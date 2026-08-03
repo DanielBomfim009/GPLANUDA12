@@ -1,4 +1,5 @@
 import io
+import math
 import os
 
 import pandas as pd
@@ -12,6 +13,7 @@ LOCAL_EXCEL_FALLBACK = os.path.join(
 )
 SUPABASE_BUCKET = "gplan-data"
 SUPABASE_FILE_PATH = "CONTROLE_DOCUMENTAL_INSTRUMENTACAO_ATUAL.xlsx"
+PAGE_SIZE = 100
 
 
 def render_html(html: str):
@@ -106,6 +108,7 @@ def get_supabase_client():
     return create_client(url, key)
 
 
+@st.cache_data(ttl=60)
 def get_source_cache_key() -> str:
     client = get_supabase_client()
     if client is not None:
@@ -140,6 +143,40 @@ def load_data(cache_key: str):
     resumo = pd.read_excel(excel_file, sheet_name="07_TAG_RESUMO")
     esperados = pd.read_excel(excel_file, sheet_name="08_RELATORIOS_ESPERADOS")
     return tags, cabos, tubing, sigem, resumo, esperados
+
+
+def paginate(df: pd.DataFrame, key: str, search_signature: str) -> pd.DataFrame:
+    total_rows = len(df)
+    total_pages = max(1, math.ceil(total_rows / PAGE_SIZE))
+
+    page_key = f"gplan_page_{key}"
+    sig_key = f"gplan_page_sig_{key}"
+    if st.session_state.get(sig_key) != search_signature:
+        st.session_state[sig_key] = search_signature
+        st.session_state[page_key] = 1
+    current_page = min(max(1, st.session_state.get(page_key, 1)), total_pages)
+
+    start = (current_page - 1) * PAGE_SIZE
+    end = min(start + PAGE_SIZE, total_rows)
+
+    col_prev, col_mid, col_next = st.columns([1, 3, 1])
+    with col_prev:
+        if st.button("← Anterior", key=f"prev_{key}", disabled=current_page <= 1, use_container_width=True):
+            st.session_state[page_key] = current_page - 1
+            st.rerun()
+    with col_mid:
+        range_txt = f"{start + 1}–{end}" if total_rows else "0"
+        render_html(
+            f'<div style="text-align:center; color:#9aa4bc; font-size:12.5px; padding-top:9px;">'
+            f"Exibindo {range_txt} de {total_rows:,} · Página {current_page} de {total_pages}"
+            f"</div>".replace(",", ".")
+        )
+    with col_next:
+        if st.button("Próxima →", key=f"next_{key}", disabled=current_page >= total_pages, use_container_width=True):
+            st.session_state[page_key] = current_page + 1
+            st.rerun()
+
+    return df.iloc[start:end]
 
 
 def count_rows(df: pd.DataFrame, report: str, origin: str | None, emitted: bool, unique_doc: bool) -> int:
@@ -415,8 +452,8 @@ def render_relatorios(esperados: pd.DataFrame):
         mask = df.apply(lambda row: row.astype(str).str.contains(search, case=False, na=False).any(), axis=1)
         df = df[mask]
 
-    st.caption(f"Exibindo {len(df):,} de {len(esperados):,} relatórios".replace(",", "."))
-    st.dataframe(df, hide_index=True, use_container_width=True, height=560)
+    df_page = paginate(df, "relatorios", search)
+    st.dataframe(df_page, hide_index=True, use_container_width=True, height=560)
 
 
 def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame):
@@ -485,13 +522,13 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
     list_df["AVANCO_DOCUMENTAL"] = (list_df["AVANCO_DOCUMENTAL"] * 100).round(1)
     list_df.columns = ["Tag", "Descrição", "Tipo", "PPU", "Relatórios", "Avanço (%)"]
 
-    st.caption(f"Exibindo {len(list_df):,} tags".replace(",", "."))
+    list_df_page = paginate(list_df, "pesquisa", search)
     event = st.dataframe(
-        list_df, hide_index=True, use_container_width=True, height=560,
+        list_df_page, hide_index=True, use_container_width=True, height=560,
         on_select="rerun", selection_mode="single-row",
     )
     if event.selection.rows:
-        selected_row = list_df.iloc[event.selection.rows[0]]
+        selected_row = list_df_page.iloc[event.selection.rows[0]]
         st.session_state.gplan_selected_tag = selected_row["Tag"]
         st.rerun()
 
@@ -521,8 +558,8 @@ def render_sigem(sigem: pd.DataFrame):
     df["DATA"] = df["DATA"].apply(format_date)
     df.columns = ["Documento", "Status", "Revisão", "Data", "Título"]
 
-    st.caption(f"Exibindo {len(df):,} de {len(sigem):,} documentos".replace(",", "."))
-    st.dataframe(df, hide_index=True, use_container_width=True, height=560)
+    df_page = paginate(df, "sigem", f"{status_filter}|{text_search}")
+    st.dataframe(df_page, hide_index=True, use_container_width=True, height=560)
 
 
 def main():
