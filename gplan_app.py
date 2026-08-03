@@ -93,6 +93,23 @@ def format_date(value: object) -> str:
     return parsed.strftime("%d/%m/%Y")
 
 
+def format_date_column(series: pd.Series) -> pd.Series:
+    """Vectorized equivalent of format_date, ~100x faster on large columns
+    than calling pd.to_datetime() once per row via .apply()."""
+    parsed = pd.to_datetime(series, dayfirst=True, errors="coerce")
+    formatted = parsed.dt.strftime("%d/%m/%Y")
+    return formatted.where(parsed.notna(), "—")
+
+
+def search_any_column(df: pd.DataFrame, text: str) -> pd.Series:
+    """Column-wise (vectorized) search across every column, instead of
+    row-wise .apply() which is orders of magnitude slower on large tables."""
+    mask = pd.Series(False, index=df.index)
+    for col in df.columns:
+        mask = mask | df[col].astype(str).str.contains(text, case=False, na=False)
+    return mask
+
+
 def get_supabase_client():
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_KEY")
@@ -442,14 +459,14 @@ def render_relatorios(esperados: pd.DataFrame):
     df = esperados[display_cols].copy()
     df["STATUS_SIGEM"] = df["STATUS_SIGEM"].map(sentence_case)
     df["EXISTE_NO_SIGEM"] = df["EXISTE_NO_SIGEM"].map({"SIM": "Sim", "NAO": "Não"}).fillna(df["EXISTE_NO_SIGEM"])
-    df["REVISAO_SIGEM"] = df["REVISAO_SIGEM"].apply(format_missing)
-    df["DATA_SIGEM"] = df["DATA_SIGEM"].apply(format_date)
+    df["REVISAO_SIGEM"] = df["REVISAO_SIGEM"].fillna("—")
+    df["DATA_SIGEM"] = format_date_column(df["DATA_SIGEM"])
     df.columns = ["Tag", "Descrição", "Grupo", "Relatório", "Referência", "Documento esperado",
                   "Existe no SIGEM", "Status SIGEM", "Revisão", "Data"]
 
     search = st.text_input("Pesquisar", placeholder="Pesquisar por tag, descrição, relatório, documento, status...", label_visibility="collapsed")
     if search:
-        mask = df.apply(lambda row: row.astype(str).str.contains(search, case=False, na=False).any(), axis=1)
+        mask = search_any_column(df, search)
         df = df[mask]
 
     df_page = paginate(df, "relatorios", search)
@@ -547,7 +564,7 @@ def render_sigem(sigem: pd.DataFrame):
     if status_filter != "Todos":
         df = df[df["STATUS"] == status_filter]
     if text_search:
-        mask = df.apply(lambda row: row.astype(str).str.contains(text_search, case=False, na=False).any(), axis=1)
+        mask = search_any_column(df, text_search)
         df = df[mask]
 
     df = df.copy()
@@ -555,7 +572,7 @@ def render_sigem(sigem: pd.DataFrame):
     df["_DOCUMENTO_SORT"] = df["DOCUMENTO"].astype(str)
     df = df.sort_values(["_REVISAO_SORT", "_DOCUMENTO_SORT"]).drop(columns=["_REVISAO_SORT", "_DOCUMENTO_SORT"])
 
-    df["DATA"] = df["DATA"].apply(format_date)
+    df["DATA"] = format_date_column(df["DATA"])
     df.columns = ["Documento", "Status", "Revisão", "Data", "Título"]
 
     df_page = paginate(df, "sigem", f"{status_filter}|{text_search}")
