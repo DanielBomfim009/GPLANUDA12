@@ -92,11 +92,14 @@ def format_date(value: object) -> str:
 
 
 def get_supabase_client():
-    try:
-        url = st.secrets.get("SUPABASE_URL")
-        key = st.secrets.get("SUPABASE_KEY")
-    except Exception:
-        return None
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_KEY")
+    if not url or not key:
+        try:
+            url = url or st.secrets.get("SUPABASE_URL")
+            key = key or st.secrets.get("SUPABASE_KEY")
+        except Exception:
+            pass
     if not url or not key:
         return None
     from supabase import create_client
