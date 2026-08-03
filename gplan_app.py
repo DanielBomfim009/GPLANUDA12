@@ -274,7 +274,10 @@ def inject_css():
           padding: 20px 22px; position: relative; overflow: hidden;
         }
         .kpi-card::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; }
-        .kpi-label { font-size: 11.5px; color: var(--text-2); font-weight:600; letter-spacing:0.2px; margin-bottom: 12px; }
+        .kpi-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 12px; }
+        .kpi-icon { width:32px; height:32px; border-radius:9px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+        .kpi-icon svg { width:16px; height:16px; }
+        .kpi-label { font-size: 11.5px; color: var(--text-2); font-weight:600; letter-spacing:0.2px; }
         .kpi-value { font-size: 30px; font-weight: 800; color: var(--text-1); letter-spacing:-0.8px; margin-bottom:4px; }
         .kpi-sub { font-size: 12px; color: var(--text-3); margin-bottom: 14px; }
         .kpi-progress-row { display:flex; align-items:center; gap:10px; }
@@ -332,12 +335,27 @@ def render_header(title: str, extra_pill: str | None = None):
     )
 
 
-def kpi_card(label: str, value: str, sub: str, pct: float, color: str) -> str:
+KPI_ICONS = {
+    "shield": '<path d="M12 2l7 4v6c0 5-3.4 8.7-7 10-3.6-1.3-7-5-7-10V6l7-4z"/>',
+    "check": '<path d="M20 6L9 17l-5-5"/>',
+    "clock": '<circle cx="12" cy="12" r="9"/><path d="M12 7v6l4 2"/>',
+    "archive": '<path d="M4 4h16v16H4z"/><path d="M4 9h16"/>',
+    "trend": '<path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/>',
+}
+
+
+def kpi_card(label: str, value: str, sub: str, pct: float, color: str, icon: str) -> str:
     pct_display = f"{pct * 100:.1f}%".replace(".", ",")
     width = max(0.0, min(pct, 1.0)) * 100
+    icon_svg = KPI_ICONS.get(icon, "")
     return f"""
         <div class="kpi-card" style="--kpi-accent:{color};">
-          <div class="kpi-label">{label}</div>
+          <div class="kpi-top">
+            <div class="kpi-label">{label}</div>
+            <div class="kpi-icon" style="background:{color}22; color:{color};">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{icon_svg}</svg>
+            </div>
+          </div>
           <div class="kpi-value">{value}</div>
           <div class="kpi-sub">{sub}</div>
           <div class="kpi-progress-row">
@@ -360,19 +378,19 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame):
 
     cols = st.columns(5)
     kpis = [
-        ("Total de tags", f"{total_tags:,}".replace(",", "."), "Base principal", 1.0, "#5b8def"),
+        ("Total de tags", f"{total_tags:,}".replace(",", "."), "Base principal", 1.0, "#5b8def", "shield"),
         ("Tags completas", f"{tags_completas:,}".replace(",", "."), "Pronta documental",
-         (tags_completas / total_tags) if total_tags else 0, "#34d399"),
+         (tags_completas / total_tags) if total_tags else 0, "#34d399", "check"),
         ("Pendentes", f"{total_pendentes:,}".replace(",", "."), "Aguardando entrega",
-         (total_pendentes / total_esperados) if total_esperados else 0, "#f87171"),
+         (total_pendentes / total_esperados) if total_esperados else 0, "#f87171", "clock"),
         ("Emitidos SIGEM", f"{total_emitidos:,}".replace(",", "."), "Com status localizado",
-         avanco_geral, "#fbbf24"),
+         avanco_geral, "#fbbf24", "archive"),
         ("Avanço geral", f"{avanco_geral * 100:.1f}%".replace(".", ","), "Progressão do projeto",
-         avanco_geral, "#9d6bff"),
+         avanco_geral, "#9d6bff", "trend"),
     ]
-    for col, (label, value, sub, pct, color) in zip(cols, kpis):
+    for col, (label, value, sub, pct, color, icon) in zip(cols, kpis):
         with col:
-            render_html(kpi_card(label, value, sub, pct, color))
+            render_html(kpi_card(label, value, sub, pct, color, icon))
 
     st.write("")
     col_left, col_right = st.columns([1.6, 1])
@@ -601,10 +619,10 @@ def main():
             "</div>"
         )
 
-    dashboard_page = st.Page(lambda: render_dashboard(resumo, esperados), title="Dashboard", url_path="dashboard", default=True)
-    relatorios_page = st.Page(lambda: render_relatorios(esperados), title="Relatórios", url_path="relatorios")
-    pesquisa_page = st.Page(lambda: render_pesquisa_tag(resumo, esperados, tags), title="Pesquisa tag", url_path="pesquisa")
-    sigem_page = st.Page(lambda: render_sigem(sigem), title="Base SIGEM", url_path="sigem")
+    dashboard_page = st.Page(lambda: render_dashboard(resumo, esperados), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
+    relatorios_page = st.Page(lambda: render_relatorios(esperados), title="Relatórios", icon=":material/description:", url_path="relatorios")
+    pesquisa_page = st.Page(lambda: render_pesquisa_tag(resumo, esperados, tags), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
+    sigem_page = st.Page(lambda: render_sigem(sigem), title="Base SIGEM", icon=":material/database:", url_path="sigem")
 
     nav = st.navigation([dashboard_page, relatorios_page, pesquisa_page, sigem_page], position="sidebar")
     nav.run()
