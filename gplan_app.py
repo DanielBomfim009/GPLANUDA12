@@ -15,6 +15,8 @@ LOCAL_EXCEL_FALLBACK = os.path.join(
 SUPABASE_BUCKET = "gplan-data"
 SUPABASE_FILE_PATH = "CONTROLE_DOCUMENTAL_INSTRUMENTACAO_ATUAL.xlsx"
 PAGE_SIZE = 100
+# O Render roda em UTC; sem converter, o cabecalho mostrava 3h a mais.
+BR_TZ = "America/Sao_Paulo"
 
 
 def render_html(html: str):
@@ -527,8 +529,27 @@ def inject_css():
     )
 
 
+def data_atualizacao(cache_key: str) -> str:
+    """Quando a PLANILHA foi atualizada, no horario de Brasilia.
+
+    Antes exibia pd.Timestamp.now(), que era a hora de renderizar a pagina:
+    mudava a cada clique e, no Render (que roda em UTC), aparecia 3h adiantada.
+    O cache_key ja carrega o updated_at do arquivo no Supabase; localmente e o
+    mtime do xlsx.
+    """
+    try:
+        if cache_key and cache_key[:4].isdigit():          # ISO-8601 do Supabase
+            ts = pd.Timestamp(cache_key)
+            ts = ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+        else:                                              # mtime local (epoch)
+            ts = pd.Timestamp(float(cache_key), unit="s", tz="UTC")
+        return ts.tz_convert(BR_TZ).strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        return "—"
+
+
 def render_header(title: str, extra_pill: str | None = None):
-    now = pd.Timestamp.now().strftime("%d/%m/%Y %H:%M")
+    now = st.session_state.get("gplan_atualizado_em", "—")
     extra_html = f'<div class="gplan-count-pill">{extra_pill}</div>' if extra_pill else ""
     render_html(
         f"""
@@ -1090,6 +1111,7 @@ def main():
         )
         st.stop()
 
+    st.session_state["gplan_atualizado_em"] = data_atualizacao(cache_key)
     tags, cabos, tubing, sigem, resumo, esperados = load_data(cache_key)
 
     with st.sidebar:
