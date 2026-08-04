@@ -764,9 +764,18 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     col_left, col_right = st.columns([1.6, 1])
 
     with col_left:
-        rows_html = ""
+        # Ordena do maior quantitativo esperado para o menor: barras em escada
+        # leem melhor do que na ordem fixa em que as regras foram declaradas.
+        barras = []
         for label, report, origin, unique_doc in REPORT_ROWS:
-            esperado = count_rows(esperados, report, origin, False, unique_doc)
+            barras.append((
+                count_rows(esperados, report, origin, False, unique_doc),
+                label, report, origin, unique_doc,
+            ))
+        barras.sort(key=lambda b: b[0], reverse=True)
+
+        rows_html = ""
+        for esperado, label, report, origin, unique_doc in barras:
             emitido = count_rows(esperados, report, origin, True, unique_doc)
             pct = (emitido / esperado * 100) if esperado else 0
             tag = '<span class="doc-tag">doc/planta</span>' if unique_doc else ""
