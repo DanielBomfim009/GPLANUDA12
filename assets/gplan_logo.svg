@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none">
+  <title>Gplan</title>
+  <circle cx="24" cy="24" r="19" stroke="#232a44" stroke-width="5"/>
+  <path d="M24 5a19 19 0 0 1 15.6 29.8" stroke="url(#gplanArc)" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="24" cy="24" r="5.5" fill="#2dd4bf"/>
+  <path d="M24 24L33 15" stroke="#f4f6fb" stroke-width="3" stroke-linecap="round"/>
+  <defs>
+    <linearGradient id="gplanArc" x1="24" y1="5" x2="40" y2="35" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5b8def"/>
+      <stop offset="1" stop-color="#2dd4bf"/>
+    </linearGradient>
+  </defs>
+</svg>

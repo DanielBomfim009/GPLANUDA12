@@ -241,6 +241,26 @@ def inject_css():
           background: linear-gradient(180deg, #0d1224 0%, #0a0e1a 100%);
           border-right: 1px solid var(--border-color);
         }
+        /* O st.navigation sempre injeta o menu antes do conteudo do usuario,
+           entao a marca caia embaixo. Reordena via flex para o topo. */
+        section[data-testid="stSidebar"] [data-testid="stSidebarContent"] {
+          display: flex !important; flex-direction: column;
+        }
+        section[data-testid="stSidebar"] [data-testid="stSidebarHeader"] { order: 0; }
+        section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+          order: 1; padding-top: 0 !important; padding-bottom: 0 !important;
+        }
+        section[data-testid="stSidebar"] [data-testid="stSidebarNav"] { order: 2; }
+        section[data-testid="stSidebar"] [data-testid="stSidebarNavSeparator"] { display: none; }
+
+        .gplan-brand {
+          display:flex; align-items:center; gap:11px; padding: 0 4px 32px;
+          border-bottom: 1px solid var(--border-color);
+        }
+        .gplan-brand-mark { width:34px; height:34px; flex-shrink:0; }
+        .gplan-brand-name { font-size:16px; font-weight:800; color:var(--text-1); letter-spacing:-0.3px; line-height:1.1; }
+        .gplan-brand-sub { font-size:11px; color:var(--text-3); margin-top:3px; }
+
         section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a,
         section[data-testid="stSidebar"] nav a {
           border-radius: 10px !important;
@@ -311,8 +331,12 @@ def inject_css():
         .gtbl tbody tr:last-child td { border-bottom:none !important; }
         .gtbl tbody tr:hover td { background:rgba(255,255,255,0.025) !important; }
         /* Centralizado (e nao a direita) para o numero ficar sob o proprio
-           cabecalho, em vez de encostar na coluna seguinte. */
-        .gtbl-num { text-align:center; font-variant-numeric:tabular-nums; }
+           cabecalho, em vez de encostar na coluna seguinte.
+           Precisa de "th.gtbl-num"/"td.gtbl-num": so ".gtbl-num" perde em
+           especificidade para ".gtbl th { text-align:left }" e o cabecalho
+           acabava a esquerda enquanto o valor ia pro centro. */
+        .gtbl th.gtbl-num, .gtbl td.gtbl-num { text-align:center; }
+        .gtbl-num { font-variant-numeric:tabular-nums; }
         .gtbl-muted { color:var(--text-2); }
         .gtbl-mono { font-size:12px; color:var(--text-2); }
         .gtbl-strong { font-weight:600; }
@@ -830,7 +854,13 @@ def render_sigem(sigem: pd.DataFrame):
 
 
 def main():
-    st.set_page_config(page_title="Gplan", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
+    favicon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "favicon.png")
+    st.set_page_config(
+        page_title="Gplan",
+        page_icon=favicon if os.path.exists(favicon) else "📊",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
     inject_css()
 
     cache_key = get_source_cache_key()
@@ -845,10 +875,19 @@ def main():
 
     with st.sidebar:
         render_html(
-            '<div style="padding: 0 4px 20px; border-bottom: 1px solid rgba(255,255,255,0.06); margin-bottom: 8px;">'
-            '<div style="font-size:15px; font-weight:700; color:#f4f6fb;">Gplan</div>'
-            '<div style="font-size:11.5px; color:#6b7590; margin-top:2px;">Instrumentação · U-12</div>'
-            "</div>"
+            '<div class="gplan-brand">'
+            '<svg class="gplan-brand-mark" viewBox="0 0 48 48" fill="none">'
+            '<circle cx="24" cy="24" r="19" stroke="#232a44" stroke-width="5"/>'
+            '<path d="M24 5a19 19 0 0 1 15.6 29.8" stroke="url(#gplanArc)" stroke-width="5" stroke-linecap="round"/>'
+            '<circle cx="24" cy="24" r="5.5" fill="#2dd4bf"/>'
+            '<path d="M24 24L33 15" stroke="#f4f6fb" stroke-width="3" stroke-linecap="round"/>'
+            '<defs><linearGradient id="gplanArc" x1="24" y1="5" x2="40" y2="35" gradientUnits="userSpaceOnUse">'
+            '<stop stop-color="#5b8def"/><stop offset="1" stop-color="#2dd4bf"/>'
+            "</linearGradient></defs></svg>"
+            '<div class="gplan-brand-text">'
+            '<div class="gplan-brand-name">Gplan</div>'
+            '<div class="gplan-brand-sub">Instrumentação · U-12</div>'
+            "</div></div>"
         )
 
     dashboard_page = st.Page(lambda: render_dashboard(resumo, esperados), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
