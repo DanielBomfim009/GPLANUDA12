@@ -197,6 +197,49 @@ def paginate(df: pd.DataFrame, key: str, search_signature: str) -> pd.DataFrame:
     return df.iloc[start:end]
 
 
+REPORT_LABELS = [r[0] for r in REPORT_ROWS]
+REPORT_BY_LABEL = {r[0]: (r[1], r[2]) for r in REPORT_ROWS}
+
+
+def consume_url_filters(esperados: pd.DataFrame):
+    """Aplica os filtros que chegam do Dashboard via ?rel= / ?status=.
+
+    Usa um token do proprio query string para aplicar UMA vez: sem isso, todo
+    rerun sobrescreveria o que o usuario acabou de escolher nos multiselects.
+    Nao limpa o query param porque escrever nele dispara outro rerun.
+    """
+    rel = [v for v in st.query_params.get_all("rel") if v in REPORT_BY_LABEL]
+    valid_status = {sentence_case(s) for s in esperados["STATUS_SIGEM"].dropna().unique()}
+    sts = [v for v in st.query_params.get_all("status") if v in valid_status]
+    if not rel and not sts:
+        return
+
+    token = f"{sorted(rel)}|{sorted(sts)}"
+    if st.session_state.get("_flt_token") == token:
+        return
+    st.session_state["_flt_token"] = token
+    st.session_state["flt_rel"] = rel
+    st.session_state["flt_status"] = sts
+
+
+def filter_by_report_labels(df: pd.DataFrame, labels: list) -> pd.DataFrame:
+    """Filtra por rotulo de relatorio respeitando a mesma logica do count_rows:
+    'RIR instrumentos' e 'RIR cabos' compartilham RELATORIO='RIR' e so se
+    distinguem pela ORIGEM_REGRA."""
+    if not labels:
+        return df
+    mask = pd.Series(False, index=df.index)
+    for label in labels:
+        if label not in REPORT_BY_LABEL:
+            continue
+        report, origin = REPORT_BY_LABEL[label]
+        m = df["RELATORIO"] == report
+        if origin is not None:
+            m &= df["ORIGEM_REGRA"] == origin
+        mask |= m
+    return df[mask]
+
+
 def count_rows(df: pd.DataFrame, report: str, origin: str | None, emitted: bool, unique_doc: bool) -> int:
     subset = df[df["RELATORIO"] == report]
     if origin is not None:
@@ -356,6 +399,8 @@ def inject_css():
         .gtbl-badge.warn { color:#fcd34d; background:rgba(251,191,36,0.14); border:1px solid rgba(251,191,36,0.26); }
         .gtbl-badge.ok   { color:#6ee7d0; background:rgba(45,212,191,0.13); border:1px solid rgba(45,212,191,0.24); }
         .gtbl-empty { padding:34px 4px; text-align:center; color:var(--text-3); font-size:13px; }
+        .flt-summary { font-size:12.5px; color:var(--text-2); padding:2px 2px 0; }
+        .flt-summary strong { color:var(--text-1); }
 
         .sg-chart-wrap { position:relative; width:100%; max-width:250px; margin: 4px auto 24px; }
         .sg-donut { width:100%; height:auto; display:block; }
@@ -367,13 +412,33 @@ def inject_css():
         .sg-center-label { font-size:11.5px; color:var(--text-3); margin-top:5px; }
         .sg-legend { display:flex; flex-direction:column; }
         .sg-leg-row {
-          display:flex; align-items:center; gap:10px; padding:9px 0;
+          display:flex; align-items:center; gap:10px; padding:9px 8px;
+          margin: 0 -8px; border-radius:7px;
           border-bottom:1px solid rgba(255,255,255,0.04);
         }
         .sg-leg-row:last-child { border-bottom:none; }
         .sg-leg-dot { width:9px; height:9px; border-radius:3px; flex-shrink:0; }
         .sg-leg-name { font-size:12.5px; color:var(--text-2); flex:1; }
         .sg-leg-val { font-size:12.5px; font-weight:700; color:var(--text-1); font-variant-numeric:tabular-nums; }
+
+        /* As linhas e a legenda viraram <a> (drill-down para Relatorios
+           filtrado); precisam voltar a se comportar como bloco e perder o
+           estilo de link que o Streamlit aplica. */
+        a.rep-row, a.sg-leg-row { text-decoration: none !important; cursor: pointer; }
+        a.rep-row { display: block; border-radius: 8px; padding: 6px 8px; margin: 0 -8px 8px; transition: background 120ms; }
+        a.rep-row:hover { background: rgba(255,255,255,0.035); }
+        a.rep-row:last-of-type { margin-bottom: 0; }
+        /* cor explicita: "inherit" herdaria o azul de link do Streamlit */
+        a.rep-row .rep-name { color: var(--text-1) !important; }
+        a.rep-row .rep-stat { color: var(--text-3) !important; }
+        a.sg-leg-row .sg-leg-name { color: var(--text-2) !important; }
+        a.sg-leg-row .sg-leg-val { color: var(--text-1) !important; }
+        a.sg-leg-row:hover .sg-leg-name { color: var(--text-1) !important; }
+        .sg-seg { transition: opacity 120ms; }
+        .sg-donut:hover .sg-seg { opacity: 0.45; }
+        .sg-donut .sg-seg:hover { opacity: 1; }
+        a.sg-leg-row:hover { background: rgba(255,255,255,0.035); }
+        a.sg-leg-row:hover .sg-leg-name { color: var(--text-1); }
 
         .rep-row { margin-bottom: 14px; }
         .rep-row:last-child { margin-bottom: 0; }
@@ -397,6 +462,32 @@ def inject_css():
         .group-card-nums { display:flex; justify-content:space-between; font-size:11px; color: var(--text-3); }
 
         .tag-detail-card { background: var(--dark-card); border: 1px solid var(--border-strong); border-radius: 16px; padding: 26px 28px; }
+        .detail-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap:12px; margin-bottom:26px; }
+        .detail-grid .detail-item { margin-bottom: 0; }
+        .ficha-head { margin-bottom: 20px; }
+        .ficha-tag { font-size:22px; font-weight:800; color:var(--text-1); letter-spacing:-0.5px; }
+        .ficha-desc { font-size:13px; color:var(--text-2); margin-top:3px; }
+        .ficha-sub { font-size:13.5px; font-weight:700; color:var(--text-1); margin-bottom:14px; }
+
+        /* Fundo desfocado atras do modal da ficha. */
+        div[data-testid="stDialog"] > div:first-child,
+        div[data-baseweb="modal"] > div:first-child {
+          backdrop-filter: blur(6px) !important;
+          -webkit-backdrop-filter: blur(6px) !important;
+          background: rgba(6, 9, 18, 0.68) !important;
+        }
+        /* o painel do dialog e um <section>, nao um <div> */
+        div[data-testid="stDialog"] [role="dialog"] {
+          background: var(--dark-card) !important;
+          border: 1px solid var(--border-strong) !important;
+          border-radius: 16px !important;
+          box-shadow: 0 24px 70px rgba(0,0,0,0.6) !important;
+        }
+        div[data-testid="stDialog"] [role="dialog"] h2 {
+          font-size: 20px !important; font-weight: 800 !important;
+          letter-spacing: -0.4px; padding-bottom: 4px;
+        }
+
         .detail-item { background: var(--dark-card-2); border: 1px solid var(--border-color); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
         .detail-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-3); font-weight: 600; margin-bottom: 6px; }
         .detail-value { font-size: 15px; font-weight: 700; color: var(--text-1); }
@@ -445,23 +536,27 @@ def status_panel(labels: list, values: list, colors: list, total: int) -> str:
     total_val = sum(values) or 1
 
     segments, offset = "", 0.0
-    for value, color in zip(values, colors):
+    for label, value, color in zip(labels, values, colors):
         length = value / total_val * circ
+        # Cada fatia e um link para Relatorios ja filtrado por aquele status.
         segments += (
-            f'<circle cx="88" cy="88" r="{radius}" fill="none" stroke="{color}" '
+            f'<a href="/relatorios?status={quote(label)}" target="_self">'
+            f'<title>{esc(label)} · {br_num(value)}</title>'
+            f'<circle class="sg-seg" cx="88" cy="88" r="{radius}" fill="none" stroke="{color}" '
             f'stroke-width="{stroke}" stroke-dasharray="{length:.2f} {circ - length:.2f}" '
-            f'stroke-dashoffset="{-offset:.2f}" transform="rotate(-90 88 88)"></circle>'
+            f'stroke-dashoffset="{-offset:.2f}" transform="rotate(-90 88 88)"></circle></a>'
         )
         offset += length
 
     legend = ""
     for label, value, color in zip(labels, values, colors):
         legend += (
-            f'<div class="sg-leg-row">'
+            f'<a class="sg-leg-row" href="/relatorios?status={quote(label)}" target="_self" '
+            f'title="Ver {esc(label)} em Relatórios">'
             f'<span class="sg-leg-dot" style="background:{color};"></span>'
-            f'<span class="sg-leg-name">{label}</span>'
+            f'<span class="sg-leg-name">{esc(label)}</span>'
             f'<span class="sg-leg-val">{br_num(value)}</span>'
-            f"</div>"
+            f"</a>"
         )
 
     return f"""
@@ -518,6 +613,14 @@ def html_table(headers: list, rows_html: str, empty_msg: str = "Nenhum registro 
     )
 
 
+def tag_link(value: object) -> str:
+    """Pill da tag que abre a ficha em modal (via ?ficha=)."""
+    return (
+        f'<a class="gtbl-tag gtbl-link" href="?ficha={quote(str(value))}" '
+        f'target="_self" title="Ver ficha de {esc(value)}">{esc(value)}</a>'
+    )
+
+
 def top10_panel(top10: pd.DataFrame) -> str:
     rows = ""
     for _, r in top10.iterrows():
@@ -529,7 +632,7 @@ def top10_panel(top10: pd.DataFrame) -> str:
         tone = "crit" if ratio >= 0.8 else ("warn" if ratio >= 0.4 else "ok")
         rows += f"""
             <tr>
-              <td>{tag_pill(r['TAG'])}</td>
+              <td>{tag_link(r['TAG'])}</td>
               <td class="gtbl-muted">{esc(str(r['GRUPO_REGRA']).title())}</td>
               <td class="gtbl-num">{esperados}</td>
               <td class="gtbl-num">{emitidos}</td>
@@ -569,8 +672,12 @@ def kpi_card(label: str, value: str, sub: str, pct: float, color: str, icon: str
     """
 
 
-def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame):
+def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame):
     render_header("Dashboard")
+
+    ficha = st.query_params.get("ficha")
+    if ficha:
+        abrir_ficha_modal(ficha, resumo, esperados, tags)
 
     total_tags = len(resumo)
     total_esperados = int(resumo["RELATORIOS_ESPERADOS"].sum())
@@ -605,11 +712,12 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame):
             emitido = count_rows(esperados, report, origin, True, unique_doc)
             pct = (emitido / esperado * 100) if esperado else 0
             tag = '<span class="doc-tag">doc/planta</span>' if unique_doc else ""
+            href = f"/relatorios?rel={quote(label)}"
             rows_html += f"""
-                <div class="rep-row">
+                <a class="rep-row" href="{href}" target="_self" title="Ver {label} em Relatórios">
                   <div class="rep-label"><span class="rep-name">{label}{tag}</span><span class="rep-stat">{emitido:,}/{esperado:,} · {pct:.1f}%</span></div>
                   <div class="rep-track"><div class="rep-done" style="width:{pct:.1f}%;"></div><div class="rep-pending" style="width:{100-pct:.1f}%;"></div></div>
-                </div>
+                </a>
             """.replace(",", ".")
         render_html(f'<div class="gplan-panel"><div class="gplan-panel-title">Esperado × emitido por relatório</div>{rows_html}</div>')
 
@@ -649,26 +757,59 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame):
     render_html(top10_panel(top10))
 
 
-def render_relatorios(esperados: pd.DataFrame):
+def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame):
     render_header("Relatórios previstos")
 
-    display_cols = ["TAG", "DESCRICAO", "GRUPO", "RELATORIO", "REFERENCIA", "DOCUMENTO_ESPERADO",
-                     "EXISTE_NO_SIGEM", "STATUS_SIGEM", "REVISAO_SIGEM", "DATA_SIGEM"]
-    df = esperados[display_cols].copy()
+    ficha = st.query_params.get("ficha")
+    if ficha:
+        abrir_ficha_modal(ficha, resumo, esperados, tags)
+
+    # Mantem ORIGEM_REGRA no dataframe (sem exibir): e ela que separa
+    # "RIR instrumentos" de "RIR cabos" no filtro por tipo de relatorio.
+    df = esperados.copy()
     df["REVISAO_SIGEM"] = df["REVISAO_SIGEM"].fillna("—")
     df["DATA_SIGEM"] = format_date_column(df["DATA_SIGEM"])
 
-    search = st.text_input("Pesquisar", placeholder="Pesquisar por tag, descrição, relatório, documento, status...", label_visibility="collapsed")
-    if search:
-        df = df[search_any_column(df, search)]
+    consume_url_filters(esperados)
 
-    df_page = paginate(df, "relatorios", search)
+    search = st.text_input("Pesquisar", placeholder="Pesquisar por tag, descrição, relatório, documento, status...", label_visibility="collapsed")
+
+    status_options = sorted({sentence_case(s) for s in esperados["STATUS_SIGEM"].dropna().unique()})
+    col_rel, col_sts = st.columns(2)
+    with col_rel:
+        sel_rel = st.multiselect("Tipo de relatório", REPORT_LABELS, key="flt_rel",
+                                 placeholder="Todos os relatórios")
+    with col_sts:
+        sel_sts = st.multiselect("Status SIGEM", status_options, key="flt_status",
+                                 placeholder="Todos os status")
+
+    if sel_rel:
+        df = filter_by_report_labels(df, sel_rel)
+    if sel_sts:
+        df = df[df["STATUS_SIGEM"].map(sentence_case).isin(sel_sts)]
+    if search:
+        # so nas colunas visiveis: varrer o dataframe inteiro faria a busca
+        # casar com colunas internas como ORIGEM_REGRA.
+        visiveis = ["TAG", "DESCRICAO", "GRUPO", "RELATORIO", "REFERENCIA",
+                    "DOCUMENTO_ESPERADO", "STATUS_SIGEM", "REVISAO_SIGEM", "DATA_SIGEM"]
+        df = df[search_any_column(df[visiveis], search)]
+
+    if sel_rel or sel_sts or search:
+        render_html(
+            '<div class="flt-summary">Exibindo <strong>'
+            + br_num(len(df))
+            + "</strong> de "
+            + br_num(len(esperados))
+            + " relatórios</div>"
+        )
+
+    df_page = paginate(df, "relatorios", f"{search}|{sel_rel}|{sel_sts}")
 
     rows = ""
     for _, r in df_page.iterrows():
         rows += f"""
             <tr>
-              <td>{tag_pill(r['TAG'])}</td>
+              <td>{tag_link(r['TAG'])}</td>
               <td>{esc(r['DESCRICAO'])}</td>
               <td class="gtbl-muted">{esc(str(r['GRUPO']).title())}</td>
               <td class="gtbl-strong">{esc(r['RELATORIO'])}</td>
@@ -692,6 +833,81 @@ def render_relatorios(esperados: pd.DataFrame):
     )
 
 
+def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
+                   tags: pd.DataFrame, com_cabecalho: bool = True) -> str | None:
+    """Ficha completa da tag como um bloco HTML unico, para servir tanto a aba
+    Pesquisa tag quanto o modal aberto pelo Dashboard/Relatorios."""
+    resumo_row = resumo[resumo["TAG"] == tag_id]
+    if resumo_row.empty:
+        return None
+
+    r = resumo_row.iloc[0]
+    tags_row = tags[tags["TAG"] == tag_id]
+    comunicacao = tags_row.iloc[0]["COMUNICACAO"] if not tags_row.empty else "—"
+
+    qtd_cabos = int(r["QTD_CABOS"])
+    cabo_txt = f"Sim ({qtd_cabos} cabo{'s' if qtd_cabos != 1 else ''})" if qtd_cabos > 0 else "Não"
+    detalhes = [
+        ("Tipo", str(r["GRUPO_REGRA"]).title()),
+        ("Item PPU", r["ITEM_PPU"]),
+        ("Comunicação", comunicacao),
+        ("Tem cabo", cabo_txt),
+        ("Tem tubing", "Sim" if str(r["TEM_TUBING"]).upper() == "SIM" else "Não"),
+        ("Relatórios esperados", int(r["RELATORIOS_ESPERADOS"])),
+        ("Relatórios entregues", int(r["RELATORIOS_POSTADOS"])),
+        ("Relatórios pendentes", int(r["RELATORIOS_PENDENTES"])),
+        ("Avanço", f"{r['AVANCO_DOCUMENTAL'] * 100:.1f}%".replace(".", ",")),
+    ]
+    cards = "".join(
+        f'<div class="detail-item"><div class="detail-label">{esc(lbl)}</div>'
+        f'<div class="detail-value">{esc(val)}</div></div>'
+        for lbl, val in detalhes
+    )
+
+    rows = ""
+    for _, tr in esperados[esperados["TAG"] == tag_id].iterrows():
+        rows += f"""
+            <tr>
+              <td class="gtbl-strong">{esc(tr['RELATORIO'])}</td>
+              <td class="gtbl-muted">{esc(tr['REFERENCIA'])}</td>
+              <td class="gtbl-mono">{esc(tr['DOCUMENTO_ESPERADO'])}</td>
+              <td>{status_badge(tr['STATUS_SIGEM'])}</td>
+              <td class="gtbl-num gtbl-muted">{esc(format_missing(tr['REVISAO_SIGEM']))}</td>
+            </tr>
+        """
+    tabela = html_table(
+        ["Relatório", "Referência", "Documento esperado", "Status SIGEM", "#Revisão"], rows
+    )
+
+    cabecalho = (
+        f'<div class="ficha-head"><div class="ficha-tag">{esc(r["TAG"])}</div>'
+        f'<div class="ficha-desc">{esc(r["DESCRICAO"])}</div></div>'
+        if com_cabecalho else ""
+    )
+    return (
+        f'<div class="ficha">{cabecalho}'
+        f'<div class="detail-grid">{cards}</div>'
+        f'<div class="ficha-sub">Relatórios da tag</div>{tabela}</div>'
+    )
+
+
+def abrir_ficha_modal(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame):
+    """Modal da ficha. O dialog e definido aqui dentro para o titulo poder
+    carregar a tag clicada (o decorator recebe o titulo fixo)."""
+    @st.dialog(str(tag_id), width="large")
+    def _dlg():
+        html = tag_ficha_html(tag_id, resumo, esperados, tags, com_cabecalho=False)
+        if html is None:
+            st.warning("Tag não encontrada na base.")
+            return
+        render_html(html)
+        if st.button("Fechar", use_container_width=True, key="close_ficha"):
+            st.query_params.clear()
+            st.rerun()
+
+    _dlg()
+
+
 def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame):
     render_header("Pesquisa tag")
 
@@ -706,68 +922,21 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
 
     if st.session_state.gplan_selected_tag:
         tag_id = st.session_state.gplan_selected_tag
-        resumo_row = resumo[resumo["TAG"] == tag_id]
-        tags_row = tags[tags["TAG"] == tag_id]
-        if resumo_row.empty:
+        if resumo[resumo["TAG"] == tag_id].empty:
             st.session_state.gplan_selected_tag = None
             st.query_params.clear()
             st.rerun()
 
-        r = resumo_row.iloc[0]
-        comunicacao = tags_row.iloc[0]["COMUNICACAO"] if not tags_row.empty else "—"
-
-        col_title, col_back = st.columns([4, 1])
-        with col_title:
-            st.markdown(f"### {r['TAG']}")
-            st.caption(r["DESCRICAO"])
+        _, col_back = st.columns([4, 1])
         with col_back:
             if st.button("← Voltar à lista", use_container_width=True):
                 st.session_state.gplan_selected_tag = None
                 st.query_params.clear()
                 st.rerun()
 
-        qtd_cabos = int(r["QTD_CABOS"])
-        cabo_txt = f"Sim ({qtd_cabos} cabo{'s' if qtd_cabos != 1 else ''})" if qtd_cabos > 0 else "Não"
-        tubing_txt = "Sim" if str(r["TEM_TUBING"]).upper() == "SIM" else "Não"
-
-        detail_cols = st.columns(3)
-        details = [
-            ("Tipo", r["GRUPO_REGRA"].title()),
-            ("Item PPU", r["ITEM_PPU"]),
-            ("Comunicação", comunicacao),
-            ("Tem cabo", cabo_txt),
-            ("Tem tubing", tubing_txt),
-            ("Relatórios esperados", int(r["RELATORIOS_ESPERADOS"])),
-            ("Relatórios entregues", int(r["RELATORIOS_POSTADOS"])),
-            ("Relatórios pendentes", int(r["RELATORIOS_PENDENTES"])),
-            ("Avanço", f"{r['AVANCO_DOCUMENTAL'] * 100:.1f}%".replace(".", ",")),
-        ]
-        for i, (label, value) in enumerate(details):
-            with detail_cols[i % 3]:
-                render_html(f'<div class="detail-item"><div class="detail-label">{label}</div><div class="detail-value">{value}</div></div>')
-
-        tag_reports = esperados[esperados["TAG"] == tag_id][
-            ["RELATORIO", "REFERENCIA", "DOCUMENTO_ESPERADO", "STATUS_SIGEM", "REVISAO_SIGEM"]
-        ].copy()
-        rows = ""
-        for _, tr in tag_reports.iterrows():
-            rows += f"""
-                <tr>
-                  <td class="gtbl-strong">{esc(tr['RELATORIO'])}</td>
-                  <td class="gtbl-muted">{esc(tr['REFERENCIA'])}</td>
-                  <td class="gtbl-mono">{esc(tr['DOCUMENTO_ESPERADO'])}</td>
-                  <td>{status_badge(tr['STATUS_SIGEM'])}</td>
-                  <td class="gtbl-num gtbl-muted">{esc(format_missing(tr['REVISAO_SIGEM']))}</td>
-                </tr>
-            """
-        render_html(
-            '<div class="gplan-panel">'
-            '<div class="gplan-panel-title">Relatórios da tag</div>'
-            + html_table(
-                ["Relatório", "Referência", "Documento esperado", "Status SIGEM", "#Revisão"], rows
-            )
-            + "</div>"
-        )
+        render_html('<div class="gplan-panel">'
+                    + tag_ficha_html(tag_id, resumo, esperados, tags)
+                    + "</div>")
         return
 
     search = st.text_input("Pesquisar", placeholder="Digite a tag para ver a ficha completa (ex: AIT-120005)...", label_visibility="collapsed")
@@ -890,8 +1059,8 @@ def main():
             "</div></div>"
         )
 
-    dashboard_page = st.Page(lambda: render_dashboard(resumo, esperados), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
-    relatorios_page = st.Page(lambda: render_relatorios(esperados), title="Relatórios", icon=":material/description:", url_path="relatorios")
+    dashboard_page = st.Page(lambda: render_dashboard(resumo, esperados, tags), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
+    relatorios_page = st.Page(lambda: render_relatorios(esperados, resumo, tags), title="Relatórios", icon=":material/description:", url_path="relatorios")
     pesquisa_page = st.Page(lambda: render_pesquisa_tag(resumo, esperados, tags), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
     sigem_page = st.Page(lambda: render_sigem(sigem), title="Base SIGEM", icon=":material/database:", url_path="sigem")
 
