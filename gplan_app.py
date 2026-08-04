@@ -55,6 +55,7 @@ REPORT_ROWS = [
     ("RIR instrumentos", "RIR", "BASE: RIR obrigatorio para todos os TAGs", False),
     ("RIR cabos", "RIR", "CONDICIONAL: RIR de cabo por TAG", False),
     ("CCP", "CCP", None, False),
+    ("RTFCJI", "RTFCJI", None, False),
     ("RIFMI", "RIFMI", None, False),
     ("RIMTU", "RIMTU", None, False),
     ("RILTCI", "RILTCI", None, False),
@@ -469,6 +470,34 @@ def inject_css():
         .ficha-desc { font-size:13px; color:var(--text-2); margin-top:3px; }
         .ficha-sub { font-size:13.5px; font-weight:700; color:var(--text-1); margin-bottom:14px; }
 
+        /* Modal da ficha resolvido por :target -- abre sem ida ao servidor. */
+        /* acima da sidebar do Streamlit, que usa z-index 999991 */
+        .fmodal { display:none; position:fixed; inset:0; z-index:1000000; }
+        .fmodal:target { display:flex; align-items:center; justify-content:center; padding:32px 20px; }
+        .fmodal-bg {
+          position:absolute; inset:0; background:rgba(6,9,18,0.68);
+          backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+        }
+        .fmodal-box {
+          position:relative; width:min(1080px, 100%); max-height:88vh; overflow:auto;
+          background:var(--dark-card); border:1px solid var(--border-strong);
+          border-radius:16px; box-shadow:0 24px 70px rgba(0,0,0,0.6);
+          animation: fmodal-in 140ms ease-out;
+        }
+        @keyframes fmodal-in { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+        .fmodal-head {
+          display:flex; align-items:center; justify-content:space-between;
+          padding:22px 28px 0; position:sticky; top:0; background:var(--dark-card); z-index:1;
+        }
+        .fmodal-title { font-size:20px; font-weight:800; color:var(--text-1); letter-spacing:-0.4px; }
+        .fmodal-x {
+          font-size:26px; line-height:1; color:var(--text-3) !important; text-decoration:none !important;
+          padding:0 6px; border-radius:8px;
+        }
+        .fmodal-x:hover { color:var(--text-1) !important; background:rgba(255,255,255,0.06); }
+        .fmodal-body { padding:16px 28px 28px; }
+        .fmodal-body .ficha-sub { margin-top:4px; }
+
         /* Fundo desfocado atras do modal da ficha. */
         div[data-testid="stDialog"] > div:first-child,
         div[data-baseweb="modal"] > div:first-child {
@@ -613,12 +642,45 @@ def html_table(headers: list, rows_html: str, empty_msg: str = "Nenhum registro 
     )
 
 
+def ficha_anchor(tag: object) -> str:
+    """Id de ancora da ficha. So letras/digitos para ser um id CSS valido."""
+    return "f-" + "".join(c if c.isalnum() else "-" for c in str(tag))
+
+
 def tag_link(value: object) -> str:
-    """Pill da tag que abre a ficha em modal (via ?ficha=)."""
+    """Pill da tag que abre a ficha em modal.
+
+    Usa ancora (#) e nao query param: o modal e resolvido por CSS :target,
+    sem ida ao servidor. Com ?ficha= o Streamlit refazia a navegacao inteira
+    (reconexao + re-execucao do script) e o modal demorava a aparecer.
+    """
     return (
-        f'<a class="gtbl-tag gtbl-link" href="?ficha={quote(str(value))}" '
-        f'target="_self" title="Ver ficha de {esc(value)}">{esc(value)}</a>'
+        f'<a class="gtbl-tag gtbl-link" href="#{ficha_anchor(value)}" '
+        f'title="Ver ficha de {esc(value)}">{esc(value)}</a>'
     )
+
+
+def fichas_modais_html(tags_ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
+                       tags: pd.DataFrame) -> str:
+    """Modais das tags visiveis na pagina, abertos/fechados via CSS :target."""
+    blocos = ""
+    for tag_id in dict.fromkeys(tags_ids):  # unicas, preservando a ordem
+        corpo = tag_ficha_html(tag_id, resumo, esperados, tags, com_cabecalho=False)
+        if corpo is None:
+            continue
+        blocos += f"""
+            <div class="fmodal" id="{ficha_anchor(tag_id)}">
+              <a class="fmodal-bg" href="#" aria-label="Fechar"></a>
+              <div class="fmodal-box">
+                <div class="fmodal-head">
+                  <div class="fmodal-title">{esc(tag_id)}</div>
+                  <a class="fmodal-x" href="#" aria-label="Fechar">&times;</a>
+                </div>
+                <div class="fmodal-body">{corpo}</div>
+              </div>
+            </div>
+        """
+    return blocos
 
 
 def top10_panel(top10: pd.DataFrame) -> str:
@@ -674,10 +736,6 @@ def kpi_card(label: str, value: str, sub: str, pct: float, color: str, icon: str
 
 def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame):
     render_header("Dashboard")
-
-    ficha = st.query_params.get("ficha")
-    if ficha:
-        abrir_ficha_modal(ficha, resumo, esperados, tags)
 
     total_tags = len(resumo)
     total_esperados = int(resumo["RELATORIOS_ESPERADOS"].sum())
@@ -754,15 +812,14 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
 
     st.write("")
     top10 = resumo.sort_values("RELATORIOS_PENDENTES", ascending=False).head(10)
-    render_html(top10_panel(top10))
+    render_html(
+        top10_panel(top10)
+        + fichas_modais_html(top10["TAG"].tolist(), resumo, esperados, tags)
+    )
 
 
 def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame):
     render_header("Relatórios previstos")
-
-    ficha = st.query_params.get("ficha")
-    if ficha:
-        abrir_ficha_modal(ficha, resumo, esperados, tags)
 
     # Mantem ORIGEM_REGRA no dataframe (sem exibir): e ela que separa
     # "RIR instrumentos" de "RIR cabos" no filtro por tipo de relatorio.
@@ -830,6 +887,7 @@ def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.Da
             "Nenhum relatório encontrado para essa busca.",
         )
         + "</div>"
+        + fichas_modais_html(df_page["TAG"].tolist(), resumo, esperados, tags)
     )
 
 
@@ -889,23 +947,6 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
         f'<div class="detail-grid">{cards}</div>'
         f'<div class="ficha-sub">Relatórios da tag</div>{tabela}</div>'
     )
-
-
-def abrir_ficha_modal(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame):
-    """Modal da ficha. O dialog e definido aqui dentro para o titulo poder
-    carregar a tag clicada (o decorator recebe o titulo fixo)."""
-    @st.dialog(str(tag_id), width="large")
-    def _dlg():
-        html = tag_ficha_html(tag_id, resumo, esperados, tags, com_cabecalho=False)
-        if html is None:
-            st.warning("Tag não encontrada na base.")
-            return
-        render_html(html)
-        if st.button("Fechar", use_container_width=True, key="close_ficha"):
-            st.query_params.clear()
-            st.rerun()
-
-    _dlg()
 
 
 def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame):
