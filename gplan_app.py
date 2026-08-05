@@ -58,6 +58,7 @@ REPORT_ROWS = [
     ("RIR cabos", "RIR", "CONDICIONAL: RIR de cabo por TAG", False),
     ("CCP", "CCP", None, False),
     ("RTFCJI", "RTFCJI", None, False),
+    ("RIMITPI", "RIMITPI", None, False),
     ("RIFMI", "RIFMI", None, False),
     ("RIMTU", "RIMTU", None, False),
     ("RILTCI", "RILTCI", None, False),
