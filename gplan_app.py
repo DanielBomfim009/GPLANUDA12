@@ -480,10 +480,11 @@ def inject_css():
         .arv-no[open] > summary .arv-seta { border-color:var(--accent-teal); }
         .arv-no[open] > summary .arv-seta::before { background:var(--accent-teal); }
         .arv-nome { font-size:13px; font-weight:700; color:var(--text-1); min-width:150px; }
-        /* o codigo e link para a ficha; o + fica a cargo do <summary> */
+        /* o codigo e link para a ficha; o + fica a cargo do <summary>.
+           sem sublinhado: so muda de cor ao passar o mouse. */
         a.arv-ficha { text-decoration:none !important; color:var(--text-1) !important;
-                      border-bottom:1px dashed rgba(169,197,255,0.35); padding-bottom:1px; }
-        a.arv-ficha:hover { color:#a9c5ff !important; border-bottom-color:#a9c5ff; }
+                      transition:color 120ms; }
+        a.arv-ficha:hover { color:#a9c5ff !important; }
         .arv-folha > .arv-linha { display:flex; align-items:center; gap:14px; padding:13px 16px; }
         .arv-vazio { width:17px; flex-shrink:0; }
         .arv-num { font-size:11.5px; color:var(--text-3); white-space:nowrap; font-variant-numeric:tabular-nums; }
@@ -506,6 +507,8 @@ def inject_css():
         .arv-n3:last-child { margin-bottom:0; }
         .arv-n3 .arv-nome { font-weight:500; font-size:12px; }
         .arv-n3 > .arv-linha { padding:10px 14px; }
+        .arv-n3 > summary { padding:10px 14px; }
+        .arv-tags { padding:2px 0 4px; }
         .arv-dica { font-size:12px; color:var(--text-3); padding:10px 4px; }
         .arv-aviso {
           font-size:12.5px; color:var(--accent-amber); background:rgba(251,191,36,0.08);
@@ -518,24 +521,30 @@ def inject_css():
         /* align-items:start deixa cada card com a altura do seu conteudo; com
            stretch, um card de 1 barra ficava do tamanho do de 5 e sobrava um
            vao de 200px+ dentro dele. */
+        /* os quatro lado a lado; abaixo de ~1250px cai para duas colunas */
         .gr-grid {
-          display:grid; grid-template-columns:repeat(auto-fit, minmax(420px, 1fr));
-          gap:28px; margin-bottom:8px; align-items:start;
+          display:grid; grid-template-columns:repeat(4, 1fr);
+          gap:16px; margin-bottom:8px; align-items:start;
         }
+        @media (max-width: 1250px) { .gr-grid { grid-template-columns:repeat(2, 1fr); } }
+        @media (max-width: 700px)  { .gr-grid { grid-template-columns:1fr; } }
         /* height:auto anula o height:100% de .gplan-panel, que esticava o card
            de 1 barra ate a altura do de 5 (245px de vao interno). */
-        .gr-panel { padding:26px 28px; margin-bottom:0 !important; height:auto !important; }
-        .gr-panel .gplan-panel-title { margin-bottom:20px; }
-        .gr-row { margin-bottom:16px; }
+        /* compacto: quatro cards por linha exigem menos folga interna */
+        .gr-panel { padding:18px 18px; margin-bottom:0 !important; height:auto !important; }
+        .gr-panel .gplan-panel-title { margin-bottom:16px; font-size:13px; }
+        .gr-row { margin-bottom:13px; }
         .gr-row:last-child { margin-bottom:0; }
-        .gr-top { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; gap:12px; }
-        .gr-nome { font-size:12.5px; font-weight:600; color:var(--text-1); white-space:nowrap;
+        .gr-top { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:5px; gap:8px; }
+        .gr-nome { font-size:11.5px; font-weight:600; color:var(--text-1); white-space:nowrap;
                    overflow:hidden; text-overflow:ellipsis; }
-        .gr-pct { font-size:13px; font-weight:800; color:var(--accent-teal); font-variant-numeric:tabular-nums; }
-        .gr-track { height:8px; background:rgba(255,255,255,0.05); border-radius:5px; overflow:hidden; }
-        .gr-fill { height:100%; border-radius:5px;
+        .gr-pct { font-size:12px; font-weight:800; color:var(--accent-teal);
+                  font-variant-numeric:tabular-nums; flex-shrink:0; }
+        .gr-track { height:6px; background:rgba(255,255,255,0.05); border-radius:4px; overflow:hidden; }
+        .gr-fill { height:100%; border-radius:4px;
                    background:linear-gradient(90deg, var(--accent-teal), #22c1b0); transition:width 400ms ease; }
-        .gr-sub { font-size:10.5px; color:var(--text-3); margin-top:5px; }
+        .gr-sub { font-size:9.5px; color:var(--text-3); margin-top:4px; white-space:nowrap;
+                  overflow:hidden; text-overflow:ellipsis; }
 
         /* barra de avanco dentro da celula da tabela */
         .cel-avanco { display:flex; align-items:center; gap:9px; justify-content:flex-end; }
@@ -1401,7 +1410,35 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     if pedido and "|" in pedido:
         tipo_aberto, valor_aberto = pedido.split("|", 1)
 
+    segs = ["Todos"] + sorted({s for s in df.SEGMENTO if not vazio(s)})
+    malhas = ["Todas"] + sorted({m for m in df.MALHA if not vazio(m)})
+    c1, c2, c3 = st.columns([2, 2, 1.4])
+    with c1:
+        f_seg = st.selectbox("Segmento", segs, key="prg_seg")
+    with c2:
+        f_malha = st.selectbox("Malha", malhas, key="prg_malha")
+    with c3:
+        st.markdown('<div class="prg-toggle-espaco"></div>', unsafe_allow_html=True)
+        detalhar = st.toggle("Mostrar instrumentos", value=False, key="prg_detalhe",
+                             help="Lista as TAGs dentro de cada malha")
+    if f_seg != "Todos":
+        df = df[df.SEGMENTO == f_seg]
+    if f_malha != "Todas":
+        df = df[df.MALHA == f_malha]
+
+    # listar as 5.097 TAGs de uma vez leva a pagina a 5,3 MB e trava o plano
+    # gratuito; com um segmento filtrado fica em torno de 300 KB.
+    excedeu = detalhar and len(df) > MAX_TAGS_DETALHE
+    detalhar = detalhar and not excedeu
+
     render_html(_totais(df))
+    if excedeu:
+        render_html(
+            '<div class="arv-aviso"><strong>' + br_num(len(df)) + " instrumentos</strong> "
+            "no recorte atual, acima do limite de " + br_num(MAX_TAGS_DETALHE)
+            + " para listar de uma vez. Escolha um <strong>segmento</strong> ou uma "
+            "<strong>malha</strong> nos filtros acima que eles aparecem dentro das malhas.</div>"
+        )
     _graficos(df)
 
     # caminho a reabrir na arvore quando uma ficha esta em foco
@@ -1415,18 +1452,22 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
             ssop_aberto = alvo.iloc[0]["SSOP"] if tipo_aberto == "MALHA" else valor_aberto
 
     blocos = ""
-    for _, sop in agrega_nivel(df, "SOP").iterrows():
+    for _, sop in agrega_nivel(df, "SOP", subnivel="SSOP").iterrows():
         nome_sop = sop["SOP"]
         d_sop = df[df.SOP == nome_sop]
 
         ssops = ""
-        for _, ss in agrega_nivel(d_sop, "SSOP").iterrows():
+        for _, ss in agrega_nivel(d_sop, "SSOP", subnivel="MALHA").iterrows():
             nome_ssop = ss["SSOP"]
             d_ssop = d_sop[d_sop.SSOP == nome_ssop]
-            malhas = "".join(
-                _no("MALHA", ml["MALHA"], ml, nivel=3)
-                for _, ml in agrega_nivel(d_ssop, "MALHA").iterrows()
-            )
+            malhas = ""
+            for _, ml in agrega_nivel(d_ssop, "MALHA").iterrows():
+                d_malha = d_ssop[d_ssop.MALHA == ml["MALHA"]] if not vazio(ml["MALHA"]) \
+                    else d_ssop[d_ssop.MALHA.apply(vazio)]
+                # com o toggle ligado, a malha vira no expansivel com as TAGs
+                corpo = (f'<div class="arv-tags">{_tabela_tags(d_malha, com_modal=False)}</div>'
+                         if detalhar else "")
+                malhas += _no("MALHA", ml["MALHA"], ml, nivel=3, filhos=corpo)
             ssops += _no("SSOP", nome_ssop, ss, nivel=2, filhos=malhas,
                          aberto=(nome_ssop == ssop_aberto))
         blocos += _no("SOP", nome_sop, sop, nivel=1, filhos=ssops,
@@ -1444,7 +1485,7 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
 
     render_html(
         '<div class="gplan-panel">'
-        '<div class="gplan-panel-title">SOP · clique no + para abrir, ou no código para ver a ficha</div>'
+        '<div class="gplan-panel-title">SOP · SSOP · Malha · TAG</div>'
         f'<div class="arvore">{blocos}</div></div>' + modal
     )
 
@@ -1473,7 +1514,17 @@ def _no(tipo: str, nome: object, r, nivel: int, filhos: str = "",
     valor = "(sem)" if vazio(nome) else str(nome)
     link = (f'<a class="arv-nome arv-ficha" href="/progresso?ficha={quote(tipo)}|{quote(valor)}" '
             f'target="_self" title="Abrir ficha">{rotulo}</a>')
+    # cada nivel resume o nivel imediatamente abaixo: SOP conta SSOPs,
+    # SSOP conta malhas, malha ja e o ultimo agrupamento antes das TAGs
+    sub = ""
+    if "subniveis" in r and pd.notna(r["subniveis"]):
+        n = int(r["subniveis"])
+        nome_sub = {"SOP": ("SSOP", "SSOP"), "SSOP": ("malha", "malhas")}.get(tipo)
+        if nome_sub:
+            sub = (f'<span class="arv-num arv-sub">{br_num(n)} '
+                   f'{nome_sub[0] if n == 1 else nome_sub[1]}</span>')
     resumo = (
+        f"{sub}"
         f'<span class="arv-num">{br_num(int(r["tags"]))} tags</span>'
         f'<span class="arv-num">{br_num(int(r["emitidos"]))}/{br_num(int(r["esperados"]))} relat.</span>'
         f'<span class="arv-num arv-val">{br_moeda(r["valor"])}</span>'
