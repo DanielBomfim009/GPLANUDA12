@@ -1392,14 +1392,18 @@ def _resumo_no(r) -> str:
     )
 
 
-def _tabela_tags(sub: pd.DataFrame) -> str:
+def _tabela_tags(sub: pd.DataFrame, com_modal: bool = True) -> str:
     linhas = ""
     for _, t in sub.sort_values("AVANCO_DOCUMENTAL", ascending=False).iterrows():
         pct = (t["AVANCO_DOCUMENTAL"] or 0) * 100
         tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
+        # sem modal, a pill leva para a ficha na aba Pesquisa tag
+        alvo = tag_link(t["TAG"]) if com_modal else (
+            f'<a class="gtbl-tag gtbl-link" href="/pesquisa?tag={quote(str(t["TAG"]))}" '
+            f'target="_self" title="Abrir ficha de {esc(t["TAG"])}">{esc(t["TAG"])}</a>')
         linhas += f"""
             <tr>
-              <td>{tag_link(t['TAG'])}</td>
+              <td>{alvo}</td>
               <td>{esc(t['DESCRICAO'])}</td>
               <td class="gtbl-num">{pill_prioridade(t.get('SUBGRUPO_PRIORIDADE'))}</td>
               <td class="gtbl-num">{int(t['RELATORIOS_POSTADOS'])}/{int(t['RELATORIOS_ESPERADOS'])}</td>
@@ -1418,24 +1422,42 @@ def _tabela_tags(sub: pd.DataFrame) -> str:
     )
 
 
-MAX_TAGS_DETALHE = 800
+# Medido na base real: a tabela custa ~800 bytes por TAG, mas cada modal de
+# ficha custa ~4,8 KB. Listar as 5.097 daria 3,9 MB de tabela e 23,3 MB de
+# modais. Dai dois limites: a lista aguenta bem mais do que as fichas.
+MAX_TAGS_DETALHE = 2000
+MAX_TAGS_MODAL = 400
 
 
 def _arvore(df: pd.DataFrame, detalhar: bool, resumo=None, esperados=None, tags=None):
     """SOP > SSOP > TAGs em <details>: expande no lugar, sem ida ao servidor,
     e permite abrir varios ao mesmo tempo.
 
-    O detalhamento so e montado ate MAX_TAGS_DETALHE: sem filtro sao 5.097
-    TAGs, o que geraria ~3 MB de HTML e travaria a pagina no plano gratuito.
+    O detalhamento so e montado ate MAX_TAGS_DETALHE, e as fichas em modal ate
+    MAX_TAGS_MODAL -- listar as 5.097 daria 3,9 MB de tabela mais 23,3 MB de
+    modais, o que travaria a pagina no plano gratuito.
     """
     excedeu = detalhar and len(df) > MAX_TAGS_DETALHE
     detalhar = detalhar and not excedeu
     if excedeu:
         render_html(
-            '<div class="arv-aviso">São ' + br_num(len(df)) + " TAGs no recorte atual — "
-            "demais para listar de uma vez. Filtre um segmento ou malha para ver os "
-            "instrumentos (limite: " + br_num(MAX_TAGS_DETALHE) + ").</div>"
+            '<div class="arv-aviso"><strong>' + br_num(len(df)) + " TAGs</strong> no recorte "
+            "atual, acima do limite de " + br_num(MAX_TAGS_DETALHE) + " para listar de uma vez. "
+            "Escolha um <strong>segmento</strong> ou uma <strong>malha</strong> nos filtros "
+            "acima que os instrumentos aparecem.</div>"
         )
+
+    # a dica dentro do SSOP tem de refletir o motivo real de nao listar
+    if excedeu:
+        dica = ('<div class="arv-dica">Filtre um segmento ou malha acima para ver '
+                'as TAGs deste subpacote.</div>')
+    else:
+        dica = ('<div class="arv-dica">Ligue “Mostrar instrumentos” acima para listar '
+                'as TAGs deste subpacote.</div>')
+
+    # fichas em modal so ate MAX_TAGS_MODAL; acima disso a pill abre a aba
+    # Pesquisa tag, que mostra a mesma ficha sem custar 4,8 KB por TAG
+    com_modal = detalhar and len(df) <= MAX_TAGS_MODAL
 
     g_sop = agrega_nivel(df, "SOP", subnivel="SSOP")
     blocos = ""
@@ -1447,8 +1469,8 @@ def _arvore(df: pd.DataFrame, detalhar: bool, resumo=None, esperados=None, tags=
         ssops = ""
         for _, ss in agrega_nivel(sub_sop, "SSOP").iterrows():
             nome_ssop = ss["SSOP"]
-            corpo = _tabela_tags(sub_sop[sub_sop.SSOP == nome_ssop]) if detalhar else (
-                '<div class="arv-dica">Ligue a chave acima para listar as TAGs deste subpacote.</div>')
+            corpo = (_tabela_tags(sub_sop[sub_sop.SSOP == nome_ssop], com_modal)
+                     if detalhar else dica)
             ssops += f"""
                 <details class="arv-no arv-n2">
                   <summary>
@@ -1474,9 +1496,8 @@ def _arvore(df: pd.DataFrame, detalhar: bool, resumo=None, esperados=None, tags=
             </details>
         """
 
-    # modais das fichas so das TAGs efetivamente listadas
     modais = (fichas_modais_html(df["TAG"].tolist(), resumo, esperados, tags)
-              if detalhar and resumo is not None else "")
+              if com_modal and resumo is not None else "")
     render_html(
         '<div class="prg-espaco"></div><div class="gplan-panel">'
         '<div class="gplan-panel-title">SOP · clique para expandir</div>'
