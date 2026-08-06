@@ -384,6 +384,10 @@ def inject_css():
            acabava a esquerda enquanto o valor ia pro centro. */
         .gtbl th.gtbl-num, .gtbl td.gtbl-num { text-align:center; }
         .gtbl-num { font-variant-numeric:tabular-nums; }
+        /* A arvore ja traz no HTML as TAGs de todas as malhas, para o "+" abrir
+           na hora. Sao ~5.100 linhas: repetir class="gtbl-num" custaria uns
+           150 bytes por linha, entao aqui o alinhamento sai pela posicao. */
+        .gtbl-tags td:nth-child(n+3) { text-align:center; font-variant-numeric:tabular-nums; }
         .gtbl-muted { color:var(--text-2); }
         .gtbl-mono { font-size:12px; color:var(--text-2); }
         .gtbl-strong { font-weight:600; }
@@ -418,8 +422,6 @@ def inject_css():
         .prg-tot-val { font-size:19px; font-weight:800; color:var(--text-1); letter-spacing:-0.3px; }
         .prg-tot-sub { font-size:10.5px; color:var(--text-3); }
         .prg-espaco { height:12px; }
-        /* centra o toggle na mesma linha do campo dos selects ao lado */
-        .prg-toggle-espaco { height:34px; }
 
         /* ficha do nivel atual (SOP / SSOP / segmento / malha) */
         .fn-panel { padding:26px 30px; margin-bottom:24px !important; }
@@ -509,12 +511,6 @@ def inject_css():
         .arv-n3 > .arv-linha { padding:10px 14px; }
         .arv-n3 > summary { padding:10px 14px; }
         .arv-tags { padding:2px 0 4px; }
-        .arv-dica { font-size:12px; color:var(--text-3); padding:10px 4px; }
-        .arv-aviso {
-          font-size:12.5px; color:var(--accent-amber); background:rgba(251,191,36,0.08);
-          border:1px solid rgba(251,191,36,0.22); border-radius:10px;
-          padding:12px 16px; margin-bottom:18px;
-        }
 
         /* graficos de "mais avancados" em grid 2x2: as linhas do grid tem
            altura uniforme, entao as colunas nunca desalinham. */
@@ -804,7 +800,8 @@ def yes_no_badge(value: object) -> str:
     return f'<span class="gtbl-badge {"ok" if yes else "crit"}">{"Sim" if yes else "Não"}</span>'
 
 
-def html_table(headers: list, rows_html: str, empty_msg: str = "Nenhum registro encontrado.") -> str:
+def html_table(headers: list, rows_html: str, empty_msg: str = "Nenhum registro encontrado.",
+               classe: str = "gtbl") -> str:
     """Tabela HTML estilizada, substituindo o st.dataframe (grid do Streamlit),
     que e um canvas fechado e nao aceita estilizacao."""
     if not rows_html:
@@ -814,7 +811,7 @@ def html_table(headers: list, rows_html: str, empty_msg: str = "Nenhum registro 
         for h in headers
     )
     return (
-        f'<div class="gtbl-scroll"><table class="gtbl">'
+        f'<div class="gtbl-scroll"><table class="{classe}">'
         f"<thead><tr>{head}</tr></thead><tbody>{rows_html}</tbody></table></div>"
     )
 
@@ -1412,33 +1409,17 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
 
     segs = ["Todos"] + sorted({s for s in df.SEGMENTO if not vazio(s)})
     malhas = ["Todas"] + sorted({m for m in df.MALHA if not vazio(m)})
-    c1, c2, c3 = st.columns([2, 2, 1.4])
+    c1, c2 = st.columns(2)
     with c1:
         f_seg = st.selectbox("Segmento", segs, key="prg_seg")
     with c2:
         f_malha = st.selectbox("Malha", malhas, key="prg_malha")
-    with c3:
-        st.markdown('<div class="prg-toggle-espaco"></div>', unsafe_allow_html=True)
-        detalhar = st.toggle("Mostrar instrumentos", value=False, key="prg_detalhe",
-                             help="Lista as TAGs dentro de cada malha")
     if f_seg != "Todos":
         df = df[df.SEGMENTO == f_seg]
     if f_malha != "Todas":
         df = df[df.MALHA == f_malha]
 
-    # listar as 5.097 TAGs de uma vez leva a pagina a 5,3 MB e trava o plano
-    # gratuito; com um segmento filtrado fica em torno de 300 KB.
-    excedeu = detalhar and len(df) > MAX_TAGS_DETALHE
-    detalhar = detalhar and not excedeu
-
     render_html(_totais(df))
-    if excedeu:
-        render_html(
-            '<div class="arv-aviso"><strong>' + br_num(len(df)) + " instrumentos</strong> "
-            "no recorte atual, acima do limite de " + br_num(MAX_TAGS_DETALHE)
-            + " para listar de uma vez. Escolha um <strong>segmento</strong> ou uma "
-            "<strong>malha</strong> nos filtros acima que eles aparecem dentro das malhas.</div>"
-        )
     _graficos(df)
 
     # caminho a reabrir na arvore quando uma ficha esta em foco
@@ -1464,9 +1445,8 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
             for _, ml in agrega_nivel(d_ssop, "MALHA").iterrows():
                 d_malha = d_ssop[d_ssop.MALHA == ml["MALHA"]] if not vazio(ml["MALHA"]) \
                     else d_ssop[d_ssop.MALHA.apply(vazio)]
-                # com o toggle ligado, a malha vira no expansivel com as TAGs
-                corpo = (f'<div class="arv-tags">{_tabela_tags(d_malha, com_modal=False)}</div>'
-                         if detalhar else "")
+                # a malha sempre tem "+": as TAGs dela ja vem no HTML
+                corpo = f'<div class="arv-tags">{_tabela_tags(d_malha, com_modal=False)}</div>'
                 malhas += _no("MALHA", ml["MALHA"], ml, nivel=3, filhos=corpo)
             ssops += _no("SSOP", nome_ssop, ss, nivel=2, filhos=malhas,
                          aberto=(nome_ssop == ssop_aberto))
@@ -1485,7 +1465,7 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
 
     render_html(
         '<div class="gplan-panel">'
-        '<div class="gplan-panel-title">SOP · SSOP · Malha · TAG</div>'
+        '<div class="gplan-panel-title">SOP · SSOP · MALHA · TAG</div>'
         f'<div class="arvore">{blocos}</div></div>' + modal
     )
 
@@ -1532,8 +1512,7 @@ def _no(tipo: str, nome: object, r, nivel: int, filhos: str = "",
         f'<span class="arv-track"><span class="arv-fill {tom}" style="width:{max(pct,1.5):.1f}%;"></span></span>'
         f'<span class="arv-pct">{f"{pct:.1f}".replace(".", ",")}%</span></span>'
     )
-    # a malha e folha: nao tem + porque abaixo dela so existem as TAGs,
-    # que aparecem na propria ficha
+    # sem filhos nao ha o que expandir: a linha fica sem o "+"
     if not filhos:
         return (f'<div class="arv-no arv-n{nivel} arv-folha">'
                 f'<div class="arv-linha"><span class="arv-vazio"></span>{link}'
@@ -1642,40 +1621,39 @@ SEM = "(sem)"
 
 
 def _tabela_tags(sub: pd.DataFrame, com_modal: bool = True) -> str:
-    linhas = ""
+    # Sem indentacao e sem class por celula: a arvore inteira sao ~5.100 destas
+    # linhas, e cada byte aqui vira ~5 KB de pagina.
+    linhas = []
     for _, t in sub.sort_values("AVANCO_DOCUMENTAL", ascending=False).iterrows():
         pct = (t["AVANCO_DOCUMENTAL"] or 0) * 100
         tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
         # sem modal, a pill leva para a ficha na aba Pesquisa tag
         alvo = tag_link(t["TAG"]) if com_modal else (
             f'<a class="gtbl-tag gtbl-link" href="/pesquisa?tag={quote(str(t["TAG"]))}" '
-            f'target="_self" title="Abrir ficha de {esc(t["TAG"])}">{esc(t["TAG"])}</a>')
-        linhas += f"""
-            <tr>
-              <td>{alvo}</td>
-              <td>{esc(t['DESCRICAO'])}</td>
-              <td class="gtbl-num">{pill_prioridade(t.get('SUBGRUPO_PRIORIDADE'))}</td>
-              <td class="gtbl-num">{int(t['RELATORIOS_POSTADOS'])}/{int(t['RELATORIOS_ESPERADOS'])}</td>
-              <td class="gtbl-num"><span class="gtbl-badge {tom}">{f"{pct:.1f}".replace(".", ",")}%</span></td>
-              <td class="gtbl-num">{status_pill(t.get('STATUS_LOCALIZACAO'))}</td>
-              <td class="gtbl-num">{status_pill(t.get('STATUS_CALIBRACAO'))}</td>
-              <td class="gtbl-num">{status_pill(t.get('STATUS_MONTAGEM'))}</td>
-              <td class="gtbl-num gtbl-muted">{'—' if vazio(t.get('STATUS_FINAL')) else esc(t.get('STATUS_FINAL'))}</td>
-              <td class="gtbl-num gtbl-muted">{br_moeda(t['PRECO_UNITARIO'])}</td>
-            </tr>
-        """
+            f'target="_self">{esc(t["TAG"])}</a>')
+        fim = t.get("STATUS_FINAL")
+        linhas.append(
+            f"<tr><td>{alvo}</td><td>{esc(t['DESCRICAO'])}</td>"
+            f"<td>{pill_prioridade(t.get('SUBGRUPO_PRIORIDADE'))}</td>"
+            f"<td>{int(t['RELATORIOS_POSTADOS'])}/{int(t['RELATORIOS_ESPERADOS'])}</td>"
+            f'<td><span class="gtbl-badge {tom}">{f"{pct:.1f}".replace(".", ",")}%</span></td>'
+            f"<td>{status_pill(t.get('STATUS_LOCALIZACAO'))}</td>"
+            f"<td>{status_pill(t.get('STATUS_CALIBRACAO'))}</td>"
+            f"<td>{status_pill(t.get('STATUS_MONTAGEM'))}</td>"
+            f'<td class="gtbl-muted">{"—" if vazio(fim) else esc(fim)}</td>'
+            f'<td class="gtbl-muted">{br_moeda(t["PRECO_UNITARIO"])}</td></tr>'
+        )
     return html_table(
         ["Tag", "Descrição", "#Prioridade", "#Emit./Esp.", "#Avanço",
          "#Localização", "#Calibração", "#Montagem", "#Status final", "#Preço unit."],
-        linhas, "Nenhuma TAG.",
+        "".join(linhas), "Nenhuma TAG.", classe="gtbl gtbl-tags",
     )
 
 
-# Medido na base real: a tabela custa ~800 bytes por TAG, mas cada modal de
-# ficha custa ~4,8 KB. Listar as 5.097 daria 3,9 MB de tabela e 23,3 MB de
-# modais. Dai dois limites: a lista aguenta bem mais do que as fichas.
-MAX_TAGS_DETALHE = 2000
-MAX_TAGS_MODAL = 400
+# Medido na base real com as 1.883 malhas abertas: a arvore inteira da 4,5 MB
+# e custa ~2 s a mais que a aba Relatorios. Cabe. O que nao cabe e a ficha
+# completa da TAG (~4,8 KB cada, 23 MB no total) -- por isso a pill leva para a
+# aba Pesquisa em vez de montar o modal aqui.
 
 
 
