@@ -480,6 +480,12 @@ def inject_css():
         .arv-no[open] > summary .arv-seta { border-color:var(--accent-teal); }
         .arv-no[open] > summary .arv-seta::before { background:var(--accent-teal); }
         .arv-nome { font-size:13px; font-weight:700; color:var(--text-1); min-width:150px; }
+        /* o codigo e link para a ficha; o + fica a cargo do <summary> */
+        a.arv-ficha { text-decoration:none !important; color:var(--text-1) !important;
+                      border-bottom:1px dashed rgba(169,197,255,0.35); padding-bottom:1px; }
+        a.arv-ficha:hover { color:#a9c5ff !important; border-bottom-color:#a9c5ff; }
+        .arv-folha > .arv-linha { display:flex; align-items:center; gap:14px; padding:13px 16px; }
+        .arv-vazio { width:17px; flex-shrink:0; }
         .arv-num { font-size:11.5px; color:var(--text-3); white-space:nowrap; font-variant-numeric:tabular-nums; }
         .arv-sub { color:var(--text-2); font-weight:600; }
         .arv-val { color:var(--text-2); }
@@ -496,6 +502,10 @@ def inject_css():
         .arv-n2:last-child { margin-bottom:0; }
         .arv-n2 > summary { padding:11px 14px; }
         .arv-n2 .arv-nome { font-weight:600; font-size:12.5px; }
+        .arv-n3 { background:var(--dark-card-2); margin-bottom:6px; }
+        .arv-n3:last-child { margin-bottom:0; }
+        .arv-n3 .arv-nome { font-weight:500; font-size:12px; }
+        .arv-n3 > .arv-linha { padding:10px 14px; }
         .arv-dica { font-size:12px; color:var(--text-3); padding:10px 4px; }
         .arv-aviso {
           font-size:12.5px; color:var(--accent-amber); background:rgba(251,191,36,0.08);
@@ -609,7 +619,8 @@ def inject_css():
         /* Modal da ficha resolvido por :target -- abre sem ida ao servidor. */
         /* acima da sidebar do Streamlit, que usa z-index 999991 */
         .fmodal { display:none; position:fixed; inset:0; z-index:1000000; }
-        .fmodal:target { display:flex; align-items:center; justify-content:center; padding:32px 20px; }
+        .fmodal:target,
+        .fmodal-on { display:flex; align-items:center; justify-content:center; padding:32px 20px; }
         .fmodal-bg {
           position:absolute; inset:0; background:rgba(6,9,18,0.68);
           backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
@@ -622,9 +633,11 @@ def inject_css():
         }
         @keyframes fmodal-in { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
         .fmodal-head {
-          display:flex; align-items:center; justify-content:space-between;
+          display:flex; align-items:center; gap:22px;
           padding:22px 28px 0; position:sticky; top:0; background:var(--dark-card); z-index:1;
         }
+        .fmodal-head > div:first-child { flex:1; }
+        .fmodal-head .fn-avanco { flex-shrink:0; }
         .fmodal-title { font-size:20px; font-weight:800; color:var(--text-1); letter-spacing:-0.4px; }
         .fmodal-x {
           font-size:26px; line-height:1; color:var(--text-3) !important; text-decoration:none !important;
@@ -1243,6 +1256,8 @@ def render_sigem(sigem: pd.DataFrame):
     )
 
 
+
+
 SEM_VALOR = {"-", "", "NAN", "NONE"}
 
 
@@ -1364,6 +1379,181 @@ def grafico_avanco(titulo: str, g: pd.DataFrame, coluna: str,
     )
 
 
+# Cadeia de expansao. Segmento ficou de fora: 92 dos 142 segmentos atravessam
+# varios SSOP, entao ele nao e um sub-nivel -- vira apenas coluna na ficha.
+CADEIA = [("SOP", "SOP", "SSOP"), ("SSOP", "SSOP", "malhas"), ("MALHA", "Malha", "tags")]
+
+
+def _ancora(tipo: str, valor: str) -> str:
+    """Id do modal de um nivel. So alfanumerico, para ser id CSS valido."""
+    limpo = "".join(c if c.isalnum() else "-" for c in str(valor))
+    return f"n-{tipo}-{limpo}"
+
+
+def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame):
+    render_header("Progresso")
+    df = progresso_base(resumo, tags)
+
+    # A ficha carrega sob demanda: gerar as 2.106 de uma vez daria 15,9 MB.
+    # Assim so a clicada e montada, e a arvore reabre o caminho ate ela.
+    pedido = st.query_params.get("ficha")
+    tipo_aberto = valor_aberto = None
+    if pedido and "|" in pedido:
+        tipo_aberto, valor_aberto = pedido.split("|", 1)
+
+    render_html(_totais(df))
+    _graficos(df)
+
+    # caminho a reabrir na arvore quando uma ficha esta em foco
+    sop_aberto = ssop_aberto = None
+    if tipo_aberto == "SOP":
+        sop_aberto = valor_aberto
+    elif tipo_aberto in ("SSOP", "MALHA"):
+        alvo = df[df.SSOP == valor_aberto] if tipo_aberto == "SSOP" else df[df.MALHA == valor_aberto]
+        if not alvo.empty:
+            sop_aberto = alvo.iloc[0]["SOP"]
+            ssop_aberto = alvo.iloc[0]["SSOP"] if tipo_aberto == "MALHA" else valor_aberto
+
+    blocos = ""
+    for _, sop in agrega_nivel(df, "SOP").iterrows():
+        nome_sop = sop["SOP"]
+        d_sop = df[df.SOP == nome_sop]
+
+        ssops = ""
+        for _, ss in agrega_nivel(d_sop, "SSOP").iterrows():
+            nome_ssop = ss["SSOP"]
+            d_ssop = d_sop[d_sop.SSOP == nome_ssop]
+            malhas = "".join(
+                _no("MALHA", ml["MALHA"], ml, nivel=3)
+                for _, ml in agrega_nivel(d_ssop, "MALHA").iterrows()
+            )
+            ssops += _no("SSOP", nome_ssop, ss, nivel=2, filhos=malhas,
+                         aberto=(nome_ssop == ssop_aberto))
+        blocos += _no("SOP", nome_sop, sop, nivel=1, filhos=ssops,
+                      aberto=(nome_sop == sop_aberto))
+
+    modal = ""
+    if tipo_aberto:
+        coluna = {"SOP": "SOP", "SSOP": "SSOP", "MALHA": "MALHA"}.get(tipo_aberto)
+        rotulo = {"SOP": "SOP", "SSOP": "SSOP", "MALHA": "Malha"}.get(tipo_aberto, "")
+        if coluna:
+            sub = (df[df[coluna].apply(vazio)] if valor_aberto == "(sem)"
+                   else df[df[coluna] == valor_aberto])
+            if not sub.empty:
+                modal = _modal_nivel(tipo_aberto, valor_aberto, sub, rotulo)
+
+    render_html(
+        '<div class="gplan-panel">'
+        '<div class="gplan-panel-title">SOP · clique no + para abrir, ou no código para ver a ficha</div>'
+        f'<div class="arvore">{blocos}</div></div>' + modal
+    )
+
+
+def _totais(df: pd.DataFrame) -> str:
+    esp = int(df["RELATORIOS_ESPERADOS"].sum())
+    emi = int(df["RELATORIOS_POSTADOS"].sum())
+    pct = (emi / esp * 100) if esp else 0
+    return (
+        '<div class="prg-tot">'
+        f'<div><span class="prg-tot-lbl">Instrumentos</span><span class="prg-tot-val">{br_num(len(df))}</span></div>'
+        f'<div><span class="prg-tot-lbl">Completos</span><span class="prg-tot-val">{br_num(int(df["COMPLETA"].sum()))}</span></div>'
+        f'<div><span class="prg-tot-lbl">Avanço</span><span class="prg-tot-val">{f"{pct:.1f}".replace(".", ",")}%</span></div>'
+        f'<div><span class="prg-tot-lbl">Valor total</span><span class="prg-tot-val">{br_moeda(df["PRECO_UNITARIO"].sum())}</span></div>'
+        f'<div><span class="prg-tot-lbl">Valor avançado</span><span class="prg-tot-val">{br_moeda(df["VALOR_AVANCADO"].sum())}</span></div>'
+        "</div>"
+    )
+
+
+def _no(tipo: str, nome: object, r, nivel: int, filhos: str = "",
+        aberto: bool = False) -> str:
+    """Uma linha da arvore: o + expande os filhos, o codigo abre a ficha."""
+    rotulo = f"Sem {tipo.lower()}" if vazio(nome) else esc(nome)
+    pct = r["avanco"]
+    tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
+    valor = "(sem)" if vazio(nome) else str(nome)
+    link = (f'<a class="arv-nome arv-ficha" href="/progresso?ficha={quote(tipo)}|{quote(valor)}" '
+            f'target="_self" title="Abrir ficha">{rotulo}</a>')
+    resumo = (
+        f'<span class="arv-num">{br_num(int(r["tags"]))} tags</span>'
+        f'<span class="arv-num">{br_num(int(r["emitidos"]))}/{br_num(int(r["esperados"]))} relat.</span>'
+        f'<span class="arv-num arv-val">{br_moeda(r["valor"])}</span>'
+        '<span class="arv-avanco">'
+        f'<span class="arv-track"><span class="arv-fill {tom}" style="width:{max(pct,1.5):.1f}%;"></span></span>'
+        f'<span class="arv-pct">{f"{pct:.1f}".replace(".", ",")}%</span></span>'
+    )
+    # a malha e folha: nao tem + porque abaixo dela so existem as TAGs,
+    # que aparecem na propria ficha
+    if not filhos:
+        return (f'<div class="arv-no arv-n{nivel} arv-folha">'
+                f'<div class="arv-linha"><span class="arv-vazio"></span>{link}'
+                f'{pill_prioridade(r["prioridade"])}{resumo}</div></div>')
+    return f"""
+        <details class="arv-no arv-n{nivel}"{' open' if aberto else ''}>
+          <summary><span class="arv-seta"></span>{link}
+            {pill_prioridade(r['prioridade'])}{resumo}</summary>
+          <div class="arv-corpo">{filhos}</div>
+        </details>
+    """
+
+
+def _modal_nivel(tipo: str, nome: object, sub: pd.DataFrame, rotulo_tipo: str) -> str:
+    """Ficha do SOP/SSOP/malha: o que ha de relevante nele + suas TAGs."""
+    esp = int(sub["RELATORIOS_ESPERADOS"].sum())
+    emi = int(sub["RELATORIOS_POSTADOS"].sum())
+    pct = (emi / esp * 100) if esp else 0
+    tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
+
+    campos = [
+        ("Instrumentos", br_num(len(sub))),
+        ("Completos", f"{br_num(int(sub['COMPLETA'].sum()))} de {br_num(len(sub))}"),
+        ("Relatórios", f"{br_num(emi)} de {br_num(esp)}"),
+        ("Prioridade", prioridade_do_grupo(sub["SUBGRUPO_PRIORIDADE"])),
+        ("Valor total", br_moeda(sub["PRECO_UNITARIO"].sum())),
+        ("Valor avançado", br_moeda(sub["VALOR_AVANCADO"].sum())),
+    ]
+    # quantitativos que fazem sentido para cada nivel
+    if tipo == "SOP":
+        campos.append(("SSOPs", br_num(sub.SSOP.nunique())))
+    if tipo in ("SOP", "SSOP"):
+        n_seg = sub[~sub.SEGMENTO.apply(vazio)].SEGMENTO.nunique()
+        n_mal = sub[~sub.MALHA.apply(vazio)].MALHA.nunique()
+        campos.append(("Segmentos", br_num(n_seg) if n_seg else "—"))
+        campos.append(("Malhas", br_num(n_mal) if n_mal else "—"))
+    if tipo == "MALHA":
+        segs = sorted({s for s in sub.SEGMENTO if not vazio(s)})
+        campos.append(("Segmento", ", ".join(segs) if segs else "—"))
+
+    cards = "".join(
+        f'<div class="fn-item"><div class="fn-lbl">{esc(l)}</div>'
+        f'<div class="fn-val">{esc(v)}</div></div>' for l, v in campos
+    )
+    titulo = f"Sem {rotulo_tipo.lower()}" if vazio(nome) else esc(nome)
+    # aberto ja na renderizacao: e a unica ficha da pagina, veio por ?ficha=
+    return f"""
+        <div class="fmodal fmodal-on">
+          <a class="fmodal-bg" href="/progresso" target="_self" aria-label="Fechar"></a>
+          <div class="fmodal-box">
+            <div class="fmodal-head">
+              <div>
+                <div class="fn-tipo">{esc(rotulo_tipo)}</div>
+                <div class="fmodal-title">{titulo}</div>
+              </div>
+              <div class="fn-avanco">
+                <div class="fn-track"><div class="fn-fill {tom}" style="width:{max(pct,1.5):.1f}%;"></div></div>
+                <div class="fn-pct">{f"{pct:.1f}".replace(".", ",")}%</div>
+              </div>
+              <a class="fmodal-x" href="/progresso" target="_self" aria-label="Fechar">&times;</a>
+            </div>
+            <div class="fmodal-body">
+              <div class="fn-grid">{cards}</div>
+              <div class="ficha-sub">Instrumentos relacionados</div>
+              {_tabela_tags(sub, com_modal=False)}
+            </div>
+          </div>
+        </div>
+    """
+
+
 def status_pill(v: object) -> str:
     """Status de campo com cor por natureza (bom / atencao / ruim)."""
     if vazio(v):
@@ -1381,197 +1571,19 @@ def status_pill(v: object) -> str:
 # SOP/SSOP (92 dos 142 segmentos atravessam varios SSOP, e 77% das TAGs nao
 # tem segmento), entao cada nivel oferece tambem o grupo "sem <nivel>" e a
 # opcao de ver os instrumentos ali mesmo -- assim nenhuma TAG fica inalcancavel.
-NIVEIS = [
-    ("sop", "SOP", "SOP", "SOPs"),
-    ("ssop", "SSOP", "SSOP", "SSOPs"),
-    ("seg", "SEGMENTO", "Segmento", "segmentos"),
-    ("malha", "MALHA", "Malha", "malhas"),
-]
 SEM = "(sem)"
 
 
-def _url(sel: dict, ate: int | None = None, extra: dict | None = None) -> str:
-    partes = []
-    for i, (chave, _, _, _) in enumerate(NIVEIS):
-        if ate is not None and i >= ate:
-            break
-        if chave in sel:
-            partes.append(f"{chave}={quote(str(sel[chave]))}")
-    for k, v in (extra or {}).items():
-        partes.append(f"{k}={quote(str(v))}")
-    return "/progresso" + ("?" + "&".join(partes) if partes else "")
 
 
-def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame):
-    render_header("Progresso")
-
-    df = progresso_base(resumo, tags)
-
-    # le a cadeia da URL, parando no primeiro nivel nao informado
-    sel, escopo, profundidade = {}, df, 0
-    for i, (chave, coluna, _, _) in enumerate(NIVEIS):
-        v = st.query_params.get(chave)
-        if v is None:
-            break
-        sel[chave] = v
-        escopo = escopo[escopo[coluna].apply(vazio)] if v == SEM else escopo[escopo[coluna] == v]
-        profundidade = i + 1
-
-    ver_tags = st.query_params.get("tags") == "1"
-
-    render_html(_trilha_nivel(sel, profundidade))
-    render_html(_ficha_nivel(sel, profundidade, escopo))
-
-    if profundidade == 0:
-        _graficos(df)
-
-    if ver_tags or profundidade >= len(NIVEIS):
-        _lista_tags(escopo, resumo, esperados, tags)
-    else:
-        _lista_nivel(escopo, sel, profundidade)
 
 
-def _trilha_nivel(sel: dict, profundidade: int) -> str:
-    itens = [('<a class="prg-link" href="/progresso" target="_self">Todos os SOP</a>'
-              if profundidade else "<span>Todos os SOP</span>")]
-    for i in range(profundidade):
-        chave, _, rotulo, _ = NIVEIS[i]
-        valor = sel[chave]
-        texto = f"{rotulo} {valor}" if valor != SEM else f"sem {rotulo.lower()}"
-        if i == profundidade - 1:
-            itens.append(f"<span>{esc(texto)}</span>")
-        else:
-            itens.append(f'<a class="prg-link" href="{_url(sel, i + 1)}" '
-                         f'target="_self">{esc(texto)}</a>')
-    return ('<div class="prg-trilha">'
-            + ' <span class="prg-sep">›</span> '.join(itens) + "</div>")
 
 
-def _ficha_nivel(sel: dict, profundidade: int, escopo: pd.DataFrame) -> str:
-    """Ficha do nivel atual: o que ha de relevante cadastrado nele."""
-    if profundidade == 0:
-        titulo, tipo = "Visão geral", "todos os SOP"
-    else:
-        chave, _, rotulo, _ = NIVEIS[profundidade - 1]
-        valor = sel[chave]
-        titulo = valor if valor != SEM else f"Sem {rotulo.lower()}"
-        tipo = rotulo
-
-    esp = int(escopo["RELATORIOS_ESPERADOS"].sum())
-    emi = int(escopo["RELATORIOS_POSTADOS"].sum())
-    pct = (emi / esp * 100) if esp else 0
-    total_v = float(escopo["PRECO_UNITARIO"].sum())
-    avanc_v = float(escopo["VALOR_AVANCADO"].sum())
-    completas = int(escopo["COMPLETA"].sum())
-
-    # quantitativos dos niveis abaixo do atual
-    quant = []
-    for i in range(profundidade, len(NIVEIS)):
-        _, coluna, _, plural = NIVEIS[i]
-        n = escopo[~escopo[coluna].apply(vazio)][coluna].nunique()
-        sem = int(escopo[coluna].apply(vazio).sum())
-        if n or sem:
-            extra = f" · {br_num(sem)} sem" if sem else ""
-            quant.append((plural.capitalize(), f"{br_num(n)}{extra}"))
-
-    prio = prioridade_do_grupo(escopo["SUBGRUPO_PRIORIDADE"])
-    campos = [
-        ("Instrumentos", br_num(len(escopo))),
-        ("Completos", f"{br_num(completas)} de {br_num(len(escopo))}"),
-        ("Relatórios", f"{br_num(emi)} de {br_num(esp)}"),
-        ("Avanço", f"{pct:.1f}%".replace(".", ",")),
-        ("Prioridade", prio if not vazio(prio) else "—"),
-        ("Valor total", br_moeda(total_v)),
-        ("Valor avançado", br_moeda(avanc_v)),
-    ] + quant
-
-    cards = "".join(
-        f'<div class="fn-item"><div class="fn-lbl">{esc(l)}</div>'
-        f'<div class="fn-val">{esc(v)}</div></div>'
-        for l, v in campos
-    )
-    tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
-    return f"""
-        <div class="gplan-panel fn-panel">
-          <div class="fn-head">
-            <div>
-              <div class="fn-tipo">{esc(tipo)}</div>
-              <div class="fn-titulo">{esc(titulo)}</div>
-            </div>
-            <div class="fn-avanco">
-              <div class="fn-track"><div class="fn-fill {tom}" style="width:{max(pct,1.5):.1f}%;"></div></div>
-              <div class="fn-pct">{f"{pct:.1f}".replace(".", ",")}%</div>
-            </div>
-          </div>
-          <div class="fn-grid">{cards}</div>
-        </div>
-    """
 
 
-def _lista_nivel(escopo: pd.DataFrame, sel: dict, profundidade: int):
-    """Lista o proximo nivel + o atalho para ver os instrumentos daqui."""
-    chave, coluna, rotulo, plural = NIVEIS[profundidade]
-    g = agrega_nivel(escopo, coluna)
-
-    linhas = ""
-    for _, r in g.iterrows():
-        nome = r[coluna]
-        eh_sem = vazio(nome)
-        destino = dict(sel)
-        destino[chave] = SEM if eh_sem else nome
-        href = _url(destino, profundidade + 1)
-        rotulo_linha = f"Sem {rotulo.lower()}" if eh_sem else esc(nome)
-        marca = ' <span class="doc-tag">não classificado</span>' if eh_sem else ""
-        pct = r["avanco"]
-        tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
-        linhas += f"""
-            <tr>
-              <td><a class="prg-link" href="{href}" target="_self">{rotulo_linha}</a>{marca}</td>
-              <td class="gtbl-num">{pill_prioridade(r['prioridade'])}</td>
-              <td class="gtbl-num">{br_num(int(r['tags']))}</td>
-              <td class="gtbl-num gtbl-muted">{br_num(int(r['completas']))}</td>
-              <td class="gtbl-num">{br_num(int(r['emitidos']))}/{br_num(int(r['esperados']))}</td>
-              <td class="gtbl-num">
-                <div class="cel-avanco">
-                  <div class="cel-track"><div class="cel-fill {tom}" style="width:{max(pct,1.5):.1f}%;"></div></div>
-                  <span class="cel-pct">{f"{pct:.1f}".replace(".", ",")}%</span>
-                </div>
-              </td>
-              <td class="gtbl-num gtbl-muted">{br_moeda(r['valor'])}</td>
-              <td class="gtbl-num gtbl-strong">{br_moeda(r['valor_avancado'])}</td>
-            </tr>
-        """
-    render_html(
-        f'<a class="prg-atalho" href="{_url(sel, profundidade, {"tags": 1})}" target="_self">'
-        f'Ver os {br_num(len(escopo))} instrumentos deste nível →</a>'
-        '<div class="gplan-panel">'
-        f'<div class="gplan-panel-title">{plural.capitalize()} · do mais avançado ao menos avançado</div>'
-        + html_table(
-            [rotulo, "#Prioridade", "#Instrum.", "#Completos", "#Relatórios",
-             "#Avanço", "#Valor total", "#Valor avançado"],
-            linhas, f"Nenhum {rotulo.lower()} neste recorte.",
-        )
-        + "</div>"
-    )
 
 
-def _lista_tags(escopo: pd.DataFrame, resumo, esperados, tags):
-    com_modal = len(escopo) <= MAX_TAGS_MODAL
-    corte = escopo if len(escopo) <= MAX_TAGS_DETALHE else escopo.head(MAX_TAGS_DETALHE)
-    aviso = ""
-    if len(escopo) > MAX_TAGS_DETALHE:
-        aviso = ('<div class="arv-aviso">Mostrando os primeiros <strong>'
-                 + br_num(MAX_TAGS_DETALHE) + "</strong> de " + br_num(len(escopo))
-                 + " instrumentos. Desça um nível para ver o conjunto completo.</div>")
-    modais = (fichas_modais_html(corte["TAG"].tolist(), resumo, esperados, tags)
-              if com_modal else "")
-    render_html(
-        aviso
-        + '<div class="gplan-panel">'
-        + '<div class="gplan-panel-title">Instrumentos · do mais avançado ao menos avançado</div>'
-        + _tabela_tags(corte, com_modal)
-        + "</div>" + modais
-    )
 
 
 
