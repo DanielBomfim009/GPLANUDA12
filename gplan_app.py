@@ -3,6 +3,7 @@ import math
 import os
 from urllib.parse import quote
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -1396,7 +1397,35 @@ def _ancora(tipo: str, valor: str) -> str:
     return f"n-{tipo}-{limpo}"
 
 
-def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame):
+@st.cache_data(show_spinner=False, max_entries=8)
+def arvore_html(cache_key: str, f_seg: str, f_malha: str, _df: pd.DataFrame) -> str:
+    """A arvore inteira, ja em HTML e sempre fechada.
+
+    Sao 224 agregacoes e 1.883 tabelas de TAG: 2,7 s aqui, uns 20 s na CPU do
+    Render. Sem cache isso se repetia a cada clique. A chave e o par
+    (planilha, filtros) -- o _df nao entra no hash, so acompanha.
+    """
+    blocos = []
+    for _, sop in agrega_nivel(_df, "SOP", subnivel="SSOP").iterrows():
+        d_sop = _df[_df.SOP == sop["SOP"]]
+        ssops = []
+        for _, ss in agrega_nivel(d_sop, "SSOP", subnivel="MALHA").iterrows():
+            d_ssop = d_sop[d_sop.SSOP == ss["SSOP"]]
+            malhas = []
+            for _, ml in agrega_nivel(d_ssop, "MALHA").iterrows():
+                d_malha = d_ssop[d_ssop.MALHA == ml["MALHA"]] if not vazio(ml["MALHA"]) \
+                    else d_ssop[d_ssop.MALHA.apply(vazio)]
+                # a malha sempre tem "+": as TAGs dela ja vem no HTML
+                corpo = (f'<div class="arv-tags">'
+                         f'{_tabela_tags(d_malha, com_modal=False)}</div>')
+                malhas.append(_no("MALHA", ml["MALHA"], ml, nivel=3, filhos=corpo))
+            ssops.append(_no("SSOP", ss["SSOP"], ss, nivel=2, filhos="".join(malhas)))
+        blocos.append(_no("SOP", sop["SOP"], sop, nivel=1, filhos="".join(ssops)))
+    return "".join(blocos)
+
+
+def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame,
+                     cache_key: str = ""):
     render_header("Progresso")
     df = progresso_base(resumo, tags)
 
@@ -1422,36 +1451,24 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     render_html(_totais(df))
     _graficos(df)
 
-    # caminho a reabrir na arvore quando uma ficha esta em foco
-    sop_aberto = ssop_aberto = None
-    if tipo_aberto == "SOP":
-        sop_aberto = valor_aberto
-    elif tipo_aberto in ("SSOP", "MALHA"):
-        alvo = df[df.SSOP == valor_aberto] if tipo_aberto == "SSOP" else df[df.MALHA == valor_aberto]
-        if not alvo.empty:
-            sop_aberto = alvo.iloc[0]["SOP"]
-            ssop_aberto = alvo.iloc[0]["SSOP"] if tipo_aberto == "MALHA" else valor_aberto
+    blocos = arvore_html(cache_key, f_seg, f_malha, df)
 
-    blocos = ""
-    for _, sop in agrega_nivel(df, "SOP", subnivel="SSOP").iterrows():
-        nome_sop = sop["SOP"]
-        d_sop = df[df.SOP == nome_sop]
-
-        ssops = ""
-        for _, ss in agrega_nivel(d_sop, "SSOP", subnivel="MALHA").iterrows():
-            nome_ssop = ss["SSOP"]
-            d_ssop = d_sop[d_sop.SSOP == nome_ssop]
-            malhas = ""
-            for _, ml in agrega_nivel(d_ssop, "MALHA").iterrows():
-                d_malha = d_ssop[d_ssop.MALHA == ml["MALHA"]] if not vazio(ml["MALHA"]) \
-                    else d_ssop[d_ssop.MALHA.apply(vazio)]
-                # a malha sempre tem "+": as TAGs dela ja vem no HTML
-                corpo = f'<div class="arv-tags">{_tabela_tags(d_malha, com_modal=False)}</div>'
-                malhas += _no("MALHA", ml["MALHA"], ml, nivel=3, filhos=corpo)
-            ssops += _no("SSOP", nome_ssop, ss, nivel=2, filhos=malhas,
-                         aberto=(nome_ssop == ssop_aberto))
-        blocos += _no("SOP", nome_sop, sop, nivel=1, filhos=ssops,
-                      aberto=(nome_sop == sop_aberto))
+    # caminho a reabrir quando uma ficha esta em foco. A arvore vem do cache
+    # sempre fechada; abrir e so acrescentar o "open" nos dois nos do caminho.
+    if tipo_aberto:
+        caminho = []
+        if tipo_aberto == "SOP":
+            caminho = [("SOP", valor_aberto)]
+        else:
+            alvo = (df[df.SSOP == valor_aberto] if tipo_aberto == "SSOP"
+                    else df[df.MALHA == valor_aberto])
+            if not alvo.empty:
+                caminho = [("SOP", alvo.iloc[0]["SOP"])]
+                caminho.append(("SSOP", alvo.iloc[0]["SSOP"] if tipo_aberto == "MALHA"
+                                else valor_aberto))
+        for tipo, valor in caminho:
+            marca = f'id="{_ancora(tipo, valor)}"'
+            blocos = blocos.replace(marca, marca + " open", 1)
 
     modal = ""
     if tipo_aberto:
@@ -1517,13 +1534,13 @@ def _no(tipo: str, nome: object, r, nivel: int, filhos: str = "",
         return (f'<div class="arv-no arv-n{nivel} arv-folha">'
                 f'<div class="arv-linha"><span class="arv-vazio"></span>{link}'
                 f'{pill_prioridade(r["prioridade"])}{resumo}</div></div>')
-    return f"""
-        <details class="arv-no arv-n{nivel}"{' open' if aberto else ''}>
-          <summary><span class="arv-seta"></span>{link}
-            {pill_prioridade(r['prioridade'])}{resumo}</summary>
-          <div class="arv-corpo">{filhos}</div>
-        </details>
-    """
+    # so SOP e SSOP levam id: sao os unicos que a ficha precisa reabrir, e
+    # marcar as 1.883 malhas custaria 40 KB por nada
+    ident = f' id="{_ancora(tipo, valor)}"' if nivel < 3 else ""
+    return (f'<details class="arv-no arv-n{nivel}"{ident}{" open" if aberto else ""}>'
+            f'<summary><span class="arv-seta"></span>{link}'
+            f'{pill_prioridade(r["prioridade"])}{resumo}</summary>'
+            f'<div class="arv-corpo">{filhos}</div></details>')
 
 
 def _modal_nivel(tipo: str, nome: object, sub: pd.DataFrame, rotulo_tipo: str) -> str:
@@ -1620,34 +1637,54 @@ SEM = "(sem)"
 
 
 
-def _tabela_tags(sub: pd.DataFrame, com_modal: bool = True) -> str:
-    # Sem indentacao e sem class por celula: a arvore inteira sao ~5.100 destas
-    # linhas, e cada byte aqui vira ~5 KB de pagina.
+CABECALHO_TAGS = ["Tag", "Descrição", "#Prioridade", "#Emit./Esp.", "#Avanço",
+                  "#Localização", "#Calibração", "#Montagem", "#Status final",
+                  "#Preço unit."]
+
+_COLS_TAGS = ("TAG", "DESCRICAO", "SUBGRUPO_PRIORIDADE", "RELATORIOS_POSTADOS",
+              "RELATORIOS_ESPERADOS", "AVANCO_DOCUMENTAL", "STATUS_LOCALIZACAO",
+              "STATUS_CALIBRACAO", "STATUS_MONTAGEM", "STATUS_FINAL", "PRECO_UNITARIO")
+
+
+def linhas_tags(sub: pd.DataFrame, com_modal: bool = True) -> pd.Series:
+    """O <tr> de cada TAG, indexado como o dataframe que entrou.
+
+    Percorre arrays com zip em vez de iterrows: o iterrows monta uma Series
+    por linha, e sao 5.097 delas na arvore inteira. So essa troca derruba a
+    montagem de 1,9 s para 0,4 s.
+
+    Sem indentacao e sem class por celula: cada byte aqui vira ~5 KB de pagina.
+    """
+    if sub.empty:
+        return pd.Series(dtype=object)
+    sub = sub.sort_values("AVANCO_DOCUMENTAL", ascending=False)
+    vazia = np.full(len(sub), None)
+    col = {c: (sub[c].values if c in sub.columns else vazia) for c in _COLS_TAGS}
+
     linhas = []
-    for _, t in sub.sort_values("AVANCO_DOCUMENTAL", ascending=False).iterrows():
-        pct = (t["AVANCO_DOCUMENTAL"] or 0) * 100
+    for tag, desc, prio, emi, esp, av, loc, cal, mon, fim, preco in zip(
+            *(col[c] for c in _COLS_TAGS)):
+        pct = (av or 0) * 100
         tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
         # sem modal, a pill leva para a ficha na aba Pesquisa tag
-        alvo = tag_link(t["TAG"]) if com_modal else (
-            f'<a class="gtbl-tag gtbl-link" href="/pesquisa?tag={quote(str(t["TAG"]))}" '
-            f'target="_self">{esc(t["TAG"])}</a>')
-        fim = t.get("STATUS_FINAL")
+        alvo = tag_link(tag) if com_modal else (
+            f'<a class="gtbl-tag gtbl-link" href="/pesquisa?tag={quote(str(tag))}" '
+            f'target="_self">{esc(tag)}</a>')
         linhas.append(
-            f"<tr><td>{alvo}</td><td>{esc(t['DESCRICAO'])}</td>"
-            f"<td>{pill_prioridade(t.get('SUBGRUPO_PRIORIDADE'))}</td>"
-            f"<td>{int(t['RELATORIOS_POSTADOS'])}/{int(t['RELATORIOS_ESPERADOS'])}</td>"
+            f"<tr><td>{alvo}</td><td>{esc(desc)}</td>"
+            f"<td>{pill_prioridade(prio)}</td>"
+            f"<td>{int(emi)}/{int(esp)}</td>"
             f'<td><span class="gtbl-badge {tom}">{f"{pct:.1f}".replace(".", ",")}%</span></td>'
-            f"<td>{status_pill(t.get('STATUS_LOCALIZACAO'))}</td>"
-            f"<td>{status_pill(t.get('STATUS_CALIBRACAO'))}</td>"
-            f"<td>{status_pill(t.get('STATUS_MONTAGEM'))}</td>"
+            f"<td>{status_pill(loc)}</td><td>{status_pill(cal)}</td><td>{status_pill(mon)}</td>"
             f'<td class="gtbl-muted">{"—" if vazio(fim) else esc(fim)}</td>'
-            f'<td class="gtbl-muted">{br_moeda(t["PRECO_UNITARIO"])}</td></tr>'
+            f'<td class="gtbl-muted">{br_moeda(preco)}</td></tr>'
         )
-    return html_table(
-        ["Tag", "Descrição", "#Prioridade", "#Emit./Esp.", "#Avanço",
-         "#Localização", "#Calibração", "#Montagem", "#Status final", "#Preço unit."],
-        "".join(linhas), "Nenhuma TAG.", classe="gtbl gtbl-tags",
-    )
+    return pd.Series(linhas, index=sub.index)
+
+
+def _tabela_tags(sub: pd.DataFrame, com_modal: bool = True) -> str:
+    return html_table(CABECALHO_TAGS, "".join(linhas_tags(sub, com_modal)),
+                      "Nenhuma TAG.", classe="gtbl gtbl-tags")
 
 
 # Medido na base real com as 1.883 malhas abertas: a arvore inteira da 4,5 MB
@@ -1719,7 +1756,7 @@ def main():
 
     dashboard_page = st.Page(lambda: render_dashboard(resumo, esperados, tags), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
     relatorios_page = st.Page(lambda: render_relatorios(esperados, resumo, tags), title="Relatórios", icon=":material/description:", url_path="relatorios")
-    progresso_page = st.Page(lambda: render_progresso(resumo, esperados, tags), title="Progresso", icon=":material/insights:", url_path="progresso")
+    progresso_page = st.Page(lambda: render_progresso(resumo, esperados, tags, cache_key), title="Progresso", icon=":material/insights:", url_path="progresso")
     pesquisa_page = st.Page(lambda: render_pesquisa_tag(resumo, esperados, tags), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
     sigem_page = st.Page(lambda: render_sigem(sigem), title="Base SIGEM", icon=":material/database:", url_path="sigem")
 
