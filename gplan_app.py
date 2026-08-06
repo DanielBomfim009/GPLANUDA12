@@ -403,6 +403,20 @@ def inject_css():
         .gtbl-badge.warn { color:#fcd34d; background:rgba(251,191,36,0.14); border:1px solid rgba(251,191,36,0.26); }
         .gtbl-badge.ok   { color:#6ee7d0; background:rgba(45,212,191,0.13); border:1px solid rgba(45,212,191,0.24); }
         .gtbl-empty { padding:34px 4px; text-align:center; color:var(--text-3); font-size:13px; }
+        .prg-trilha { font-size:12.5px; color:var(--text-2); margin-bottom:18px; }
+        .prg-sep { color:var(--text-3); margin:0 2px; }
+        a.prg-link { color:#a9c5ff !important; text-decoration:none !important; font-weight:600; }
+        a.prg-link:hover { text-decoration:underline !important; }
+        .prg-nome { color:var(--text-2); }
+        .prg-tot {
+          display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px;
+          background:var(--dark-card-2); border:1px solid var(--border-color);
+          border-radius:12px; padding:16px 20px; margin-bottom:24px;
+        }
+        .prg-tot > div { display:flex; flex-direction:column; gap:4px; }
+        .prg-tot-lbl { font-size:10.5px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-3); font-weight:600; }
+        .prg-tot-val { font-size:19px; font-weight:800; color:var(--text-1); letter-spacing:-0.3px; }
+
         .flt-summary { font-size:12.5px; color:var(--text-2); padding:2px 2px 0; }
         .flt-summary strong { color:var(--text-1); }
 
@@ -936,6 +950,16 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
 
     qtd_cabos = int(r["QTD_CABOS"])
     cabo_txt = f"Sim ({qtd_cabos} cabo{'s' if qtd_cabos != 1 else ''})" if qtd_cabos > 0 else "Não"
+
+    # dados que vivem so na base de TAGs (hierarquia, criterio e preco)
+    t = tags_row.iloc[0] if not tags_row.empty else {}
+
+    def da_base(campo, default="—"):
+        v = t.get(campo, default) if hasattr(t, "get") else default
+        return default if v is None or vazio(v) else v
+
+    preco = pd.to_numeric(pd.Series([t.get("PRECO_UNITARIO")]), errors="coerce").fillna(0).iloc[0] if hasattr(t, "get") else 0
+
     detalhes = [
         ("Tipo", str(r["GRUPO_REGRA"]).title()),
         ("Item PPU", r["ITEM_PPU"]),
@@ -946,6 +970,12 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
         ("Relatórios entregues", int(r["RELATORIOS_POSTADOS"])),
         ("Relatórios pendentes", int(r["RELATORIOS_PENDENTES"])),
         ("Avanço", f"{r['AVANCO_DOCUMENTAL'] * 100:.1f}%".replace(".", ",")),
+        ("SOP", da_base("SOP")),
+        ("SSOP", da_base("SSOP")),
+        ("Segmento", da_base("SEGMENTO")),
+        ("Malha", da_base("MALHA")),
+        ("Critério de medição", da_base("CRITERIO_MEDICAO")),
+        ("Preço unitário", br_moeda(float(preco))),
     ]
     cards = "".join(
         f'<div class="detail-item"><div class="detail-label">{esc(lbl)}</div>'
@@ -1094,6 +1124,198 @@ def render_sigem(sigem: pd.DataFrame):
     )
 
 
+SEM_VALOR = {"-", "", "NAN", "NONE"}
+
+
+def vazio(v: object) -> bool:
+    """A base marca ausencia com '-', nao com celula vazia."""
+    return str(v).strip().upper() in SEM_VALOR
+
+
+def br_moeda(v: float) -> str:
+    return f"R$ {v:,.2f}".replace(",", "~").replace(".", ",").replace("~", ".")
+
+
+def progresso_base(resumo: pd.DataFrame, tags: pd.DataFrame) -> pd.DataFrame:
+    """Une o avanco documental (07_TAG_RESUMO) com a hierarquia e o preco
+    (01_BASE_TAGS). O avanco por TAG e o mesmo usado nas demais abas."""
+    cols = ["TAG", "SOP", "SSOP", "SUBGRUPO_PRIORIDADE", "SEGMENTO", "MALHA",
+            "CRITERIO_MEDICAO", "PRECO_UNITARIO"]
+    disponiveis = [c for c in cols if c in tags.columns]
+    df = resumo.merge(tags[disponiveis], on="TAG", how="left")
+    for c in ("SOP", "SSOP", "SEGMENTO", "MALHA", "SUBGRUPO_PRIORIDADE"):
+        if c not in df.columns:
+            df[c] = "-"
+        df[c] = df[c].fillna("-").astype(str).str.strip()
+    if "PRECO_UNITARIO" not in df.columns:
+        df["PRECO_UNITARIO"] = 0.0
+    df["PRECO_UNITARIO"] = pd.to_numeric(df["PRECO_UNITARIO"], errors="coerce").fillna(0.0)
+    # valor ja comprovado documentalmente = preco x avanco da TAG
+    df["VALOR_AVANCADO"] = df["PRECO_UNITARIO"] * df["AVANCO_DOCUMENTAL"].fillna(0)
+    return df
+
+
+def agrega_nivel(df: pd.DataFrame, coluna: str) -> pd.DataFrame:
+    g = df.groupby(coluna).agg(
+        tags=("TAG", "count"),
+        esperados=("RELATORIOS_ESPERADOS", "sum"),
+        emitidos=("RELATORIOS_POSTADOS", "sum"),
+        valor=("PRECO_UNITARIO", "sum"),
+        valor_avancado=("VALOR_AVANCADO", "sum"),
+    ).reset_index()
+    g["avanco"] = (g["emitidos"] / g["esperados"]).fillna(0) * 100
+    return g.sort_values("tags", ascending=False)
+
+
+def linha_nivel(rotulo: str, href: str | None, r, extra: str = "") -> str:
+    # caminho completo + target="_self": href relativo perde a rota /progresso
+    nome = (f'<a class="prg-link" href="{href}" target="_self">{esc(rotulo)}</a>' if href
+            else f'<span class="prg-nome">{esc(rotulo)}</span>')
+    pct = r["avanco"]
+    tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
+    return f"""
+        <tr>
+          <td>{nome}{extra}</td>
+          <td class="gtbl-num">{br_num(int(r['tags']))}</td>
+          <td class="gtbl-num">{br_num(int(r['esperados']))}</td>
+          <td class="gtbl-num">{br_num(int(r['emitidos']))}</td>
+          <td class="gtbl-num"><span class="gtbl-badge {tom}">{f"{pct:.1f}".replace(".", ",")}%</span></td>
+          <td class="gtbl-num gtbl-muted">{br_moeda(r['valor'])}</td>
+          <td class="gtbl-num gtbl-strong">{br_moeda(r['valor_avancado'])}</td>
+        </tr>
+    """
+
+
+CAB_NIVEL = ["", "#TAGs", "#Esperados", "#Emitidos", "#Avanço", "#Valor total", "#Valor avançado"]
+
+
+def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame):
+    render_header("Progresso")
+
+    df = progresso_base(resumo, tags)
+
+    # filtros independentes da hierarquia
+    segs = ["Todos"] + sorted({s for s in df.SEGMENTO if not vazio(s)})
+    malhas = ["Todas"] + sorted({m for m in df.MALHA if not vazio(m)})
+    c1, c2 = st.columns(2)
+    with c1:
+        f_seg = st.selectbox("Segmento", segs, key="prg_seg")
+    with c2:
+        f_malha = st.selectbox("Malha", malhas, key="prg_malha")
+    if f_seg != "Todos":
+        df = df[df.SEGMENTO == f_seg]
+    if f_malha != "Todas":
+        df = df[df.MALHA == f_malha]
+
+    sop = st.query_params.get("sop")
+    ssop = st.query_params.get("ssop")
+
+    if ssop:
+        _progresso_tags(df[df.SSOP == ssop], ssop, sop, esperados, resumo, tags)
+    elif sop:
+        _progresso_ssop(df[df.SOP == sop], sop)
+    else:
+        _progresso_sop(df)
+
+
+def _trilha(itens: list[tuple[str, str | None]]) -> str:
+    partes = []
+    for rotulo, href in itens:
+        partes.append(f'<a class="prg-link" href="{href}" target="_self">{esc(rotulo)}</a>' if href
+                      else f"<span>{esc(rotulo)}</span>")
+    return '<div class="prg-trilha">' + ' <span class="prg-sep">›</span> '.join(partes) + "</div>"
+
+
+def _painel_totais(df: pd.DataFrame, titulo: str) -> str:
+    esp = int(df["RELATORIOS_ESPERADOS"].sum())
+    emi = int(df["RELATORIOS_POSTADOS"].sum())
+    pct = (emi / esp * 100) if esp else 0
+    return (
+        '<div class="prg-tot">'
+        f'<div><span class="prg-tot-lbl">TAGs</span><span class="prg-tot-val">{br_num(len(df))}</span></div>'
+        f'<div><span class="prg-tot-lbl">Avanço</span><span class="prg-tot-val">{f"{pct:.1f}".replace(".", ",")}%</span></div>'
+        f'<div><span class="prg-tot-lbl">Valor total</span><span class="prg-tot-val">{br_moeda(df["PRECO_UNITARIO"].sum())}</span></div>'
+        f'<div><span class="prg-tot-lbl">Valor avançado</span><span class="prg-tot-val">{br_moeda(df["VALOR_AVANCADO"].sum())}</span></div>'
+        "</div>"
+    )
+
+
+def _progresso_sop(df: pd.DataFrame):
+    g = agrega_nivel(df, "SOP")
+    linhas = ""
+    for _, r in g.iterrows():
+        nome = r["SOP"]
+        if vazio(nome):
+            linhas += linha_nivel("Sem SOP", None, r,
+                                  ' <span class="doc-tag">sem prioridade</span>')
+        else:
+            linhas += linha_nivel(nome, f"/progresso?sop={quote(nome)}", r)
+    render_html(
+        '<div class="gplan-panel">'
+        + _painel_totais(df, "Geral")
+        + '<div class="gplan-panel-title">SOP · prioridades</div>'
+        + html_table(["SOP"] + CAB_NIVEL[1:], linhas, "Nenhum SOP para esses filtros.")
+        + "</div>"
+    )
+
+
+def _progresso_ssop(df: pd.DataFrame, sop: str):
+    g = agrega_nivel(df, "SSOP")
+    linhas = ""
+    for _, r in g.iterrows():
+        nome = r["SSOP"]
+        linhas += linha_nivel(
+            "Sem SSOP" if vazio(nome) else nome,
+            None if vazio(nome) else f"/progresso?sop={quote(sop)}&ssop={quote(nome)}", r,
+        )
+    render_html(
+        '<div class="gplan-panel">'
+        + _trilha([("Todos os SOP", "/progresso"), (f"SOP {sop}", None)])
+        + _painel_totais(df, sop)
+        + '<div class="gplan-panel-title">SSOP deste SOP</div>'
+        + html_table(["SSOP"] + CAB_NIVEL[1:], linhas, "Nenhum SSOP.")
+        + "</div>"
+    )
+
+
+def _progresso_tags(df: pd.DataFrame, ssop: str, sop: str | None,
+                    esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame):
+    linhas = ""
+    for _, r in df.sort_values("AVANCO_DOCUMENTAL").iterrows():
+        pct = (r["AVANCO_DOCUMENTAL"] or 0) * 100
+        tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
+        linhas += f"""
+            <tr>
+              <td>{tag_link(r['TAG'])}</td>
+              <td>{esc(r['DESCRICAO'])}</td>
+              <td class="gtbl-muted">{'—' if vazio(r['SEGMENTO']) else esc(r['SEGMENTO'])}</td>
+              <td class="gtbl-muted">{'—' if vazio(r['MALHA']) else esc(r['MALHA'])}</td>
+              <td class="gtbl-num">{int(r['RELATORIOS_ESPERADOS'])}</td>
+              <td class="gtbl-num">{int(r['RELATORIOS_POSTADOS'])}</td>
+              <td class="gtbl-num"><span class="gtbl-badge {tom}">{f"{pct:.1f}".replace(".", ",")}%</span></td>
+              <td class="gtbl-num gtbl-muted">{esc(r.get('CRITERIO_MEDICAO', '—'))}</td>
+              <td class="gtbl-num gtbl-muted">{br_moeda(r['PRECO_UNITARIO'])}</td>
+            </tr>
+        """
+    trilha = [("Todos os SOP", "/progresso")]
+    if sop:
+        trilha.append((f"SOP {sop}", f"/progresso?sop={quote(sop)}"))
+    trilha.append((f"SSOP {ssop}", None))
+    render_html(
+        '<div class="gplan-panel">'
+        + _trilha(trilha)
+        + _painel_totais(df, ssop)
+        + '<div class="gplan-panel-title">TAGs deste SSOP</div>'
+        + html_table(
+            ["Tag", "Descrição", "Segmento", "Malha", "#Esperados", "#Emitidos",
+             "#Avanço", "#Critério", "#Preço unit."],
+            linhas, "Nenhuma TAG.",
+        )
+        + "</div>"
+        + fichas_modais_html(df["TAG"].tolist(), resumo, esperados, tags)
+    )
+
+
 def main():
     favicon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "favicon.png")
     st.set_page_config(
@@ -1134,10 +1356,11 @@ def main():
 
     dashboard_page = st.Page(lambda: render_dashboard(resumo, esperados, tags), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
     relatorios_page = st.Page(lambda: render_relatorios(esperados, resumo, tags), title="Relatórios", icon=":material/description:", url_path="relatorios")
+    progresso_page = st.Page(lambda: render_progresso(resumo, esperados, tags), title="Progresso", icon=":material/insights:", url_path="progresso")
     pesquisa_page = st.Page(lambda: render_pesquisa_tag(resumo, esperados, tags), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
     sigem_page = st.Page(lambda: render_sigem(sigem), title="Base SIGEM", icon=":material/database:", url_path="sigem")
 
-    nav = st.navigation([dashboard_page, relatorios_page, pesquisa_page, sigem_page], position="sidebar")
+    nav = st.navigation([dashboard_page, progresso_page, relatorios_page, pesquisa_page, sigem_page], position="sidebar")
     nav.run()
 
 
