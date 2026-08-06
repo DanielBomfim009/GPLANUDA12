@@ -409,13 +409,100 @@ def inject_css():
         a.prg-link:hover { text-decoration:underline !important; }
         .prg-nome { color:var(--text-2); }
         .prg-tot {
-          display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px;
+          display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:20px;
           background:var(--dark-card-2); border:1px solid var(--border-color);
-          border-radius:12px; padding:16px 20px; margin-bottom:24px;
+          border-radius:14px; padding:22px 26px; margin-bottom:36px;
         }
         .prg-tot > div { display:flex; flex-direction:column; gap:4px; }
         .prg-tot-lbl { font-size:10.5px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-3); font-weight:600; }
         .prg-tot-val { font-size:19px; font-weight:800; color:var(--text-1); letter-spacing:-0.3px; }
+        .prg-tot-sub { font-size:10.5px; color:var(--text-3); }
+        .prg-espaco { height:12px; }
+        /* centra o toggle na mesma linha do campo dos selects ao lado */
+        .prg-toggle-espaco { height:34px; }
+
+        /* arvore SOP > SSOP > TAGs em <details>: expande sem ida ao servidor */
+        .arvore { display:flex; flex-direction:column; gap:8px; }
+        .arv-no { border:1px solid var(--border-color); border-radius:11px; overflow:hidden;
+                  background:var(--dark-card-2); }
+        .arv-no[open] { border-color:var(--border-strong); }
+        .arv-no > summary {
+          display:flex; align-items:center; gap:14px; padding:13px 16px;
+          cursor:pointer; list-style:none; user-select:none; transition:background 120ms;
+        }
+        .arv-no > summary::-webkit-details-marker { display:none; }
+        .arv-no > summary:hover { background:rgba(255,255,255,0.035); }
+        .arv-no[open] > summary { background:rgba(255,255,255,0.03);
+                                  border-bottom:1px solid var(--border-color); }
+        .arv-seta {
+          width:17px; height:17px; flex-shrink:0; position:relative;
+          border:1px solid var(--border-strong); border-radius:5px;
+        }
+        .arv-seta::before, .arv-seta::after {
+          content:''; position:absolute; background:var(--text-2);
+          left:50%; top:50%; transform:translate(-50%,-50%);
+        }
+        .arv-seta::before { width:9px; height:1.5px; }
+        .arv-seta::after  { width:1.5px; height:9px; transition:opacity 140ms; }
+        .arv-no[open] > summary .arv-seta::after { opacity:0; }
+        .arv-no[open] > summary .arv-seta { border-color:var(--accent-teal); }
+        .arv-no[open] > summary .arv-seta::before { background:var(--accent-teal); }
+        .arv-nome { font-size:13px; font-weight:700; color:var(--text-1); min-width:150px; }
+        .arv-num { font-size:11.5px; color:var(--text-3); white-space:nowrap; font-variant-numeric:tabular-nums; }
+        .arv-sub { color:var(--text-2); font-weight:600; }
+        .arv-val { color:var(--text-2); }
+        .arv-avanco { display:flex; align-items:center; gap:9px; margin-left:auto; flex-shrink:0; }
+        .arv-track { width:88px; height:6px; background:rgba(255,255,255,0.07); border-radius:4px; overflow:hidden; }
+        .arv-fill { display:block; height:100%; border-radius:4px; }
+        .arv-fill.ok { background:var(--accent-teal); }
+        .arv-fill.warn { background:var(--accent-amber); }
+        .arv-fill.crit { background:var(--accent-red); }
+        .arv-pct { font-size:12.5px; font-weight:700; color:var(--text-1);
+                   min-width:52px; text-align:right; font-variant-numeric:tabular-nums; }
+        .arv-corpo { padding:12px 14px 14px; }
+        .arv-n2 { background:var(--dark-card); margin-bottom:7px; }
+        .arv-n2:last-child { margin-bottom:0; }
+        .arv-n2 > summary { padding:11px 14px; }
+        .arv-n2 .arv-nome { font-weight:600; font-size:12.5px; }
+        .arv-dica { font-size:12px; color:var(--text-3); padding:10px 4px; }
+        .arv-aviso {
+          font-size:12.5px; color:var(--accent-amber); background:rgba(251,191,36,0.08);
+          border:1px solid rgba(251,191,36,0.22); border-radius:10px;
+          padding:12px 16px; margin-bottom:18px;
+        }
+
+        /* graficos de "mais avancados" em grid 2x2: as linhas do grid tem
+           altura uniforme, entao as colunas nunca desalinham. */
+        /* align-items:start deixa cada card com a altura do seu conteudo; com
+           stretch, um card de 1 barra ficava do tamanho do de 5 e sobrava um
+           vao de 200px+ dentro dele. */
+        .gr-grid {
+          display:grid; grid-template-columns:repeat(auto-fit, minmax(420px, 1fr));
+          gap:28px; margin-bottom:8px; align-items:start;
+        }
+        /* height:auto anula o height:100% de .gplan-panel, que esticava o card
+           de 1 barra ate a altura do de 5 (245px de vao interno). */
+        .gr-panel { padding:26px 28px; margin-bottom:0 !important; height:auto !important; }
+        .gr-panel .gplan-panel-title { margin-bottom:20px; }
+        .gr-row { margin-bottom:16px; }
+        .gr-row:last-child { margin-bottom:0; }
+        .gr-top { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; gap:12px; }
+        .gr-nome { font-size:12.5px; font-weight:600; color:var(--text-1); white-space:nowrap;
+                   overflow:hidden; text-overflow:ellipsis; }
+        .gr-pct { font-size:13px; font-weight:800; color:var(--accent-teal); font-variant-numeric:tabular-nums; }
+        .gr-track { height:8px; background:rgba(255,255,255,0.05); border-radius:5px; overflow:hidden; }
+        .gr-fill { height:100%; border-radius:5px;
+                   background:linear-gradient(90deg, var(--accent-teal), #22c1b0); transition:width 400ms ease; }
+        .gr-sub { font-size:10.5px; color:var(--text-3); margin-top:5px; }
+
+        /* barra de avanco dentro da celula da tabela */
+        .cel-avanco { display:flex; align-items:center; gap:9px; justify-content:flex-end; }
+        .cel-track { width:62px; height:6px; background:rgba(255,255,255,0.06); border-radius:4px; overflow:hidden; flex-shrink:0; }
+        .cel-fill { height:100%; border-radius:4px; }
+        .cel-fill.ok { background:var(--accent-teal); }
+        .cel-fill.warn { background:var(--accent-amber); }
+        .cel-fill.crit { background:var(--accent-red); }
+        .cel-pct { font-size:12px; font-weight:600; min-width:46px; text-align:right; font-variant-numeric:tabular-nums; }
 
         .flt-summary { font-size:12.5px; color:var(--text-2); padding:2px 2px 0; }
         .flt-summary strong { color:var(--text-1); }
@@ -1140,7 +1227,8 @@ def progresso_base(resumo: pd.DataFrame, tags: pd.DataFrame) -> pd.DataFrame:
     """Une o avanco documental (07_TAG_RESUMO) com a hierarquia e o preco
     (01_BASE_TAGS). O avanco por TAG e o mesmo usado nas demais abas."""
     cols = ["TAG", "SOP", "SSOP", "SUBGRUPO_PRIORIDADE", "SEGMENTO", "MALHA",
-            "CRITERIO_MEDICAO", "PRECO_UNITARIO"]
+            "CRITERIO_MEDICAO", "PRECO_UNITARIO",
+            "STATUS_LOCALIZACAO", "STATUS_CALIBRACAO", "STATUS_MONTAGEM", "STATUS_FINAL"]
     disponiveis = [c for c in cols if c in tags.columns]
     df = resumo.merge(tags[disponiveis], on="TAG", how="left")
     for c in ("SOP", "SSOP", "SEGMENTO", "MALHA", "SUBGRUPO_PRIORIDADE"):
@@ -1150,43 +1238,111 @@ def progresso_base(resumo: pd.DataFrame, tags: pd.DataFrame) -> pd.DataFrame:
     if "PRECO_UNITARIO" not in df.columns:
         df["PRECO_UNITARIO"] = 0.0
     df["PRECO_UNITARIO"] = pd.to_numeric(df["PRECO_UNITARIO"], errors="coerce").fillna(0.0)
-    # valor ja comprovado documentalmente = preco x avanco da TAG
-    df["VALOR_AVANCADO"] = df["PRECO_UNITARIO"] * df["AVANCO_DOCUMENTAL"].fillna(0)
+    # O valor so avanca quando a TAG fecha 100% documental -- nao ha medicao
+    # parcial: uma TAG a 90% vale zero.
+    df["COMPLETA"] = df["AVANCO_DOCUMENTAL"].fillna(0) >= 1.0
+    df["VALOR_AVANCADO"] = df["PRECO_UNITARIO"].where(df["COMPLETA"], 0.0)
     return df
 
 
-def agrega_nivel(df: pd.DataFrame, coluna: str) -> pd.DataFrame:
-    g = df.groupby(coluna).agg(
+def ordem_prioridade(v: object) -> tuple:
+    """'6.1' -> (6,1). Ordena por grupo e subgrupo numericos, senao '3.12'
+    viria antes de '3.2' na ordenacao alfabetica. Sem prioridade vai pro fim."""
+    s = str(v).strip()
+    if vazio(s):
+        return (9999, 9999)
+    try:
+        partes = [int(p) for p in s.replace(",", ".").split(".")]
+        return tuple(partes + [0] * (2 - len(partes)))[:2]
+    except ValueError:
+        return (9998, 9998)
+
+
+def prioridade_do_grupo(serie: pd.Series) -> str:
+    """A prioridade mais alta (menor numero) entre as TAGs do grupo."""
+    reais = [v for v in serie if not vazio(v)]
+    return min(reais, key=ordem_prioridade) if reais else "-"
+
+
+def agrega_nivel(df: pd.DataFrame, coluna: str, subnivel: str | None = None) -> pd.DataFrame:
+    """Avanco = soma(emitidos)/soma(esperados): um relatorio pesa o mesmo em
+    qualquer nivel, coerente com o avanco do Dashboard e com medicao. A media
+    dos subniveis daria outro numero (num SOP chegou a 14pp de diferenca),
+    porque faria um SSOP de 1 TAG pesar como um de 173."""
+    agg = dict(
         tags=("TAG", "count"),
         esperados=("RELATORIOS_ESPERADOS", "sum"),
         emitidos=("RELATORIOS_POSTADOS", "sum"),
+        completas=("COMPLETA", "sum"),
         valor=("PRECO_UNITARIO", "sum"),
         valor_avancado=("VALOR_AVANCADO", "sum"),
-    ).reset_index()
+        prioridade=("SUBGRUPO_PRIORIDADE", prioridade_do_grupo),
+    )
+    if subnivel:
+        agg["subniveis"] = (subnivel, "nunique")
+    g = df.groupby(coluna).agg(**agg).reset_index()
     g["avanco"] = (g["emitidos"] / g["esperados"]).fillna(0) * 100
-    return g.sort_values("tags", ascending=False)
+    return g.sort_values("avanco", ascending=False)
 
 
-def linha_nivel(rotulo: str, href: str | None, r, extra: str = "") -> str:
-    # caminho completo + target="_self": href relativo perde a rota /progresso
-    nome = (f'<a class="prg-link" href="{href}" target="_self">{esc(rotulo)}</a>' if href
-            else f'<span class="prg-nome">{esc(rotulo)}</span>')
-    pct = r["avanco"]
-    tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
-    return f"""
-        <tr>
-          <td>{nome}{extra}</td>
-          <td class="gtbl-num">{br_num(int(r['tags']))}</td>
-          <td class="gtbl-num">{br_num(int(r['esperados']))}</td>
-          <td class="gtbl-num">{br_num(int(r['emitidos']))}</td>
-          <td class="gtbl-num"><span class="gtbl-badge {tom}">{f"{pct:.1f}".replace(".", ",")}%</span></td>
-          <td class="gtbl-num gtbl-muted">{br_moeda(r['valor'])}</td>
-          <td class="gtbl-num gtbl-strong">{br_moeda(r['valor_avancado'])}</td>
-        </tr>
+def pill_prioridade(v: object) -> str:
+    if vazio(v):
+        return '<span class="gtbl-muted">—</span>'
+    grupo = ordem_prioridade(v)[0]
+    tom = "crit" if grupo <= 3 else ("warn" if grupo <= 6 else "ok")
+    return f'<span class="gtbl-badge {tom}">{esc(v)}</span>'
+
+
+MIN_TAGS_GRAFICO = 5
+
+
+def grafico_avanco(titulo: str, g: pd.DataFrame, coluna: str,
+                   rotulo_sub: str = "", limite: int = 5) -> str:
+    """Barras dos mais avancados, para indicar por onde comecar.
+
+    Exige MIN_TAGS_GRAFICO: sem isso o ranking enche de pacotes de 1 TAG, que
+    sobem por acaso e nao representam trabalho relevante.
     """
+    validos = g[~g[coluna].apply(vazio) & (g["tags"] >= MIN_TAGS_GRAFICO)]
+    dados = validos.nlargest(limite, "avanco")
+    if dados.empty:
+        return (f'<div class="gplan-panel gr-panel"><div class="gplan-panel-title">{esc(titulo)}</div>'
+                f'<div class="gtbl-empty">Nenhum grupo com {MIN_TAGS_GRAFICO}+ tags.</div></div>')
+    linhas = ""
+    for _, r in dados.iterrows():
+        pct = r["avanco"]
+        if rotulo_sub and "subniveis" in r:
+            quant = f"{br_num(int(r['subniveis']))} {rotulo_sub} · {br_num(int(r['tags']))} tags"
+        else:
+            quant = f"{br_num(int(r['tags']))} tags"
+        linhas += f"""
+            <div class="gr-row">
+              <div class="gr-top">
+                <span class="gr-nome">{esc(r[coluna])}</span>
+                <span class="gr-pct">{f"{pct:.1f}".replace(".", ",")}%</span>
+              </div>
+              <div class="gr-track"><div class="gr-fill" style="width:{max(pct, 1.5):.1f}%;"></div></div>
+              <div class="gr-sub">{quant} · prioridade {esc(r['prioridade'])}</div>
+            </div>
+        """
+    return (
+        '<div class="gplan-panel gr-panel">'
+        f'<div class="gplan-panel-title">{esc(titulo)}</div>'
+        f"{linhas}</div>"
+    )
 
 
-CAB_NIVEL = ["", "#TAGs", "#Esperados", "#Emitidos", "#Avanço", "#Valor total", "#Valor avançado"]
+def status_pill(v: object) -> str:
+    """Status de campo com cor por natureza (bom / atencao / ruim)."""
+    if vazio(v):
+        return '<span class="gtbl-muted">—</span>'
+    t = str(v).strip()
+    n = t.upper()
+    bons = {"LOCALIZADO", "APROVADO", "MONTADO", "CALIBRADO", "SIM", "APTO"}
+    ruins = {"NAO LOCALIZADO", "NÃO LOCALIZADO", "REPROVADO", "NAO MONTADO",
+             "NÃO MONTADO", "CANCELADO", "NAO APTO", "NÃO APTO"}
+    tom = "ok" if n in bons else ("crit" if n in ruins else "warn")
+    return f'<span class="gtbl-badge {tom}">{esc(t)}</span>'
 
 
 def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame):
@@ -1197,123 +1353,181 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     # filtros independentes da hierarquia
     segs = ["Todos"] + sorted({s for s in df.SEGMENTO if not vazio(s)})
     malhas = ["Todas"] + sorted({m for m in df.MALHA if not vazio(m)})
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns([2, 2, 1.4])
     with c1:
         f_seg = st.selectbox("Segmento", segs, key="prg_seg")
     with c2:
         f_malha = st.selectbox("Malha", malhas, key="prg_malha")
+    with c3:
+        # rotulo invisivel so para alinhar a base do toggle com a dos selects
+        st.markdown('<div class="prg-toggle-espaco"></div>', unsafe_allow_html=True)
+        detalhar = st.toggle("Mostrar instrumentos", value=False, key="prg_detalhe",
+                             help="Abre o terceiro nível: as TAGs dentro de cada SSOP")
     if f_seg != "Todos":
         df = df[df.SEGMENTO == f_seg]
     if f_malha != "Todas":
         df = df[df.MALHA == f_malha]
 
-    sop = st.query_params.get("sop")
-    ssop = st.query_params.get("ssop")
-
-    if ssop:
-        _progresso_tags(df[df.SSOP == ssop], ssop, sop, esperados, resumo, tags)
-    elif sop:
-        _progresso_ssop(df[df.SOP == sop], sop)
-    else:
-        _progresso_sop(df)
+    render_html(_painel_totais(df, "Geral"))
+    _graficos(df)
+    _arvore(df, detalhar, resumo, esperados, tags)
 
 
-def _trilha(itens: list[tuple[str, str | None]]) -> str:
-    partes = []
-    for rotulo, href in itens:
-        partes.append(f'<a class="prg-link" href="{href}" target="_self">{esc(rotulo)}</a>' if href
-                      else f"<span>{esc(rotulo)}</span>")
-    return '<div class="prg-trilha">' + ' <span class="prg-sep">›</span> '.join(partes) + "</div>"
+def _barra(pct: float) -> str:
+    tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
+    return (
+        '<span class="arv-avanco">'
+        f'<span class="arv-track"><span class="arv-fill {tom}" style="width:{max(pct,1.5):.1f}%;"></span></span>'
+        f'<span class="arv-pct">{f"{pct:.1f}".replace(".", ",")}%</span></span>'
+    )
+
+
+def _resumo_no(r) -> str:
+    """Numeros que aparecem na linha do SOP/SSOP, ao lado do nome."""
+    return (
+        f'<span class="arv-num">{br_num(int(r["tags"]))} tags</span>'
+        f'<span class="arv-num">{br_num(int(r["emitidos"]))}/{br_num(int(r["esperados"]))} relat.</span>'
+        f'<span class="arv-num arv-val">{br_moeda(r["valor"])}</span>'
+        f"{_barra(r['avanco'])}"
+    )
+
+
+def _tabela_tags(sub: pd.DataFrame) -> str:
+    linhas = ""
+    for _, t in sub.sort_values("AVANCO_DOCUMENTAL", ascending=False).iterrows():
+        pct = (t["AVANCO_DOCUMENTAL"] or 0) * 100
+        tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
+        linhas += f"""
+            <tr>
+              <td>{tag_link(t['TAG'])}</td>
+              <td>{esc(t['DESCRICAO'])}</td>
+              <td class="gtbl-num">{pill_prioridade(t.get('SUBGRUPO_PRIORIDADE'))}</td>
+              <td class="gtbl-num">{int(t['RELATORIOS_POSTADOS'])}/{int(t['RELATORIOS_ESPERADOS'])}</td>
+              <td class="gtbl-num"><span class="gtbl-badge {tom}">{f"{pct:.1f}".replace(".", ",")}%</span></td>
+              <td class="gtbl-num">{status_pill(t.get('STATUS_LOCALIZACAO'))}</td>
+              <td class="gtbl-num">{status_pill(t.get('STATUS_CALIBRACAO'))}</td>
+              <td class="gtbl-num">{status_pill(t.get('STATUS_MONTAGEM'))}</td>
+              <td class="gtbl-num gtbl-muted">{'—' if vazio(t.get('STATUS_FINAL')) else esc(t.get('STATUS_FINAL'))}</td>
+              <td class="gtbl-num gtbl-muted">{br_moeda(t['PRECO_UNITARIO'])}</td>
+            </tr>
+        """
+    return html_table(
+        ["Tag", "Descrição", "#Prioridade", "#Emit./Esp.", "#Avanço",
+         "#Localização", "#Calibração", "#Montagem", "#Status final", "#Preço unit."],
+        linhas, "Nenhuma TAG.",
+    )
+
+
+MAX_TAGS_DETALHE = 800
+
+
+def _arvore(df: pd.DataFrame, detalhar: bool, resumo=None, esperados=None, tags=None):
+    """SOP > SSOP > TAGs em <details>: expande no lugar, sem ida ao servidor,
+    e permite abrir varios ao mesmo tempo.
+
+    O detalhamento so e montado ate MAX_TAGS_DETALHE: sem filtro sao 5.097
+    TAGs, o que geraria ~3 MB de HTML e travaria a pagina no plano gratuito.
+    """
+    excedeu = detalhar and len(df) > MAX_TAGS_DETALHE
+    detalhar = detalhar and not excedeu
+    if excedeu:
+        render_html(
+            '<div class="arv-aviso">São ' + br_num(len(df)) + " TAGs no recorte atual — "
+            "demais para listar de uma vez. Filtre um segmento ou malha para ver os "
+            "instrumentos (limite: " + br_num(MAX_TAGS_DETALHE) + ").</div>"
+        )
+
+    g_sop = agrega_nivel(df, "SOP", subnivel="SSOP")
+    blocos = ""
+    for _, s in g_sop.iterrows():
+        nome_sop = s["SOP"]
+        rotulo = "Sem SOP" if vazio(nome_sop) else esc(nome_sop)
+        sub_sop = df[df.SOP == nome_sop]
+
+        ssops = ""
+        for _, ss in agrega_nivel(sub_sop, "SSOP").iterrows():
+            nome_ssop = ss["SSOP"]
+            corpo = _tabela_tags(sub_sop[sub_sop.SSOP == nome_ssop]) if detalhar else (
+                '<div class="arv-dica">Ligue a chave acima para listar as TAGs deste subpacote.</div>')
+            ssops += f"""
+                <details class="arv-no arv-n2">
+                  <summary>
+                    <span class="arv-seta"></span>
+                    <span class="arv-nome">{'Sem SSOP' if vazio(nome_ssop) else esc(nome_ssop)}</span>
+                    {pill_prioridade(ss['prioridade'])}
+                    {_resumo_no(ss)}
+                  </summary>
+                  <div class="arv-corpo">{corpo}</div>
+                </details>
+            """
+
+        blocos += f"""
+            <details class="arv-no arv-n1">
+              <summary>
+                <span class="arv-seta"></span>
+                <span class="arv-nome">{rotulo}</span>
+                {pill_prioridade(s['prioridade'])}
+                <span class="arv-num arv-sub">{br_num(int(s['subniveis']))} SSOP</span>
+                {_resumo_no(s)}
+              </summary>
+              <div class="arv-corpo">{ssops}</div>
+            </details>
+        """
+
+    # modais das fichas so das TAGs efetivamente listadas
+    modais = (fichas_modais_html(df["TAG"].tolist(), resumo, esperados, tags)
+              if detalhar and resumo is not None else "")
+    render_html(
+        '<div class="prg-espaco"></div><div class="gplan-panel">'
+        '<div class="gplan-panel-title">SOP · clique para expandir</div>'
+        f'<div class="arvore">{blocos or "<div class=\'gtbl-empty\'>Nada para esses filtros.</div>"}</div>'
+        "</div>" + modais
+    )
 
 
 def _painel_totais(df: pd.DataFrame, titulo: str) -> str:
     esp = int(df["RELATORIOS_ESPERADOS"].sum())
     emi = int(df["RELATORIOS_POSTADOS"].sum())
     pct = (emi / esp * 100) if esp else 0
+    completas = int(df["COMPLETA"].sum())
+    total_v = float(df["PRECO_UNITARIO"].sum())
+    avanc_v = float(df["VALOR_AVANCADO"].sum())
+    pct_v = (avanc_v / total_v * 100) if total_v else 0
     return (
         '<div class="prg-tot">'
         f'<div><span class="prg-tot-lbl">TAGs</span><span class="prg-tot-val">{br_num(len(df))}</span></div>'
-        f'<div><span class="prg-tot-lbl">Avanço</span><span class="prg-tot-val">{f"{pct:.1f}".replace(".", ",")}%</span></div>'
-        f'<div><span class="prg-tot-lbl">Valor total</span><span class="prg-tot-val">{br_moeda(df["PRECO_UNITARIO"].sum())}</span></div>'
-        f'<div><span class="prg-tot-lbl">Valor avançado</span><span class="prg-tot-val">{br_moeda(df["VALOR_AVANCADO"].sum())}</span></div>'
+        f'<div><span class="prg-tot-lbl">TAGs completas</span>'
+        f'<span class="prg-tot-val">{br_num(completas)}</span>'
+        f'<span class="prg-tot-sub">100% documental</span></div>'
+        f'<div><span class="prg-tot-lbl">Avanço documental</span>'
+        f'<span class="prg-tot-val">{f"{pct:.1f}".replace(".", ",")}%</span>'
+        f'<span class="prg-tot-sub">{br_num(emi)} de {br_num(esp)} relatórios</span></div>'
+        f'<div><span class="prg-tot-lbl">Valor total</span>'
+        f'<span class="prg-tot-val">{br_moeda(total_v)}</span></div>'
+        f'<div><span class="prg-tot-lbl">Valor avançado</span>'
+        f'<span class="prg-tot-val">{br_moeda(avanc_v)}</span>'
+        f'<span class="prg-tot-sub">{f"{pct_v:.1f}".replace(".", ",")}% · só TAGs completas</span></div>'
         "</div>"
     )
 
 
-def _progresso_sop(df: pd.DataFrame):
-    g = agrega_nivel(df, "SOP")
-    linhas = ""
-    for _, r in g.iterrows():
-        nome = r["SOP"]
-        if vazio(nome):
-            linhas += linha_nivel("Sem SOP", None, r,
-                                  ' <span class="doc-tag">sem prioridade</span>')
-        else:
-            linhas += linha_nivel(nome, f"/progresso?sop={quote(nome)}", r)
-    render_html(
-        '<div class="gplan-panel">'
-        + _painel_totais(df, "Geral")
-        + '<div class="gplan-panel-title">SOP · prioridades</div>'
-        + html_table(["SOP"] + CAB_NIVEL[1:], linhas, "Nenhum SOP para esses filtros.")
-        + "</div>"
-    )
+def _graficos(df: pd.DataFrame):
+    """Os quatro recortes mais avancados: onde ha mais chance de fechar rapido.
 
-
-def _progresso_ssop(df: pd.DataFrame, sop: str):
-    g = agrega_nivel(df, "SSOP")
-    linhas = ""
-    for _, r in g.iterrows():
-        nome = r["SSOP"]
-        linhas += linha_nivel(
-            "Sem SSOP" if vazio(nome) else nome,
-            None if vazio(nome) else f"/progresso?sop={quote(sop)}&ssop={quote(nome)}", r,
-        )
-    render_html(
-        '<div class="gplan-panel">'
-        + _trilha([("Todos os SOP", "/progresso"), (f"SOP {sop}", None)])
-        + _painel_totais(df, sop)
-        + '<div class="gplan-panel-title">SSOP deste SOP</div>'
-        + html_table(["SSOP"] + CAB_NIVEL[1:], linhas, "Nenhum SSOP.")
-        + "</div>"
-    )
-
-
-def _progresso_tags(df: pd.DataFrame, ssop: str, sop: str | None,
-                    esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame):
-    linhas = ""
-    for _, r in df.sort_values("AVANCO_DOCUMENTAL").iterrows():
-        pct = (r["AVANCO_DOCUMENTAL"] or 0) * 100
-        tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
-        linhas += f"""
-            <tr>
-              <td>{tag_link(r['TAG'])}</td>
-              <td>{esc(r['DESCRICAO'])}</td>
-              <td class="gtbl-muted">{'—' if vazio(r['SEGMENTO']) else esc(r['SEGMENTO'])}</td>
-              <td class="gtbl-muted">{'—' if vazio(r['MALHA']) else esc(r['MALHA'])}</td>
-              <td class="gtbl-num">{int(r['RELATORIOS_ESPERADOS'])}</td>
-              <td class="gtbl-num">{int(r['RELATORIOS_POSTADOS'])}</td>
-              <td class="gtbl-num"><span class="gtbl-badge {tom}">{f"{pct:.1f}".replace(".", ",")}%</span></td>
-              <td class="gtbl-num gtbl-muted">{esc(r.get('CRITERIO_MEDICAO', '—'))}</td>
-              <td class="gtbl-num gtbl-muted">{br_moeda(r['PRECO_UNITARIO'])}</td>
-            </tr>
-        """
-    trilha = [("Todos os SOP", "/progresso")]
-    if sop:
-        trilha.append((f"SOP {sop}", f"/progresso?sop={quote(sop)}"))
-    trilha.append((f"SSOP {ssop}", None))
-    render_html(
-        '<div class="gplan-panel">'
-        + _trilha(trilha)
-        + _painel_totais(df, ssop)
-        + '<div class="gplan-panel-title">TAGs deste SSOP</div>'
-        + html_table(
-            ["Tag", "Descrição", "Segmento", "Malha", "#Esperados", "#Emitidos",
-             "#Avanço", "#Critério", "#Preço unit."],
-            linhas, "Nenhuma TAG.",
-        )
-        + "</div>"
-        + fichas_modais_html(df["TAG"].tolist(), resumo, esperados, tags)
-    )
+    Um grid CSS unico, e nao st.columns: cada coluna do Streamlit empilha de
+    forma independente, entao com poucos itens as colunas ficavam com alturas
+    diferentes (chegou a 218px de desequilibrio) e abria um vao no meio.
+    """
+    blocos = "".join([
+        grafico_avanco("SOP mais avançados", agrega_nivel(df, "SOP", subnivel="SSOP"),
+                       "SOP", rotulo_sub="SSOP"),
+        grafico_avanco("SSOP mais avançados", agrega_nivel(df, "SSOP"), "SSOP"),
+        grafico_avanco("Segmentos mais avançados",
+                       agrega_nivel(df, "SEGMENTO", subnivel="MALHA"), "SEGMENTO",
+                       rotulo_sub="malhas"),
+        grafico_avanco("Malhas mais avançadas", agrega_nivel(df, "MALHA"), "MALHA"),
+    ])
+    render_html(f'<div class="gr-grid">{blocos}</div>')
 
 
 def main():
