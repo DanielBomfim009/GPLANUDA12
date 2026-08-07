@@ -1,6 +1,7 @@
 import io
 import math
 import os
+from contextlib import contextmanager
 from urllib.parse import quote
 
 import numpy as np
@@ -22,6 +23,38 @@ BR_TZ = "America/Sao_Paulo"
 
 def render_html(html: str):
     st.markdown("\n".join(line.strip() for line in html.strip().split("\n")), unsafe_allow_html=True)
+
+
+LOGO_SVG = (
+    '<svg viewBox="0 0 48 48" fill="none">'
+    '<circle cx="24" cy="24" r="19" stroke="#232a44" stroke-width="5"/>'
+    '<path d="M24 5a19 19 0 0 1 15.6 29.8" stroke="url(#gpArc)" stroke-width="5" stroke-linecap="round"/>'
+    '<circle cx="24" cy="24" r="5.5" fill="#2dd4bf"/>'
+    '<path d="M24 24L33 15" stroke="#f4f6fb" stroke-width="3" stroke-linecap="round"/>'
+    '<defs><linearGradient id="gpArc" x1="24" y1="5" x2="40" y2="35" gradientUnits="userSpaceOnUse">'
+    '<stop stop-color="#5b8def"/><stop offset="1" stop-color="#2dd4bf"/>'
+    "</linearGradient></defs></svg>"
+)
+
+
+def tela_carregando(texto: str, pct: int | None = None, coberta: bool = True) -> str:
+    """Carregando com a marca. Sem pct a barra corre sozinha, indeterminada.
+
+    So passar numero quando ele significar alguma coisa: uma porcentagem
+    inventada mente sobre quanto falta, e a aba Progresso demora o bastante
+    para isso irritar.
+    """
+    if pct is None:
+        barra = '<div class="gpl-fill gpl-indet"></div>'
+    else:
+        barra = f'<div class="gpl-fill" style="width:{pct}%;"></div>'
+    return (
+        f'<div class="gpl {"gpl-cheia" if coberta else ""}">'
+        f'<div class="gpl-mark">{LOGO_SVG}</div>'
+        '<div class="gpl-nome">Gplan</div>'
+        f'<div class="gpl-txt">{esc(texto)}</div>'
+        f'<div class="gpl-track">{barra}</div></div>'
+    )
 
 
 def lembrado(widget, chave: str, *args, **kwargs):
@@ -564,6 +597,25 @@ def inject_css():
         .arv-n3 > summary { padding:10px 14px; }
         .arv-tags { padding:2px 0 4px; }
 
+        /* Carregando. Acima do modal (1000000) e da sidebar (999991), senao a
+           tela de carga aparece por baixo da navegacao. */
+        .gpl { display:flex; flex-direction:column; align-items:center; justify-content:center;
+               gap:14px; padding:54px 20px; }
+        .gpl-cheia { position:fixed; inset:0; z-index:1000001; background:var(--dark-bg); }
+        .gpl-mark { width:58px; height:58px; animation:gpl-bate 1.5s ease-in-out infinite; }
+        .gpl-mark svg { width:100%; height:100%; }
+        @keyframes gpl-bate { 0%,100% { opacity:0.5; transform:scale(0.93); }
+                              50%     { opacity:1;   transform:scale(1); } }
+        .gpl-nome { font-size:18px; font-weight:800; color:var(--text-1); letter-spacing:-0.4px; }
+        .gpl-txt { font-size:12.5px; color:var(--text-2); min-height:16px; }
+        .gpl-track { width:250px; height:6px; border-radius:4px; overflow:hidden;
+                     background:rgba(255,255,255,0.08); }
+        .gpl-fill { height:100%; border-radius:4px; transition:width 260ms ease;
+                    background:linear-gradient(90deg,#5b8def,#2dd4bf); }
+        /* sem etapa conhecida a barra corre de ponta a ponta, sem fingir % */
+        .gpl-indet { width:40%; animation:gpl-corre 1.15s ease-in-out infinite; }
+        @keyframes gpl-corre { 0% { margin-left:-40%; } 100% { margin-left:100%; } }
+
         /* graficos de "mais avancados" em grid 2x2: as linhas do grid tem
            altura uniforme, entao as colunas nunca desalinham. */
         /* align-items:start deixa cada card com a altura do seu conteudo; com
@@ -766,6 +818,39 @@ def data_atualizacao(cache_key: str) -> str:
         return ts.tz_convert(BR_TZ).strftime("%d/%m/%Y %H:%M")
     except Exception:
         return "—"
+
+
+@contextmanager
+def carregando(texto: str):
+    """Cobre a tela enquanto a aba monta, e descobre no fim.
+
+    O Streamlit desenha de cima para baixo, entao sem isso a pagina aparece em
+    pedacos por varios segundos. A cobertura sai no finally: se a montagem
+    quebrar, o erro tem que ficar visivel em vez de uma tela de carga eterna.
+
+    Guardada em session_state, e nao numa global: o processo atende varias
+    sessoes ao mesmo tempo e uma nao pode escrever na tela da outra.
+    """
+    capa = st.empty()
+    capa.markdown(tela_carregando(texto), unsafe_allow_html=True)
+    st.session_state["_capa"] = capa
+    try:
+        yield
+    finally:
+        descobrir()
+
+
+def descobrir():
+    """Tira a tela de carga. Pode ser chamada mais de uma vez."""
+    capa = st.session_state.pop("_capa", None)
+    if capa is not None:
+        capa.empty()
+
+
+def _sob_carga(texto: str, montar):
+    """Roda a montagem da aba por tras da tela de carga."""
+    with carregando(texto):
+        montar()
 
 
 def render_header(title: str, extra_pill: str | None = None):
@@ -1549,6 +1634,10 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     render_html(_totais(df))
     _graficos(df)
 
+    # Filtros, totais e graficos ja estao na tela: a cobertura sai aqui e a
+    # espera pela arvore passa a ser mostrada no lugar dela, la embaixo.
+    descobrir()
+
     # Os 66 SOPs numa pagina so, com todas as fichas junto: e o que permite
     # abrir SOP, SSOP, malha e TAG sobre a pagina, sem navegar.
     #
@@ -1559,13 +1648,29 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     # e as outras quatro seguem funcionando.
     pag, df_pag = 0, df
 
-    render_html_pesado(
+    # A barra fica no lugar onde a arvore vai nascer, e cada etapa e uma etapa
+    # de verdade -- nada de porcentagem inventada. No fim a propria arvore
+    # substitui a barra, entao a pagina nao pisca nem salta.
+    lugar = st.empty()
+    n = br_num(len(df_pag))
+
+    lugar.markdown(tela_carregando(f"Montando a árvore de {n} instrumentos", 20,
+                                   coberta=False), unsafe_allow_html=True)
+    arvore = arvore_html(cache_key, f_seg, f_malha, pag, df_pag)
+
+    lugar.markdown(tela_carregando("Preparando as fichas de SOP, SSOP e malha", 55,
+                                   coberta=False), unsafe_allow_html=True)
+    niveis = fichas_niveis_html(cache_key, f_seg, f_malha, pag, df_pag)
+
+    lugar.markdown(tela_carregando(f"Preparando as fichas das {n} TAGs", 80,
+                                   coberta=False), unsafe_allow_html=True)
+    fichas = fichas_tags_html(cache_key, f_seg, f_malha, pag,
+                              df_pag["TAG"].tolist(), resumo, esperados, tags)
+
+    lugar.html(
         '<div class="gplan-panel">'
         '<div class="gplan-panel-title">SOP · SSOP · MALHA · TAG</div>'
-        f'<div class="arvore">{arvore_html(cache_key, f_seg, f_malha, pag, df_pag)}</div></div>'
-        + fichas_niveis_html(cache_key, f_seg, f_malha, pag, df_pag)
-        + fichas_tags_html(cache_key, f_seg, f_malha, pag,
-                           df_pag["TAG"].tolist(), resumo, esperados, tags)
+        f'<div class="arvore">{arvore}</div></div>' + niveis + fichas
     )
 
 
@@ -1935,11 +2040,11 @@ def main():
             "</div></div>"
         )
 
-    dashboard_page = st.Page(lambda: render_dashboard(resumo, esperados, tags), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
-    relatorios_page = st.Page(lambda: render_relatorios(esperados, resumo, tags), title="Relatórios", icon=":material/description:", url_path="relatorios")
-    progresso_page = st.Page(lambda: render_progresso(resumo, esperados, tags, cache_key), title="Progresso", icon=":material/insights:", url_path="progresso")
-    pesquisa_page = st.Page(lambda: render_pesquisa_tag(resumo, esperados, tags), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
-    sigem_page = st.Page(lambda: render_sigem(sigem), title="Base SIGEM", icon=":material/database:", url_path="sigem")
+    dashboard_page = st.Page(lambda: _sob_carga("Carregando o painel", lambda: render_dashboard(resumo, esperados, tags)), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
+    relatorios_page = st.Page(lambda: _sob_carga("Carregando os relatórios", lambda: render_relatorios(esperados, resumo, tags)), title="Relatórios", icon=":material/description:", url_path="relatorios")
+    progresso_page = st.Page(lambda: _sob_carga("Abrindo o Progresso", lambda: render_progresso(resumo, esperados, tags, cache_key)), title="Progresso", icon=":material/insights:", url_path="progresso")
+    pesquisa_page = st.Page(lambda: _sob_carga("Carregando as tags", lambda: render_pesquisa_tag(resumo, esperados, tags)), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
+    sigem_page = st.Page(lambda: _sob_carga("Carregando a base SIGEM", lambda: render_sigem(sigem)), title="Base SIGEM", icon=":material/database:", url_path="sigem")
 
     nav = st.navigation([dashboard_page, progresso_page, relatorios_page, pesquisa_page, sigem_page], position="sidebar")
     nav.run()
