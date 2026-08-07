@@ -24,6 +24,19 @@ def render_html(html: str):
     st.markdown("\n".join(line.strip() for line in html.strip().split("\n")), unsafe_allow_html=True)
 
 
+def render_html_pesado(html: str):
+    """Para os blocos grandes: o st.markdown passa a string inteira por um
+    parser de Markdown antes de virar HTML, e com os 24,8 MB da arvore da aba
+    Progresso a pagina simplesmente nunca terminava de abrir. O st.html insere
+    direto -- 13 s no lugar de mais de 10 minutos.
+
+    So serve para bloco sem <style> e sem <svg>: o st.html descarta os dois.
+    O donut do Status SIGEM e os icones dos cards, por exemplo, precisam
+    continuar no render_html.
+    """
+    st.html(html)
+
+
 STATUS_DISPLAY_MAP = {
     "NAO POSTADO": "Não postado",
     "Sem Comentários": "Sem comentários",
@@ -1506,14 +1519,10 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     render_html(_totais(df))
     _graficos(df)
 
-    # Todas as fichas da pagina vao no HTML, para abrirem por :target sem
-    # navegar. Dai a paginacao: os 66 SOPs de uma vez dao 24,8 MB e 1,77 milhao
-    # de elementos, que nenhum navegador monta -- medido, nao estimado.
-    paginas = paginar_sops(df)
-    pag = _controles_pagina(len(paginas), df)
-    df_pag = df[df.SOP.isin(paginas[pag])]
+    # Os 66 SOPs numa pagina so, com todas as fichas junto.
+    pag, df_pag = 0, df
 
-    render_html(
+    render_html_pesado(
         '<div class="gplan-panel">'
         '<div class="gplan-panel-title">SOP · SSOP · MALHA · TAG</div>'
         f'<div class="arvore">{arvore_html(cache_key, f_seg, f_malha, pag, df_pag)}</div></div>'
