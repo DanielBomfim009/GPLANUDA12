@@ -50,10 +50,11 @@ def tela_carregando(texto: str, pct: int | None = None, coberta: bool = True) ->
         barra = f'<div class="gpl-fill" style="width:{pct}%;"></div>'
     return (
         f'<div class="gpl {"gpl-cheia" if coberta else ""}">'
+        '<div class="gpl-corpo">'
         f'<div class="gpl-mark">{LOGO_SVG}</div>'
         '<div class="gpl-nome">Gplan</div>'
         f'<div class="gpl-txt">{esc(texto)}</div>'
-        f'<div class="gpl-track">{barra}</div></div>'
+        f'<div class="gpl-track">{barra}</div></div></div>'
     )
 
 
@@ -602,6 +603,14 @@ def inject_css():
         .gpl { display:flex; flex-direction:column; align-items:center; justify-content:center;
                gap:14px; padding:54px 20px; }
         .gpl-cheia { position:fixed; inset:0; z-index:1000001; background:var(--dark-bg); }
+        /* O fundo entra na hora, a marca e a barra so depois. Numa troca de
+           aba rapida a cobertura ja saiu antes disso, entao o que se ve e um
+           escurecer breve em vez de logo e barra piscando. E a entrada e
+           lenta de proposito: se a pagina ficar pronta no meio, o elemento
+           aparece a meio caminho em vez de dar um flash. */
+        .gpl-corpo { display:flex; flex-direction:column; align-items:center; gap:14px;
+                     opacity:0; animation:gpl-surge 420ms ease-out 380ms forwards; }
+        @keyframes gpl-surge { to { opacity:1; } }
         .gpl-mark { width:58px; height:58px; animation:gpl-bate 1.5s ease-in-out infinite; }
         .gpl-mark svg { width:100%; height:100%; }
         @keyframes gpl-bate { 0%,100% { opacity:0.5; transform:scale(0.93); }
