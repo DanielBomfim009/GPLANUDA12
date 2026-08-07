@@ -1519,8 +1519,12 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     render_html(_totais(df))
     _graficos(df)
 
-    # Os 66 SOPs numa pagina so, com todas as fichas junto.
-    pag, df_pag = 0, df
+    # Uma pagina so com os 66 SOPs derruba o servico: 24,8 MB de HTML mais as
+    # bases em memoria passam dos 512 MB da instancia e o processo e morto --
+    # o navegador recebe 502. Enquanto o plano nao mudar, paginado.
+    paginas = paginar_sops(df)
+    pag = _controles_pagina(len(paginas), df)
+    df_pag = df[df.SOP.isin(paginas[pag])]
 
     render_html_pesado(
         '<div class="gplan-panel">'
