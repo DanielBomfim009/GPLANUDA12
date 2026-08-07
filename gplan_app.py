@@ -1199,6 +1199,12 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
     search = st.text_input("Pesquisar", placeholder="Digite a tag para ver a ficha completa (ex: AIT-120005)...", label_visibility="collapsed")
 
     list_df = resumo[["TAG", "DESCRICAO", "GRUPO_REGRA", "ITEM_PPU", "RELATORIOS_ESPERADOS", "AVANCO_DOCUMENTAL"]].copy()
+    # o status de campo mora na 01_BASE_TAGS, nao no resumo. Planilha antiga
+    # nao tem essas colunas: sem o merge a pill so mostra tracinho.
+    campo = [c for c in ("STATUS_LOCALIZACAO", "STATUS_CALIBRACAO", "STATUS_MONTAGEM",
+                         "STATUS_FINAL") if c in tags.columns]
+    if campo:
+        list_df = list_df.merge(tags[["TAG"] + campo], on="TAG", how="left")
     if search:
         mask = list_df["TAG"].astype(str).str.contains(search, case=False, na=False) | list_df["DESCRICAO"].astype(str).str.contains(search, case=False, na=False)
         list_df = list_df[mask]
@@ -1219,12 +1225,17 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
               <td class="gtbl-num gtbl-muted">{esc(r['ITEM_PPU'])}</td>
               <td class="gtbl-num">{int(r['RELATORIOS_ESPERADOS'])}</td>
               <td class="gtbl-num"><span class="gtbl-badge {tone}">{br_pct(avanco)}</span></td>
+              <td class="gtbl-num">{status_pill(r.get('STATUS_LOCALIZACAO'))}</td>
+              <td class="gtbl-num">{status_pill(r.get('STATUS_CALIBRACAO'))}</td>
+              <td class="gtbl-num">{status_pill(r.get('STATUS_MONTAGEM'))}</td>
+              <td class="gtbl-num">{status_pill(r.get('STATUS_FINAL'))}</td>
             </tr>
         """
     render_html(
         '<div class="gplan-panel">'
         + html_table(
-            ["Tag", "Descrição", "Tipo", "#PPU", "#Relatórios", "#Avanço"],
+            ["Tag", "Descrição", "Tipo", "#PPU", "#Relatórios", "#Avanço",
+             "#Localização", "#Calibração", "#Montagem", "#Status final"],
             rows,
             "Nenhuma tag encontrada para essa busca.",
         )
