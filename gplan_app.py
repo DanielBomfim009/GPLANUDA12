@@ -24,6 +24,30 @@ def render_html(html: str):
     st.markdown("\n".join(line.strip() for line in html.strip().split("\n")), unsafe_allow_html=True)
 
 
+def lembrado(widget, chave: str, *args, **kwargs):
+    """Filtro que sobrevive a troca de aba.
+
+    O Streamlit descarta o estado de um widget quando a pagina que o criou sai
+    de cena: filtrar na Pesquisa tag, ir para a Base SIGEM e voltar devolvia o
+    campo vazio. Aqui o valor tambem fica numa chave propria, que a navegacao
+    nao limpa, e o widget e reconstruido a partir dela.
+    """
+    guardado = st.session_state.get(f"mem_{chave}")
+    if guardado is not None:
+        # args = (rotulo, opcoes): a lista e o segundo, nao o primeiro
+        opcoes = list(args[1]) if len(args) > 1 else list(kwargs.get("options", []))
+        if widget is st.selectbox:
+            if guardado in opcoes:
+                kwargs["index"] = opcoes.index(guardado)
+        elif widget is st.multiselect:
+            kwargs["default"] = [v for v in guardado if v in opcoes]
+        else:
+            kwargs["value"] = guardado
+    valor = widget(*args, key=chave, **kwargs)
+    st.session_state[f"mem_{chave}"] = valor
+    return valor
+
+
 def render_html_pesado(html: str):
     """Para os blocos grandes: o st.markdown passa a string inteira por um
     parser de Markdown antes de virar HTML, e com os 24,8 MB da arvore da aba
@@ -425,6 +449,8 @@ def inject_css():
         .gtbl-badge.crit { color:#fca5a5; background:rgba(248,113,113,0.16); border:1px solid rgba(248,113,113,0.28); }
         .gtbl-badge.warn { color:#fcd34d; background:rgba(251,191,36,0.14); border:1px solid rgba(251,191,36,0.26); }
         .gtbl-badge.ok   { color:#6ee7d0; background:rgba(45,212,191,0.13); border:1px solid rgba(45,212,191,0.24); }
+        /* etapa do caminho, nao alerta: azul, a mesma familia da pill de TAG */
+        .gtbl-badge.andamento { color:#a9c5ff; background:rgba(91,141,239,0.14); border:1px solid rgba(91,141,239,0.26); }
         .gtbl-empty { padding:34px 4px; text-align:center; color:var(--text-3); font-size:13px; }
         .prg-trilha { font-size:12.5px; color:var(--text-2); margin-bottom:18px; }
         .prg-sep { color:var(--text-3); margin:0 2px; }
@@ -1076,16 +1102,16 @@ def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.Da
 
     consume_url_filters(esperados)
 
-    search = st.text_input("Pesquisar", placeholder="Pesquisar por tag, descrição, relatório, documento, status...", label_visibility="collapsed")
+    search = lembrado(st.text_input, "rel_busca", "Pesquisar", placeholder="Pesquisar por tag, descrição, relatório, documento, status...", label_visibility="collapsed")
 
     status_options = sorted({sentence_case(s) for s in esperados["STATUS_SIGEM"].dropna().unique()})
     col_rel, col_sts = st.columns(2)
     with col_rel:
-        sel_rel = st.multiselect("Tipo de relatório", REPORT_LABELS, key="flt_rel",
-                                 placeholder="Todos os relatórios")
+        sel_rel = lembrado(st.multiselect, "flt_rel", "Tipo de relatório", REPORT_LABELS,
+                           placeholder="Todos os relatórios")
     with col_sts:
-        sel_sts = st.multiselect("Status SIGEM", status_options, key="flt_status",
-                                 placeholder="Todos os status")
+        sel_sts = lembrado(st.multiselect, "flt_status", "Status SIGEM", status_options,
+                           placeholder="Todos os status")
 
     if sel_rel:
         df = filter_by_report_labels(df, sel_rel)
@@ -1244,7 +1270,7 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
                     + "</div>")
         return
 
-    search = st.text_input("Pesquisar", placeholder="Digite a tag para ver a ficha completa (ex: AIT-120005)...", label_visibility="collapsed")
+    search = lembrado(st.text_input, "pesq_busca", "Pesquisar", placeholder="Digite a tag para ver a ficha completa (ex: AIT-120005)...", label_visibility="collapsed")
 
     list_df = resumo[["TAG", "DESCRICAO", "GRUPO_REGRA", "ITEM_PPU", "RELATORIOS_ESPERADOS", "AVANCO_DOCUMENTAL"]].copy()
     # o status de campo mora na 01_BASE_TAGS, nao no resumo. Planilha antiga
@@ -1297,9 +1323,9 @@ def render_sigem(sigem: pd.DataFrame):
     status_options = ["Todos"] + sorted(sigem["STATUS"].dropna().unique().tolist())
     col1, col2 = st.columns([1, 3])
     with col1:
-        status_filter = st.selectbox("Status", status_options)
+        status_filter = lembrado(st.selectbox, "sig_status", "Status", status_options)
     with col2:
-        text_search = st.text_input("Pesquisa de texto", placeholder="Buscar em qualquer campo do documento...")
+        text_search = lembrado(st.text_input, "sig_busca", "Pesquisa de texto", placeholder="Buscar em qualquer campo do documento...")
 
     df = sigem.copy()
     if status_filter != "Todos":
@@ -1512,9 +1538,9 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     malhas = ["Todas"] + sorted({m for m in df.MALHA if not vazio(m)})
     c1, c2 = st.columns(2)
     with c1:
-        f_seg = st.selectbox("Segmento", segs, key="prg_seg")
+        f_seg = lembrado(st.selectbox, "prg_seg", "Segmento", segs)
     with c2:
-        f_malha = st.selectbox("Malha", malhas, key="prg_malha")
+        f_malha = lembrado(st.selectbox, "prg_malha", "Malha", malhas)
     if f_seg != "Todos":
         df = df[df.SEGMENTO == f_seg]
     if f_malha != "Todas":
@@ -1735,16 +1761,37 @@ def _tabela_niveis(sub: pd.DataFrame, coluna: str, subnivel: str = None) -> str:
     return html_table(cab, "".join(linhas), f"Nenhum {rotulo.lower()}.")
 
 
+# Os estados de campo, classificados pelo que significam. Antes so existiam
+# "bom" e "ruim", e todo o resto caia em ambar -- o que punha "EM COMPRA",
+# "EM REPARO" e os 4.637 "Nao Programado" com cara de alerta. Nenhum deles e
+# problema: sao etapas do caminho.
+STATUS_BONS = {"LOCALIZADO", "APROVADO", "MONTADO", "CALIBRADO", "SIM", "APTO"}
+STATUS_ANDAMENTO = {"ON DEMAND", "EM COMPRA", "EM REPARO", "CALIBRAR",
+                    "EM PROGRAMAÇÃO", "EM PROGRAMACAO", "NÃO PROGRAMADO",
+                    "NAO PROGRAMADO", "ALMOXARIFADO CONSAG"}
+STATUS_RUINS = {"NAO LOCALIZADO", "NÃO LOCALIZADO", "REPROVADO", "NAO MONTADO",
+                "NÃO MONTADO", "CANCELADO", "REMOVER", "NAO APTO", "NÃO APTO"}
+
+
 def status_pill(v: object) -> str:
-    """Status de campo com cor por natureza (bom / atencao / ruim)."""
+    """Status de campo colorido pelo que significa.
+
+    O ambar ficou reservado para valor que nao esta em nenhuma das listas: se
+    a base ganhar um estado novo, ele aparece em destaque em vez de se
+    confundir com os que ja foram classificados.
+    """
     if vazio(v):
         return '<span class="gtbl-muted">—</span>'
     t = str(v).strip()
     n = t.upper()
-    bons = {"LOCALIZADO", "APROVADO", "MONTADO", "CALIBRADO", "SIM", "APTO"}
-    ruins = {"NAO LOCALIZADO", "NÃO LOCALIZADO", "REPROVADO", "NAO MONTADO",
-             "NÃO MONTADO", "CANCELADO", "NAO APTO", "NÃO APTO"}
-    tom = "ok" if n in bons else ("crit" if n in ruins else "warn")
+    if n in STATUS_BONS:
+        tom = "ok"
+    elif n in STATUS_ANDAMENTO:
+        tom = "andamento"
+    elif n in STATUS_RUINS:
+        tom = "crit"
+    else:
+        tom = "warn"
     return f'<span class="gtbl-badge {tom}">{esc(t)}</span>'
 
 
