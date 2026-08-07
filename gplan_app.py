@@ -1,6 +1,7 @@
 import io
 import math
 import os
+import time
 from contextlib import contextmanager
 from urllib.parse import quote
 
@@ -37,19 +38,36 @@ LOGO_SVG = (
 )
 
 
-def tela_carregando(texto: str, pct: int | None = None, coberta: bool = True) -> str:
+# A transicao inteira leva isso, mesmo quando o trabalho acaba antes. Sem o
+# minimo a tela pisca e some no mesmo movimento, o que se le como falha e nao
+# como carregamento -- e as abas em cache ficam prontas em menos de 100 ms.
+CARGA_MINIMA = 0.85
+
+
+def tela_carregando(texto: str, pct: int | None = None, coberta: bool = True,
+                    vidro: bool = False, saindo: bool = False) -> str:
     """Carregando com a marca. Sem pct a barra corre sozinha, indeterminada.
 
     So passar numero quando ele significar alguma coisa: uma porcentagem
     inventada mente sobre quanto falta, e a aba Progresso demora o bastante
     para isso irritar.
+
+    `vidro` desfoca o que esta atras em vez de tapar com cor solida: serve
+    para filtro e troca de aba, onde ja existe conteudo na tela e sumir com
+    ele daria a sensacao de recomecar do zero. Fundo solido fica para a
+    primeira abertura, quando nao ha nada atras mesmo.
     """
     if pct is None:
         barra = '<div class="gpl-fill gpl-indet"></div>'
     else:
         barra = f'<div class="gpl-fill" style="width:{pct}%;"></div>'
+    classes = "gpl"
+    if coberta:
+        classes += " gpl-vidro" if vidro else " gpl-cheia"
+    if saindo:
+        classes += " gpl-saindo"
     return (
-        f'<div class="gpl {"gpl-cheia" if coberta else ""}">'
+        f'<div class="{classes}">'
         '<div class="gpl-corpo">'
         f'<div class="gpl-mark">{LOGO_SVG}</div>'
         '<div class="gpl-nome">Gplan</div>'
@@ -602,14 +620,22 @@ def inject_css():
            tela de carga aparece por baixo da navegacao. */
         .gpl { display:flex; flex-direction:column; align-items:center; justify-content:center;
                gap:14px; padding:54px 20px; }
-        .gpl-cheia { position:fixed; inset:0; z-index:1000001; background:var(--dark-bg); }
-        /* O fundo entra na hora, a marca e a barra so depois. Numa troca de
-           aba rapida a cobertura ja saiu antes disso, entao o que se ve e um
-           escurecer breve em vez de logo e barra piscando. E a entrada e
-           lenta de proposito: se a pagina ficar pronta no meio, o elemento
-           aparece a meio caminho em vez de dar um flash. */
+        .gpl-cheia, .gpl-vidro {
+          position:fixed; inset:0; z-index:1000001;
+          animation:gpl-entra 220ms ease-out;
+        }
+        .gpl-cheia { background:var(--dark-bg); }
+        /* desfoca em vez de tapar: a tela anterior continua ali atras, entao a
+           troca parece continuacao e nao um recomeco do zero */
+        .gpl-vidro { background:rgba(10,14,26,0.72); backdrop-filter:blur(7px);
+                     -webkit-backdrop-filter:blur(7px); }
+        @keyframes gpl-entra { from { opacity:0; } to { opacity:1; } }
+        /* Sai dissolvendo. Remover o elemento o apagaria num quadro so, que e
+           exatamente o corte seco. Fica invisivel e sem captar clique. */
+        .gpl-saindo { animation:gpl-sai 420ms ease-in forwards; pointer-events:none; }
+        @keyframes gpl-sai { from { opacity:1; } to { opacity:0; visibility:hidden; } }
         .gpl-corpo { display:flex; flex-direction:column; align-items:center; gap:14px;
-                     opacity:0; animation:gpl-surge 420ms ease-out 380ms forwards; }
+                     opacity:0; animation:gpl-surge 300ms ease-out 130ms forwards; }
         @keyframes gpl-surge { to { opacity:1; } }
         .gpl-mark { width:58px; height:58px; animation:gpl-bate 1.5s ease-in-out infinite; }
         .gpl-mark svg { width:100%; height:100%; }
@@ -840,9 +866,14 @@ def carregando(texto: str):
     Guardada em session_state, e nao numa global: o processo atende varias
     sessoes ao mesmo tempo e uma nao pode escrever na tela da outra.
     """
+    # primeira abertura da sessao tapa com cor; dai em diante desfoca o que ja
+    # esta na tela, para a troca parecer continuacao e nao recomeco
+    vidro = st.session_state.get("_ja_abriu", False)
+    st.session_state["_ja_abriu"] = True
+
     capa = st.empty()
-    capa.markdown(tela_carregando(texto), unsafe_allow_html=True)
-    st.session_state["_capa"] = capa
+    capa.markdown(tela_carregando(texto, vidro=vidro), unsafe_allow_html=True)
+    st.session_state["_capa"] = (capa, texto, vidro, time.monotonic())
     try:
         yield
     finally:
@@ -850,10 +881,21 @@ def carregando(texto: str):
 
 
 def descobrir():
-    """Tira a tela de carga. Pode ser chamada mais de uma vez."""
-    capa = st.session_state.pop("_capa", None)
-    if capa is not None:
-        capa.empty()
+    """Dissolve a tela de carga. Pode ser chamada mais de uma vez.
+
+    Nao usa empty(): remover o elemento o faz sumir num quadro, que e o corte
+    seco. Aqui ele e trocado por uma copia que se apaga sozinha e fica
+    invisivel e sem captar clique.
+    """
+    guardado = st.session_state.pop("_capa", None)
+    if guardado is None:
+        return
+    capa, texto, vidro, inicio = guardado
+    falta = CARGA_MINIMA - (time.monotonic() - inicio)
+    if falta > 0:
+        time.sleep(falta)
+    capa.markdown(tela_carregando(texto, vidro=vidro, saindo=True),
+                  unsafe_allow_html=True)
 
 
 def _sob_carga(texto: str, montar):
