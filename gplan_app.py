@@ -532,7 +532,6 @@ def inject_css():
         .arv-n3 > .arv-linha { padding:10px 14px; }
         .arv-n3 > summary { padding:10px 14px; }
         .arv-tags { padding:2px 0 4px; }
-        .prg-pag { text-align:center; font-size:12.5px; color:var(--text-2); padding:9px 0; }
 
         /* graficos de "mais avancados" em grid 2x2: as linhas do grid tem
            altura uniforme, entao as colunas nunca desalinham. */
@@ -1519,12 +1518,15 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     render_html(_totais(df))
     _graficos(df)
 
-    # Uma pagina so com os 66 SOPs derruba o servico: 24,8 MB de HTML mais as
-    # bases em memoria passam dos 512 MB da instancia e o processo e morto --
-    # o navegador recebe 502. Enquanto o plano nao mudar, paginado.
-    paginas = paginar_sops(df)
-    pag = _controles_pagina(len(paginas), df)
-    df_pag = df[df.SOP.isin(paginas[pag])]
+    # Os 66 SOPs numa pagina so, com todas as fichas junto: e o que permite
+    # abrir SOP, SSOP, malha e TAG sobre a pagina, sem navegar.
+    #
+    # Isso exige RAM que o plano gratuito nao tem. Medido: 880 MB para um
+    # usuario, 1.275 MB para dois, contra os 512 MB da instancia -- o processo
+    # e morto no meio da resposta e o navegador recebe 502. Ligado assim por
+    # decisao do Daniel, que vai contratar o plano; ate la a aba fica fora do ar
+    # e as outras quatro seguem funcionando.
+    pag, df_pag = 0, df
 
     render_html_pesado(
         '<div class="gplan-panel">'
@@ -1556,60 +1558,6 @@ def fichas_tags_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
     """As fichas das 5.098 TAGs. Cada uma varre a 08_RELATORIOS_ESPERADOS, por
     isso o cache -- sem ele isso se repetia a cada clique."""
     return fichas_modais_html(_ids, _resumo, _esperados, _tags)
-
-
-# Com as fichas enxutas cabe mais por pagina. Acima disso o navegador comeca
-# a engasgar: os 66 SOPs juntos dao 1,77 milhao de elementos e nao renderizam.
-TAGS_POR_PAGINA = 800
-
-
-def paginar_sops(df: pd.DataFrame) -> list:
-    """Divide os SOPs em paginas de ~800 TAGs, sem quebrar um SOP ao meio.
-
-    Nao da para paginar por quantidade de SOP: eles sao muito desiguais -- os
-    4 maiores sozinhos juntam 1.290 das 5.098 TAGs.
-
-    O balde "sem SOP" vai para o fim. Sao 1.209 TAGs sem hierarquia, o que ja
-    estoura o limite sozinho: ordenado por nome ele cai em "-", fica com a
-    primeira pagina inteira, e quem abre a aba encontra uma linha so.
-    """
-    tamanhos = df.groupby("SOP").size()
-    ordem = sorted(tamanhos.index, key=lambda s: (vazio(s), str(s)))
-
-    paginas, atual, soma = [], [], 0
-    for sop in ordem:
-        n = int(tamanhos[sop])
-        if atual and soma + n > TAGS_POR_PAGINA:
-            paginas.append(atual)
-            atual, soma = [], 0
-        atual.append(sop)
-        soma += n
-    if atual:
-        paginas.append(atual)
-    return paginas or [[]]
-
-
-def _controles_pagina(total: int, df: pd.DataFrame) -> int:
-    """Anterior / Proxima da arvore. Devolve o indice da pagina atual."""
-    if total <= 1:
-        return 0
-    chave = "prg_pagina"
-    pag = min(st.session_state.get(chave, 0), total - 1)
-    c1, c2, c3 = st.columns([1, 2, 1])
-    with c1:
-        if st.button("← Anterior", use_container_width=True,
-                     disabled=pag == 0, key="prg_ant"):
-            st.session_state[chave] = pag - 1
-            st.rerun()
-    with c3:
-        if st.button("Próxima →", use_container_width=True,
-                     disabled=pag >= total - 1, key="prg_prox"):
-            st.session_state[chave] = pag + 1
-            st.rerun()
-    with c2:
-        render_html(f'<div class="prg-pag">Página {pag + 1} de {total} · '
-                    f'{br_num(len(df))} instrumentos no recorte</div>')
-    return pag
 
 
 def _totais(df: pd.DataFrame) -> str:
