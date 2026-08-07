@@ -1568,9 +1568,17 @@ def paginar_sops(df: pd.DataFrame) -> list:
 
     Nao da para paginar por quantidade de SOP: eles sao muito desiguais -- os
     4 maiores sozinhos juntam 1.290 das 5.098 TAGs.
+
+    O balde "sem SOP" vai para o fim. Sao 1.209 TAGs sem hierarquia, o que ja
+    estoura o limite sozinho: ordenado por nome ele cai em "-", fica com a
+    primeira pagina inteira, e quem abre a aba encontra uma linha so.
     """
+    tamanhos = df.groupby("SOP").size()
+    ordem = sorted(tamanhos.index, key=lambda s: (vazio(s), str(s)))
+
     paginas, atual, soma = [], [], 0
-    for sop, n in df.groupby("SOP").size().items():
+    for sop in ordem:
+        n = int(tamanhos[sop])
         if atual and soma + n > TAGS_POR_PAGINA:
             paginas.append(atual)
             atual, soma = [], 0
