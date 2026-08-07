@@ -737,6 +737,12 @@ def br_num(value: int) -> str:
     return f"{value:,}".replace(",", ".")
 
 
+def br_pct(value: float, casas: int = 1) -> str:
+    """Porcentagem com virgula. So para texto lido na tela -- largura de barra
+    em CSS continua com ponto, senao o navegador descarta a regra."""
+    return f"{value:.{casas}f}%".replace(".", ",")
+
+
 def status_panel(labels: list, values: list, colors: list, total: int) -> str:
     """Painel 'Status SIGEM' inteiro como um unico bloco HTML: donut em SVG puro
     + legenda com os valores alinhados a direita. Precisa ser um bloco so, porque
@@ -871,7 +877,7 @@ def top10_panel(top10: pd.DataFrame) -> str:
         pendentes = int(r["RELATORIOS_PENDENTES"])
         esperados = int(r["RELATORIOS_ESPERADOS"])
         emitidos = int(r["RELATORIOS_POSTADOS"])
-        conclusao = f"{r['AVANCO_DOCUMENTAL'] * 100:.1f}%".replace(".", ",").replace(",0%", "%")
+        conclusao = br_pct(r['AVANCO_DOCUMENTAL'] * 100).replace(",0%", "%")
         ratio = (pendentes / esperados) if esperados else 0
         tone = "crit" if ratio >= 0.8 else ("warn" if ratio >= 0.4 else "ok")
         rows += f"""
@@ -895,7 +901,7 @@ def top10_panel(top10: pd.DataFrame) -> str:
 
 
 def kpi_card(label: str, value: str, sub: str, pct: float, color: str, icon: str) -> str:
-    pct_display = f"{pct * 100:.1f}%".replace(".", ",")
+    pct_display = br_pct(pct * 100)
     width = max(0.0, min(pct, 1.0)) * 100
     icon_svg = KPI_ICONS.get(icon, "")
     return f"""
@@ -935,7 +941,7 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
          (total_pendentes / total_esperados) if total_esperados else 0, "#f87171", "clock"),
         ("Emitidos SIGEM", f"{total_emitidos:,}".replace(",", "."), "Com status localizado",
          avanco_geral, "#fbbf24", "archive"),
-        ("Avanço geral", f"{avanco_geral * 100:.1f}%".replace(".", ","), "Progressão do projeto",
+        ("Avanço geral", br_pct(avanco_geral * 100), "Progressão do projeto",
          avanco_geral, "#9d6bff", "trend"),
     ]
     for col, (label, value, sub, pct, color, icon) in zip(cols, kpis):
@@ -962,12 +968,15 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
             pct = (emitido / esperado * 100) if esperado else 0
             tag = '<span class="doc-tag">doc/planta</span>' if unique_doc else ""
             href = f"/relatorios?rel={quote(label)}"
+            # nada de .replace(",", ".") no bloco inteiro: isso trocava o
+            # separador de milhar mas deixava o decimal em ponto (62.9%), e
+            # ainda pegaria qualquer virgula do href ou do title de tabela
             rows_html += f"""
                 <a class="rep-row" href="{href}" target="_self" title="Ver {label} em Relatórios">
-                  <div class="rep-label"><span class="rep-name">{label}{tag}</span><span class="rep-stat">{emitido:,}/{esperado:,} · {pct:.1f}%</span></div>
+                  <div class="rep-label"><span class="rep-name">{label}{tag}</span><span class="rep-stat">{br_num(emitido)}/{br_num(esperado)} · {br_pct(pct)}</span></div>
                   <div class="rep-track"><div class="rep-done" style="width:{pct:.1f}%;"></div><div class="rep-pending" style="width:{100-pct:.1f}%;"></div></div>
                 </a>
-            """.replace(",", ".")
+            """
         render_html(f'<div class="gplan-panel"><div class="gplan-panel-title">Esperado × emitido por relatório</div>{rows_html}</div>')
 
     with col_right:
@@ -990,7 +999,7 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     for _, row in grouped.iterrows():
         cards_html += f"""
             <div class="group-card-v2">
-              <div class="group-card-top"><span class="group-card-name">{row['GRUPO_REGRA'].title()}</span><span class="group-card-pct">{row['avanco']:.1f}%</span></div>
+              <div class="group-card-top"><span class="group-card-name">{row['GRUPO_REGRA'].title()}</span><span class="group-card-pct">{br_pct(row['avanco'])}</span></div>
               <div class="group-card-value">{br_num(int(row['tags']))} <span class="group-card-unit">tags</span></div>
               <div class="group-card-track"><div class="group-card-fill" style="width:{row['avanco']:.1f}%;"></div></div>
               <div class="group-card-nums"><span>{br_num(int(row['emitidos']))} emitidos</span><span>{br_num(int(row['esperados']))} esperados</span></div>
@@ -1115,7 +1124,7 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
         ("Relatórios esperados", int(r["RELATORIOS_ESPERADOS"])),
         ("Relatórios entregues", int(r["RELATORIOS_POSTADOS"])),
         ("Relatórios pendentes", int(r["RELATORIOS_PENDENTES"])),
-        ("Avanço", f"{r['AVANCO_DOCUMENTAL'] * 100:.1f}%".replace(".", ",")),
+        ("Avanço", br_pct(r['AVANCO_DOCUMENTAL'] * 100)),
         ("SOP", da_base("SOP")),
         ("SSOP", da_base("SSOP")),
         ("Segmento", da_base("SEGMENTO")),
@@ -1209,7 +1218,7 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
               <td class="gtbl-muted">{esc(str(r['GRUPO_REGRA']).title())}</td>
               <td class="gtbl-num gtbl-muted">{esc(r['ITEM_PPU'])}</td>
               <td class="gtbl-num">{int(r['RELATORIOS_ESPERADOS'])}</td>
-              <td class="gtbl-num"><span class="gtbl-badge {tone}">{f"{avanco:.1f}".replace(".", ",")}%</span></td>
+              <td class="gtbl-num"><span class="gtbl-badge {tone}">{br_pct(avanco)}</span></td>
             </tr>
         """
     render_html(
@@ -1380,7 +1389,7 @@ def grafico_avanco(titulo: str, g: pd.DataFrame, coluna: str,
             <div class="gr-row">
               <div class="gr-top">
                 <span class="gr-nome">{esc(r[coluna])}</span>
-                <span class="gr-pct">{f"{pct:.1f}".replace(".", ",")}%</span>
+                <span class="gr-pct">{br_pct(pct)}</span>
               </div>
               <div class="gr-track"><div class="gr-fill" style="width:{max(pct, 1.5):.1f}%;"></div></div>
               <div class="gr-sub">{quant} · prioridade {esc(r['prioridade'])}</div>
@@ -1502,7 +1511,7 @@ def _totais(df: pd.DataFrame) -> str:
         '<div class="prg-tot">'
         f'<div><span class="prg-tot-lbl">Instrumentos</span><span class="prg-tot-val">{br_num(len(df))}</span></div>'
         f'<div><span class="prg-tot-lbl">Completos</span><span class="prg-tot-val">{br_num(int(df["COMPLETA"].sum()))}</span></div>'
-        f'<div><span class="prg-tot-lbl">Avanço</span><span class="prg-tot-val">{f"{pct:.1f}".replace(".", ",")}%</span></div>'
+        f'<div><span class="prg-tot-lbl">Avanço</span><span class="prg-tot-val">{br_pct(pct)}</span></div>'
         f'<div><span class="prg-tot-lbl">Valor total</span><span class="prg-tot-val">{br_moeda(df["PRECO_UNITARIO"].sum())}</span></div>'
         f'<div><span class="prg-tot-lbl">Valor avançado</span><span class="prg-tot-val">{br_moeda(df["VALOR_AVANCADO"].sum())}</span></div>'
         "</div>"
@@ -1536,7 +1545,7 @@ def _no(tipo: str, nome: object, r, nivel: int, filhos: str = "",
         f'<span class="arv-num arv-val">{br_moeda(r["valor"])}</span>'
         '<span class="arv-avanco">'
         f'<span class="arv-track"><span class="arv-fill {tom}" style="width:{max(pct,1.5):.1f}%;"></span></span>'
-        f'<span class="arv-pct">{f"{pct:.1f}".replace(".", ",")}%</span></span>'
+        f'<span class="arv-pct">{br_pct(pct)}</span></span>'
     )
     # sem filhos nao ha o que expandir: a linha fica sem o "+"
     if not filhos:
@@ -1596,7 +1605,7 @@ def _modal_nivel(tipo: str, nome: object, sub: pd.DataFrame, rotulo_tipo: str) -
               </div>
               <div class="fn-avanco">
                 <div class="fn-track"><div class="fn-fill {tom}" style="width:{max(pct,1.5):.1f}%;"></div></div>
-                <div class="fn-pct">{f"{pct:.1f}".replace(".", ",")}%</div>
+                <div class="fn-pct">{br_pct(pct)}</div>
               </div>
               <a class="fmodal-x" href="/progresso" target="_self" aria-label="Fechar">&times;</a>
             </div>
@@ -1683,7 +1692,7 @@ def linhas_tags(sub: pd.DataFrame, com_modal: bool = True) -> pd.Series:
             f"<tr><td>{alvo}</td><td>{esc(desc)}</td>"
             f"<td>{pill_prioridade(prio)}</td>"
             f"<td>{int(emi)}/{int(esp)}</td>"
-            f'<td><span class="gtbl-badge {tom}">{f"{pct:.1f}".replace(".", ",")}%</span></td>'
+            f'<td><span class="gtbl-badge {tom}">{br_pct(pct)}</span></td>'
             f"<td>{status_pill(loc)}</td><td>{status_pill(cal)}</td><td>{status_pill(mon)}</td>"
             f"<td>{status_pill(fim)}</td>"
             f'<td class="gtbl-muted">{br_moeda(preco)}</td></tr>'
