@@ -8,3 +8,6 @@ font = "sans serif"
 
 [server]
 headless = true
+# Recarrega sozinho quando o codigo muda, em vez de perguntar "Source file
+# changed" e esperar clique. No Render nao muda nada: la o arquivo e fixo.
+runOnSave = true
