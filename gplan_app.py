@@ -852,9 +852,22 @@ def tag_link(value: object) -> str:
 def fichas_modais_html(tags_ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
                        tags: pd.DataFrame) -> str:
     """Modais das tags visiveis na pagina, abertos/fechados via CSS :target."""
+    ids = list(dict.fromkeys(tags_ids))  # unicas, preservando a ordem
+    # Indexar uma vez. Antes cada ficha varria resumo, esperados e tags
+    # inteiros: com as 1.209 TAGs de uma pagina davam 42 milhoes de comparacoes
+    # por carregamento, e era isso que levava a aba a 115 s no Render.
+    def por_tag(df):
+        return {k: v for k, v in df[df["TAG"].isin(ids)].groupby("TAG")}
+
+    g_resumo, g_esp, g_tags = por_tag(resumo), por_tag(esperados), por_tag(tags)
+    vazio_esp, vazio_tags = esperados.iloc[0:0], tags.iloc[0:0]
+
     blocos = ""
-    for tag_id in dict.fromkeys(tags_ids):  # unicas, preservando a ordem
-        corpo = tag_ficha_html(tag_id, resumo, esperados, tags, com_cabecalho=False)
+    for tag_id in ids:
+        if tag_id not in g_resumo:
+            continue
+        corpo = tag_ficha_html(tag_id, g_resumo[tag_id], g_esp.get(tag_id, vazio_esp),
+                               g_tags.get(tag_id, vazio_tags), com_cabecalho=False)
         if corpo is None:
             continue
         blocos += f"""
@@ -1425,7 +1438,9 @@ def _ancora(tipo: str, valor: str) -> str:
     return f"n-{tipo}-{limpo}"
 
 
-@st.cache_data(show_spinner=False, max_entries=8)
+# max_entries baixo de proposito: cada entrada guarda ate ~5 MB de HTML e o
+# plano do Render tem 512 MB. Com 8 por funcao dava 83 MB so de cache.
+@st.cache_data(show_spinner=False, max_entries=3)
 def arvore_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
                 _df: pd.DataFrame) -> str:
     """A arvore inteira, ja em HTML e sempre fechada.
@@ -1485,7 +1500,8 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
         '<div class="gplan-panel-title">SOP · SSOP · MALHA · TAG</div>'
         f'<div class="arvore">{arvore_html(cache_key, f_seg, f_malha, pag, df_pag)}</div></div>'
         + fichas_niveis_html(cache_key, f_seg, f_malha, pag, df_pag)
-        + fichas_modais_html(df_pag["TAG"].tolist(), resumo, esperados, tags)
+        + fichas_tags_html(cache_key, f_seg, f_malha, pag,
+                           df_pag["TAG"].tolist(), resumo, esperados, tags)
     )
 
 
@@ -1535,7 +1551,9 @@ def _controles_pagina(total: int, df: pd.DataFrame) -> int:
     return pag
 
 
-@st.cache_data(show_spinner=False, max_entries=8)
+# max_entries baixo de proposito: cada entrada guarda ate ~5 MB de HTML e o
+# plano do Render tem 512 MB. Com 8 por funcao dava 83 MB so de cache.
+@st.cache_data(show_spinner=False, max_entries=3)
 def fichas_niveis_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
                        _df: pd.DataFrame) -> str:
     """As fichas de SOP, SSOP e malha da pagina, todas fechadas."""
@@ -1544,6 +1562,18 @@ def fichas_niveis_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
         for valor, sub in _df.groupby(tipo):
             partes.append(_modal_nivel(tipo, valor, sub, rotulo))
     return "".join(partes)
+
+
+# max_entries baixo de proposito: cada entrada guarda ate ~5 MB de HTML e o
+# plano do Render tem 512 MB. Com 8 por funcao dava 83 MB so de cache.
+@st.cache_data(show_spinner=False, max_entries=3)
+def fichas_tags_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
+                     _ids: list, _resumo: pd.DataFrame, _esperados: pd.DataFrame,
+                     _tags: pd.DataFrame) -> str:
+    """As fichas de TAG da pagina. Sao ate 1.200 por pagina e cada uma varre a
+    08_RELATORIOS_ESPERADOS: sem cache isso se repetia a cada clique, e era o
+    que levava a aba a 115 s no Render."""
+    return fichas_modais_html(_ids, _resumo, _esperados, _tags)
 
 
 def _totais(df: pd.DataFrame) -> str:
