@@ -625,6 +625,22 @@ def inject_css():
         .tag-detail-card { background: var(--dark-card); border: 1px solid var(--border-strong); border-radius: 16px; padding: 26px 28px; }
         .detail-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap:12px; margin-bottom:26px; }
         .detail-grid .detail-item { margin-bottom: 0; }
+        /* Os 16 campos da ficha se repetem em 5.098 TAGs. Escrever as tres
+           classes em cada um custava 1,4 KB por ficha, uns 7 MB no total, e a
+           pagina inteira precisa caber no navegador. Aqui as classes saem e o
+           estilo vem pela posicao -- nada muda visualmente. */
+        .detail-grid > div { background:var(--dark-card-2); border:1px solid var(--border-color);
+                             border-radius:12px; padding:14px 16px; }
+        .detail-grid > div > span:first-child { display:block; font-size:10.5px;
+          text-transform:uppercase; letter-spacing:0.5px; color:var(--text-3);
+          font-weight:600; margin-bottom:6px; }
+        .detail-grid > div > span:last-child { display:block; font-size:15px;
+          font-weight:700; color:var(--text-1); }
+        /* mesma coisa na tabela de relatorios: sao 25.095 linhas somadas */
+        .gtbl-rel td:nth-child(2) { color:var(--text-2); }
+        .gtbl-rel td:nth-child(3) { font-size:12px; color:var(--text-2); }
+        .gtbl-rel td:nth-child(5) { text-align:center; color:var(--text-2);
+                                    font-variant-numeric:tabular-nums; }
         .ficha-head { margin-bottom: 20px; }
         .ficha-tag { font-size:22px; font-weight:800; color:var(--text-1); letter-spacing:-0.5px; }
         .ficha-desc { font-size:13px; color:var(--text-2); margin-top:3px; }
@@ -1146,25 +1162,26 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
         ("Critério de medição", da_base("CRITERIO_MEDICAO")),
         ("Preço unitário", br_moeda(float(preco))),
     ]
+    # sem classe por celula: .detail-grid estiliza pela posicao
     cards = "".join(
-        f'<div class="detail-item"><div class="detail-label">{esc(lbl)}</div>'
-        f'<div class="detail-value">{esc(val)}</div></div>'
+        f"<div><span>{esc(lbl)}</span><span>{esc(val)}</span></div>"
         for lbl, val in detalhes
     )
 
-    rows = ""
-    for _, tr in esperados[esperados["TAG"] == tag_id].iterrows():
-        rows += f"""
-            <tr>
-              <td class="gtbl-strong">{esc(tr['RELATORIO'])}</td>
-              <td class="gtbl-muted">{esc(tr['REFERENCIA'])}</td>
-              <td class="gtbl-mono">{esc(tr['DOCUMENTO_ESPERADO'])}</td>
-              <td>{status_badge(tr['STATUS_SIGEM'])}</td>
-              <td class="gtbl-num gtbl-muted">{esc(format_missing(tr['REVISAO_SIGEM']))}</td>
-            </tr>
-        """
+    meus = esperados[esperados["TAG"] == tag_id]
+    linhas = []
+    for rel, ref, doc, stat, rev in zip(
+            meus["RELATORIO"].values, meus["REFERENCIA"].values,
+            meus["DOCUMENTO_ESPERADO"].values, meus["STATUS_SIGEM"].values,
+            meus["REVISAO_SIGEM"].values):
+        linhas.append(
+            f'<tr><td class="gtbl-strong">{esc(rel)}</td><td>{esc(ref)}</td>'
+            f"<td>{esc(doc)}</td><td>{status_badge(stat)}</td>"
+            f"<td>{esc(format_missing(rev))}</td></tr>"
+        )
     tabela = html_table(
-        ["Relatório", "Referência", "Documento esperado", "Status SIGEM", "#Revisão"], rows
+        ["Relatório", "Referência", "Documento esperado", "Status SIGEM", "#Revisão"],
+        "".join(linhas), classe="gtbl gtbl-rel",
     )
 
     cabecalho = (
@@ -1490,7 +1507,8 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     _graficos(df)
 
     # Todas as fichas da pagina vao no HTML, para abrirem por :target sem
-    # recarregar. Dai a paginacao: as 5.098 TAGs de uma vez dariam 37 MB.
+    # navegar. Dai a paginacao: os 66 SOPs de uma vez dao 24,8 MB e 1,77 milhao
+    # de elementos, que nenhum navegador monta -- medido, nao estimado.
     paginas = paginar_sops(df)
     pag = _controles_pagina(len(paginas), df)
     df_pag = df[df.SOP.isin(paginas[pag])]
@@ -1505,8 +1523,30 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     )
 
 
-# Cabe com folga em ~800: a pagina fica em torno de 4,5 MB, o mesmo peso de
-# antes, so que agora com todas as fichas dentro dela.
+# max_entries baixo de proposito: cada entrada guarda muitos MB de HTML e o
+# plano do Render tem 512 MB.
+@st.cache_data(show_spinner=False, max_entries=3)
+def fichas_niveis_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
+                       _df: pd.DataFrame) -> str:
+    """As fichas de SOP, SSOP e malha, todas fechadas."""
+    partes = []
+    for tipo, rotulo in (("SOP", "SOP"), ("SSOP", "SSOP"), ("MALHA", "Malha")):
+        for valor, sub in _df.groupby(tipo):
+            partes.append(_modal_nivel(tipo, valor, sub, rotulo))
+    return "".join(partes)
+
+
+@st.cache_data(show_spinner=False, max_entries=3)
+def fichas_tags_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
+                     _ids: list, _resumo: pd.DataFrame, _esperados: pd.DataFrame,
+                     _tags: pd.DataFrame) -> str:
+    """As fichas das 5.098 TAGs. Cada uma varre a 08_RELATORIOS_ESPERADOS, por
+    isso o cache -- sem ele isso se repetia a cada clique."""
+    return fichas_modais_html(_ids, _resumo, _esperados, _tags)
+
+
+# Com as fichas enxutas cabe mais por pagina. Acima disso o navegador comeca
+# a engasgar: os 66 SOPs juntos dao 1,77 milhao de elementos e nao renderizam.
 TAGS_POR_PAGINA = 800
 
 
@@ -1549,31 +1589,6 @@ def _controles_pagina(total: int, df: pd.DataFrame) -> int:
         render_html(f'<div class="prg-pag">Página {pag + 1} de {total} · '
                     f'{br_num(len(df))} instrumentos no recorte</div>')
     return pag
-
-
-# max_entries baixo de proposito: cada entrada guarda ate ~5 MB de HTML e o
-# plano do Render tem 512 MB. Com 8 por funcao dava 83 MB so de cache.
-@st.cache_data(show_spinner=False, max_entries=3)
-def fichas_niveis_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
-                       _df: pd.DataFrame) -> str:
-    """As fichas de SOP, SSOP e malha da pagina, todas fechadas."""
-    partes = []
-    for tipo, rotulo in (("SOP", "SOP"), ("SSOP", "SSOP"), ("MALHA", "Malha")):
-        for valor, sub in _df.groupby(tipo):
-            partes.append(_modal_nivel(tipo, valor, sub, rotulo))
-    return "".join(partes)
-
-
-# max_entries baixo de proposito: cada entrada guarda ate ~5 MB de HTML e o
-# plano do Render tem 512 MB. Com 8 por funcao dava 83 MB so de cache.
-@st.cache_data(show_spinner=False, max_entries=3)
-def fichas_tags_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
-                     _ids: list, _resumo: pd.DataFrame, _esperados: pd.DataFrame,
-                     _tags: pd.DataFrame) -> str:
-    """As fichas de TAG da pagina. Sao ate 1.200 por pagina e cada uma varre a
-    08_RELATORIOS_ESPERADOS: sem cache isso se repetia a cada clique, e era o
-    que levava a aba a 115 s no Render."""
-    return fichas_modais_html(_ids, _resumo, _esperados, _tags)
 
 
 def _totais(df: pd.DataFrame) -> str:
