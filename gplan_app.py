@@ -461,8 +461,13 @@ def inject_css():
         .arv-no { border:1px solid var(--border-color); border-radius:11px; overflow:hidden;
                   background:var(--dark-card-2); }
         .arv-no[open] { border-color:var(--border-strong); }
-        .arv-no > summary {
-          display:flex; align-items:center; gap:14px; padding:13px 16px;
+        /* Grid, e nao flex: no flex o conteudo se amontoa a esquerda e a barra
+           vai sozinha para a direita com margin-left:auto, deixando uns 40% da
+           linha vazios no meio. Com colunas fixas cada campo cai sempre no
+           mesmo lugar e a barra fica com o espaco que sobrava. */
+        .arv-no > summary, .arv-folha > .arv-linha {
+          display:grid; align-items:center; gap:14px; padding:13px 16px;
+          grid-template-columns:17px minmax(140px,1fr) 46px 92px 74px 116px 132px minmax(150px,1.6fr);
           cursor:pointer; list-style:none; user-select:none; transition:background 120ms;
         }
         .arv-no > summary::-webkit-details-marker { display:none; }
@@ -488,19 +493,21 @@ def inject_css():
         a.arv-ficha { text-decoration:none !important; color:var(--text-1) !important;
                       transition:color 120ms; }
         a.arv-ficha:hover { color:#a9c5ff !important; }
-        .arv-folha > .arv-linha { display:flex; align-items:center; gap:14px; padding:13px 16px; }
-        .arv-vazio { width:17px; flex-shrink:0; }
+        .arv-vazio { width:17px; }
         .arv-num { font-size:11.5px; color:var(--text-3); white-space:nowrap; font-variant-numeric:tabular-nums; }
         .arv-sub { color:var(--text-2); font-weight:600; }
         .arv-val { color:var(--text-2); }
-        .arv-avanco { display:flex; align-items:center; gap:9px; margin-left:auto; flex-shrink:0; }
-        .arv-track { width:88px; height:6px; background:rgba(255,255,255,0.07); border-radius:4px; overflow:hidden; }
+        /* a barra ocupa a coluna inteira; a porcentagem tem largura propria
+           para os digitos ficarem alinhados de uma linha para outra */
+        .arv-avanco { display:grid; grid-template-columns:1fr 52px; align-items:center; gap:11px; }
+        .arv-track { height:8px; background:rgba(255,255,255,0.07); border-radius:5px; overflow:hidden; }
         .arv-fill { display:block; height:100%; border-radius:4px; }
         .arv-fill.ok { background:var(--accent-teal); }
         .arv-fill.warn { background:var(--accent-amber); }
         .arv-fill.crit { background:var(--accent-red); }
         .arv-pct { font-size:12.5px; font-weight:700; color:var(--text-1);
-                   min-width:52px; text-align:right; font-variant-numeric:tabular-nums; }
+                   text-align:right; font-variant-numeric:tabular-nums; }
+        .arv-fill { border-radius:5px; }
         .arv-corpo { padding:12px 14px 14px; }
         .arv-n2 { background:var(--dark-card); margin-bottom:7px; }
         .arv-n2:last-child { margin-bottom:0; }
@@ -1512,17 +1519,19 @@ def _no(tipo: str, nome: object, r, nivel: int, filhos: str = "",
     link = (f'<a class="arv-nome arv-ficha" href="/progresso?ficha={quote(tipo)}|{quote(valor)}" '
             f'target="_self" title="Abrir ficha">{rotulo}</a>')
     # cada nivel resume o nivel imediatamente abaixo: SOP conta SSOPs,
-    # SSOP conta malhas, malha ja e o ultimo agrupamento antes das TAGs
+    # SSOP conta malhas, malha ja e o ultimo agrupamento antes das TAGs.
+    # A malha nao tem sub-nivel, mas a celula vem vazia mesmo assim: sem ela
+    # as colunas do grid escorregariam uma casa nessa linha.
     sub = ""
     if "subniveis" in r and pd.notna(r["subniveis"]):
         n = int(r["subniveis"])
         nome_sub = {"SOP": ("SSOP", "SSOP"), "SSOP": ("malha", "malhas")}.get(tipo)
         if nome_sub:
-            sub = (f'<span class="arv-num arv-sub">{br_num(n)} '
-                   f'{nome_sub[0] if n == 1 else nome_sub[1]}</span>')
+            sub = f"{br_num(n)} {nome_sub[0] if n == 1 else nome_sub[1]}"
+    n_tags = int(r["tags"])
     resumo = (
-        f"{sub}"
-        f'<span class="arv-num">{br_num(int(r["tags"]))} tags</span>'
+        f'<span class="arv-num arv-sub">{sub}</span>'
+        f'<span class="arv-num">{br_num(n_tags)} {"tag" if n_tags == 1 else "tags"}</span>'
         f'<span class="arv-num">{br_num(int(r["emitidos"]))}/{br_num(int(r["esperados"]))} relat.</span>'
         f'<span class="arv-num arv-val">{br_moeda(r["valor"])}</span>'
         '<span class="arv-avanco">'
@@ -1676,7 +1685,7 @@ def linhas_tags(sub: pd.DataFrame, com_modal: bool = True) -> pd.Series:
             f"<td>{int(emi)}/{int(esp)}</td>"
             f'<td><span class="gtbl-badge {tom}">{f"{pct:.1f}".replace(".", ",")}%</span></td>'
             f"<td>{status_pill(loc)}</td><td>{status_pill(cal)}</td><td>{status_pill(mon)}</td>"
-            f'<td class="gtbl-muted">{"—" if vazio(fim) else esc(fim)}</td>'
+            f"<td>{status_pill(fim)}</td>"
             f'<td class="gtbl-muted">{br_moeda(preco)}</td></tr>'
         )
     return pd.Series(linhas, index=sub.index)
