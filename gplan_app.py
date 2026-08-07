@@ -519,6 +519,7 @@ def inject_css():
         .arv-n3 > .arv-linha { padding:10px 14px; }
         .arv-n3 > summary { padding:10px 14px; }
         .arv-tags { padding:2px 0 4px; }
+        .prg-pag { text-align:center; font-size:12.5px; color:var(--text-2); padding:9px 0; }
 
         /* graficos de "mais avancados" em grid 2x2: as linhas do grid tem
            altura uniforme, entao as colunas nunca desalinham. */
@@ -1425,12 +1426,14 @@ def _ancora(tipo: str, valor: str) -> str:
 
 
 @st.cache_data(show_spinner=False, max_entries=8)
-def arvore_html(cache_key: str, f_seg: str, f_malha: str, _df: pd.DataFrame) -> str:
+def arvore_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
+                _df: pd.DataFrame) -> str:
     """A arvore inteira, ja em HTML e sempre fechada.
 
     Sao 224 agregacoes e 1.883 tabelas de TAG: 2,7 s aqui, uns 20 s na CPU do
     Render. Sem cache isso se repetia a cada clique. A chave e o par
-    (planilha, filtros) -- o _df nao entra no hash, so acompanha.
+    (planilha, filtros, pagina) -- o _df nao entra no hash, so acompanha. A
+    pagina precisa estar na chave: sem ela a pagina 2 servia a arvore da 1.
     """
     blocos = []
     for _, sop in agrega_nivel(_df, "SOP", subnivel="SSOP").iterrows():
@@ -1444,7 +1447,7 @@ def arvore_html(cache_key: str, f_seg: str, f_malha: str, _df: pd.DataFrame) -> 
                     else d_ssop[d_ssop.MALHA.apply(vazio)]
                 # a malha sempre tem "+": as TAGs dela ja vem no HTML
                 corpo = (f'<div class="arv-tags">'
-                         f'{_tabela_tags(d_malha, com_modal=False)}</div>')
+                         f'{_tabela_tags(d_malha, com_modal=True)}</div>')
                 malhas.append(_no("MALHA", ml["MALHA"], ml, nivel=3, filhos=corpo))
             ssops.append(_no("SSOP", ss["SSOP"], ss, nivel=2, filhos="".join(malhas)))
         blocos.append(_no("SOP", sop["SOP"], sop, nivel=1, filhos="".join(ssops)))
@@ -1455,13 +1458,6 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
                      cache_key: str = ""):
     render_header("Progresso")
     df = progresso_base(resumo, tags)
-
-    # A ficha carrega sob demanda: gerar as 2.106 de uma vez daria 15,9 MB.
-    # Assim so a clicada e montada, e a arvore reabre o caminho ate ela.
-    pedido = st.query_params.get("ficha")
-    tipo_aberto = valor_aberto = None
-    if pedido and "|" in pedido:
-        tipo_aberto, valor_aberto = pedido.split("|", 1)
 
     segs = ["Todos"] + sorted({s for s in df.SEGMENTO if not vazio(s)})
     malhas = ["Todas"] + sorted({m for m in df.MALHA if not vazio(m)})
@@ -1478,40 +1474,76 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     render_html(_totais(df))
     _graficos(df)
 
-    blocos = arvore_html(cache_key, f_seg, f_malha, df)
-
-    # caminho a reabrir quando uma ficha esta em foco. A arvore vem do cache
-    # sempre fechada; abrir e so acrescentar o "open" nos dois nos do caminho.
-    if tipo_aberto:
-        caminho = []
-        if tipo_aberto == "SOP":
-            caminho = [("SOP", valor_aberto)]
-        else:
-            alvo = (df[df.SSOP == valor_aberto] if tipo_aberto == "SSOP"
-                    else df[df.MALHA == valor_aberto])
-            if not alvo.empty:
-                caminho = [("SOP", alvo.iloc[0]["SOP"])]
-                caminho.append(("SSOP", alvo.iloc[0]["SSOP"] if tipo_aberto == "MALHA"
-                                else valor_aberto))
-        for tipo, valor in caminho:
-            marca = f'id="{_ancora(tipo, valor)}"'
-            blocos = blocos.replace(marca, marca + " open", 1)
-
-    modal = ""
-    if tipo_aberto:
-        coluna = {"SOP": "SOP", "SSOP": "SSOP", "MALHA": "MALHA"}.get(tipo_aberto)
-        rotulo = {"SOP": "SOP", "SSOP": "SSOP", "MALHA": "Malha"}.get(tipo_aberto, "")
-        if coluna:
-            sub = (df[df[coluna].apply(vazio)] if valor_aberto == "(sem)"
-                   else df[df[coluna] == valor_aberto])
-            if not sub.empty:
-                modal = _modal_nivel(tipo_aberto, valor_aberto, sub, rotulo)
+    # Todas as fichas da pagina vao no HTML, para abrirem por :target sem
+    # recarregar. Dai a paginacao: as 5.098 TAGs de uma vez dariam 37 MB.
+    paginas = paginar_sops(df)
+    pag = _controles_pagina(len(paginas), df)
+    df_pag = df[df.SOP.isin(paginas[pag])]
 
     render_html(
         '<div class="gplan-panel">'
         '<div class="gplan-panel-title">SOP · SSOP · MALHA · TAG</div>'
-        f'<div class="arvore">{blocos}</div></div>' + modal
+        f'<div class="arvore">{arvore_html(cache_key, f_seg, f_malha, pag, df_pag)}</div></div>'
+        + fichas_niveis_html(cache_key, f_seg, f_malha, pag, df_pag)
+        + fichas_modais_html(df_pag["TAG"].tolist(), resumo, esperados, tags)
     )
+
+
+# Cabe com folga em ~800: a pagina fica em torno de 4,5 MB, o mesmo peso de
+# antes, so que agora com todas as fichas dentro dela.
+TAGS_POR_PAGINA = 800
+
+
+def paginar_sops(df: pd.DataFrame) -> list:
+    """Divide os SOPs em paginas de ~800 TAGs, sem quebrar um SOP ao meio.
+
+    Nao da para paginar por quantidade de SOP: eles sao muito desiguais -- os
+    4 maiores sozinhos juntam 1.290 das 5.098 TAGs.
+    """
+    paginas, atual, soma = [], [], 0
+    for sop, n in df.groupby("SOP").size().items():
+        if atual and soma + n > TAGS_POR_PAGINA:
+            paginas.append(atual)
+            atual, soma = [], 0
+        atual.append(sop)
+        soma += n
+    if atual:
+        paginas.append(atual)
+    return paginas or [[]]
+
+
+def _controles_pagina(total: int, df: pd.DataFrame) -> int:
+    """Anterior / Proxima da arvore. Devolve o indice da pagina atual."""
+    if total <= 1:
+        return 0
+    chave = "prg_pagina"
+    pag = min(st.session_state.get(chave, 0), total - 1)
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c1:
+        if st.button("← Anterior", use_container_width=True,
+                     disabled=pag == 0, key="prg_ant"):
+            st.session_state[chave] = pag - 1
+            st.rerun()
+    with c3:
+        if st.button("Próxima →", use_container_width=True,
+                     disabled=pag >= total - 1, key="prg_prox"):
+            st.session_state[chave] = pag + 1
+            st.rerun()
+    with c2:
+        render_html(f'<div class="prg-pag">Página {pag + 1} de {total} · '
+                    f'{br_num(len(df))} instrumentos no recorte</div>')
+    return pag
+
+
+@st.cache_data(show_spinner=False, max_entries=8)
+def fichas_niveis_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
+                       _df: pd.DataFrame) -> str:
+    """As fichas de SOP, SSOP e malha da pagina, todas fechadas."""
+    partes = []
+    for tipo, rotulo in (("SOP", "SOP"), ("SSOP", "SSOP"), ("MALHA", "Malha")):
+        for valor, sub in _df.groupby(tipo):
+            partes.append(_modal_nivel(tipo, valor, sub, rotulo))
+    return "".join(partes)
 
 
 def _totais(df: pd.DataFrame) -> str:
@@ -1536,8 +1568,10 @@ def _no(tipo: str, nome: object, r, nivel: int, filhos: str = "",
     pct = r["avanco"]
     tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
     valor = "(sem)" if vazio(nome) else str(nome)
-    link = (f'<a class="arv-nome arv-ficha" href="/progresso?ficha={quote(tipo)}|{quote(valor)}" '
-            f'target="_self" title="Abrir ficha">{rotulo}</a>')
+    # ancora, nao query param: a ficha ja esta na pagina e abre por :target,
+    # sem recarregar
+    link = (f'<a class="arv-nome arv-ficha" href="#{_ancora(tipo, valor)}" '
+            f'title="Abrir ficha">{rotulo}</a>')
     # cada nivel resume o nivel imediatamente abaixo: SOP conta SSOPs,
     # SSOP conta malhas, malha ja e o ultimo agrupamento antes das TAGs.
     # A malha nao tem sub-nivel, mas a celula vem vazia mesmo assim: sem ela
@@ -1563,71 +1597,123 @@ def _no(tipo: str, nome: object, r, nivel: int, filhos: str = "",
         return (f'<div class="arv-no arv-n{nivel} arv-folha">'
                 f'<div class="arv-linha"><span class="arv-vazio"></span>{link}'
                 f'{pill_prioridade(r["prioridade"])}{resumo}</div></div>')
-    # so SOP e SSOP levam id: sao os unicos que a ficha precisa reabrir, e
-    # marcar as 1.883 malhas custaria 40 KB por nada
-    ident = f' id="{_ancora(tipo, valor)}"' if nivel < 3 else ""
-    return (f'<details class="arv-no arv-n{nivel}"{ident}{" open" if aberto else ""}>'
+    # sem id aqui: a ancora _ancora() pertence a ficha, e um id repetido no no
+    # da arvore fazia o :target casar com o no em vez da janela
+    return (f'<details class="arv-no arv-n{nivel}"{" open" if aberto else ""}>'
             f'<summary><span class="arv-seta"></span>{link}'
             f'{pill_prioridade(r["prioridade"])}{resumo}</summary>'
             f'<div class="arv-corpo">{filhos}</div></details>')
 
 
+def _distintos(serie: pd.Series, limite: int = 3) -> str:
+    """Valores distintos de uma coluna, resumidos quando sao muitos."""
+    vals = sorted({str(v).strip() for v in serie if not vazio(v)})
+    if not vals:
+        return "—"
+    if len(vals) <= limite:
+        return ", ".join(vals)
+    return f"{', '.join(vals[:limite])} +{br_num(len(vals) - limite)}"
+
+
 def _modal_nivel(tipo: str, nome: object, sub: pd.DataFrame, rotulo_tipo: str) -> str:
-    """Ficha do SOP/SSOP/malha: o que ha de relevante nele + suas TAGs."""
+    """Ficha do SOP/SSOP/malha: tudo que esta cadastrado e relacionado a ele,
+    mais a lista do nivel imediatamente abaixo."""
+    valor_ancora = "(sem)" if vazio(nome) else str(nome)
     esp = int(sub["RELATORIOS_ESPERADOS"].sum())
     emi = int(sub["RELATORIOS_POSTADOS"].sum())
     pct = (emi / esp * 100) if esp else 0
     tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
+    n_mal = sub[~sub.MALHA.apply(vazio)].MALHA.nunique()
 
-    campos = [
-        ("Instrumentos", br_num(len(sub))),
-        ("Completos", f"{br_num(int(sub['COMPLETA'].sum()))} de {br_num(len(sub))}"),
-        ("Relatórios", f"{br_num(emi)} de {br_num(esp)}"),
-        ("Prioridade", prioridade_do_grupo(sub["SUBGRUPO_PRIORIDADE"])),
-        ("Valor total", br_moeda(sub["PRECO_UNITARIO"].sum())),
-        ("Valor avançado", br_moeda(sub["VALOR_AVANCADO"].sum())),
-    ]
-    # quantitativos que fazem sentido para cada nivel
+    campos = []
+    # a cadeia acima: de onde este nivel pendura
+    if tipo in ("SSOP", "MALHA"):
+        campos.append(("SOP", _distintos(sub.SOP, 2)))
+    if tipo == "MALHA":
+        campos.append(("SSOP", _distintos(sub.SSOP, 2)))
+    # a cadeia abaixo
     if tipo == "SOP":
         campos.append(("SSOPs", br_num(sub.SSOP.nunique())))
     if tipo in ("SOP", "SSOP"):
-        n_seg = sub[~sub.SEGMENTO.apply(vazio)].SEGMENTO.nunique()
-        n_mal = sub[~sub.MALHA.apply(vazio)].MALHA.nunique()
-        campos.append(("Segmentos", br_num(n_seg) if n_seg else "—"))
         campos.append(("Malhas", br_num(n_mal) if n_mal else "—"))
-    if tipo == "MALHA":
-        segs = sorted({s for s in sub.SEGMENTO if not vazio(s)})
-        campos.append(("Segmento", ", ".join(segs) if segs else "—"))
+    campos += [
+        ("Instrumentos", br_num(len(sub))),
+        ("Completos", f"{br_num(int(sub['COMPLETA'].sum()))} de {br_num(len(sub))}"),
+        ("Relatórios", f"{br_num(emi)} de {br_num(esp)}"),
+        ("Pendentes", br_num(esp - emi)),
+        ("Prioridade", prioridade_do_grupo(sub["SUBGRUPO_PRIORIDADE"])),
+        ("Segmento" if tipo == "MALHA" else "Segmentos",
+         _distintos(sub.SEGMENTO) if tipo == "MALHA"
+         else br_num(sub[~sub.SEGMENTO.apply(vazio)].SEGMENTO.nunique())),
+        ("Tipos de instrumento", _distintos(sub.GRUPO_REGRA.str.title())
+         if "GRUPO_REGRA" in sub.columns else "—"),
+        ("Critério de medição", _distintos(sub.CRITERIO_MEDICAO, 2)
+         if "CRITERIO_MEDICAO" in sub.columns else "—"),
+        ("Valor total", br_moeda(sub["PRECO_UNITARIO"].sum())),
+        ("Valor avançado", br_moeda(sub["VALOR_AVANCADO"].sum())),
+    ]
 
     cards = "".join(
         f'<div class="fn-item"><div class="fn-lbl">{esc(l)}</div>'
         f'<div class="fn-val">{esc(v)}</div></div>' for l, v in campos
     )
     titulo = f"Sem {rotulo_tipo.lower()}" if vazio(nome) else esc(nome)
-    # aberto ja na renderizacao: e a unica ficha da pagina, veio por ?ficha=
-    return f"""
-        <div class="fmodal fmodal-on">
-          <a class="fmodal-bg" href="/progresso" target="_self" aria-label="Fechar"></a>
-          <div class="fmodal-box">
-            <div class="fmodal-head">
-              <div>
-                <div class="fn-tipo">{esc(rotulo_tipo)}</div>
-                <div class="fmodal-title">{titulo}</div>
-              </div>
-              <div class="fn-avanco">
-                <div class="fn-track"><div class="fn-fill {tom}" style="width:{max(pct,1.5):.1f}%;"></div></div>
-                <div class="fn-pct">{br_pct(pct)}</div>
-              </div>
-              <a class="fmodal-x" href="/progresso" target="_self" aria-label="Fechar">&times;</a>
-            </div>
-            <div class="fmodal-body">
-              <div class="fn-grid">{cards}</div>
-              <div class="ficha-sub">Instrumentos relacionados</div>
-              {_tabela_tags(sub, com_modal=False)}
-            </div>
-          </div>
-        </div>
+    # a ficha mostra o nivel imediatamente abaixo, nao as TAGs: o SOP lista os
+    # SSOPs dele, o SSOP as malhas, e so a malha chega nas TAGs. Fora ser o
+    # recorte certo, isso derruba 53% das linhas -- antes os tres niveis
+    # repetiam a mesma lista de TAGs, 15.294 linhas somadas contra 7.138.
+    if tipo == "MALHA":
+        rotulo_sub, corpo = "Instrumentos", _tabela_tags(sub, com_modal=True)
+    else:
+        filho = "SSOP" if tipo == "SOP" else "MALHA"
+        neto = "MALHA" if tipo == "SOP" else None
+        rotulo_sub = "SSOPs" if tipo == "SOP" else "Malhas"
+        corpo = _tabela_niveis(sub, filho, neto)
+
+    return (
+        f'<div class="fmodal" id="{_ancora(tipo, valor_ancora)}">'
+        '<a class="fmodal-bg" href="#" aria-label="Fechar"></a>'
+        '<div class="fmodal-box"><div class="fmodal-head">'
+        f'<div><div class="fn-tipo">{esc(rotulo_tipo)}</div>'
+        f'<div class="fmodal-title">{titulo}</div></div>'
+        '<div class="fn-avanco">'
+        f'<div class="fn-track"><div class="fn-fill {tom}" style="width:{max(pct,1.5):.1f}%;"></div></div>'
+        f'<div class="fn-pct">{br_pct(pct)}</div></div>'
+        '<a class="fmodal-x" href="#" aria-label="Fechar">&times;</a></div>'
+        f'<div class="fmodal-body"><div class="fn-grid">{cards}</div>'
+        f'<div class="ficha-sub">{rotulo_sub}</div>{corpo}</div></div></div>'
+    )
+
+
+def _tabela_niveis(sub: pd.DataFrame, coluna: str, subnivel: str = None) -> str:
+    """Os filhos diretos de um nivel: o que o SOP mostra dos SSOPs dele.
+
+    Cada linha leva a propria ficha, entao dentro da ficha do SOP da para
+    descer para a do SSOP sem fechar nada.
     """
+    rotulo = {"SSOP": "SSOP", "MALHA": "Malha"}[coluna]
+    conta_sub = {"MALHA": "#Malhas"}.get(subnivel)
+    linhas = []
+    for _, r in agrega_nivel(sub, coluna, subnivel=subnivel).iterrows():
+        nome = r[coluna]
+        alvo = "(sem)" if vazio(nome) else str(nome)
+        rot = f"Sem {rotulo.lower()}" if vazio(nome) else esc(nome)
+        pct = r["avanco"]
+        tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
+        n_sub = ""
+        if conta_sub and "subniveis" in r and pd.notna(r["subniveis"]):
+            n_sub = f'<td class="gtbl-num">{br_num(int(r["subniveis"]))}</td>'
+        linhas.append(
+            f'<tr><td><a class="gtbl-tag gtbl-link" href="#{_ancora(coluna, alvo)}">{rot}</a></td>'
+            f'<td class="gtbl-num">{pill_prioridade(r["prioridade"])}</td>{n_sub}'
+            f'<td class="gtbl-num">{br_num(int(r["tags"]))}</td>'
+            f'<td class="gtbl-num">{br_num(int(r["emitidos"]))}/{br_num(int(r["esperados"]))}</td>'
+            f'<td class="gtbl-num gtbl-muted">{br_moeda(r["valor"])}</td>'
+            f'<td class="gtbl-num"><span class="gtbl-badge {tom}">{br_pct(pct)}</span></td></tr>'
+        )
+    cab = [rotulo, "#Prioridade"] + ([conta_sub] if conta_sub else []) + \
+          ["#TAGs", "#Emit./Esp.", "#Valor", "#Avanço"]
+    return html_table(cab, "".join(linhas), f"Nenhum {rotulo.lower()}.")
 
 
 def status_pill(v: object) -> str:
