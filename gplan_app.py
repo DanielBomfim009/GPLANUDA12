@@ -130,6 +130,11 @@ def search_any_column(df: pd.DataFrame, text: str) -> pd.Series:
 
 
 def get_supabase_client():
+    # GPLAN_LOCAL=1 le a planilha do disco e ignora o Supabase, sem precisar
+    # esconder o secrets.toml. Serve para testar local: e mais rapido e nao
+    # esbarra no proxy da rede, que derruba o SSL da chamada ao Supabase.
+    if os.environ.get("GPLAN_LOCAL") == "1":
+        return None
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_KEY")
     if not url or not key:
