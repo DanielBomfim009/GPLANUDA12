@@ -1268,6 +1268,24 @@ def painel_recusados(esperados: pd.DataFrame, sigem: pd.DataFrame) -> str:
     )
 
 
+def fichas_completas(ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
+                     tags: pd.DataFrame, sigem: pd.DataFrame, cache_key: str = "") -> str:
+    """Fichas das TAGs pedidas MAIS as dos relatorios que elas listam.
+
+    As duas andam juntas: a ficha da TAG mostra todos os relatorios dela, e
+    cada um tem um botao Detalhes. Gerar so as fichas dos documentos que
+    aparecem na tabela da pagina deixa esses botoes apontando para ancoras que
+    nao existem, e o clique nao faz nada -- aconteceu no Dashboard e em
+    Relatorios, com 43 dos 83 botoes sem destino. Chamar isto no lugar de
+    fichas_modais_html impede que os dois voltem a divergir.
+    """
+    alvo = set(ids)
+    meus = esperados[esperados["TAG"].isin(alvo)]
+    docs = meus[meus["STATUS_SIGEM"].map(POSTADO)]["DOCUMENTO_ESPERADO"].tolist()
+    return (fichas_modais_html(ids, resumo, esperados, tags)
+            + fichas_relatorios_html(docs, esperados, _revisoes_por_doc(cache_key, sigem)))
+
+
 def top10_panel(top10: pd.DataFrame) -> str:
     rows = ""
     for _, r in top10.iterrows():
@@ -1319,7 +1337,7 @@ def kpi_card(label: str, value: str, pct: float, color: str, icon: str) -> str:
 
 
 def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame,
-                     sigem: pd.DataFrame):
+                     sigem: pd.DataFrame, cache_key: str = ""):
     render_header("Dashboard")
 
     total_tags = len(resumo)
@@ -1419,9 +1437,13 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
 
     st.write("")
     top10 = resumo.sort_values("RELATORIOS_PENDENTES", ascending=False).head(10)
+    # As fichas de relatorio das TAGs do Top 10 vao junto. Sem elas o botao
+    # Detalhes aponta para uma ancora que nao existe nesta pagina e o clique
+    # nao faz nada -- foi o que aconteceu quando liguei a ficha do relatorio
+    # nas outras tres abas e esqueci esta.
     render_html(
         top10_panel(top10)
-        + fichas_modais_html(top10["TAG"].tolist(), resumo, esperados, tags)
+        + fichas_completas(top10["TAG"].tolist(), resumo, esperados, tags, sigem, cache_key)
     )
 
 
@@ -1514,9 +1536,8 @@ def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.Da
             "Nenhum relatório encontrado para essa busca.",
         )
         + "</div>"
-        + fichas_modais_html(df_page["TAG"].tolist(), resumo, esperados, tags)
-        + fichas_relatorios_html(df_page["DOCUMENTO_ESPERADO"].tolist(), esperados,
-                                 _revisoes_por_doc(cache_key, sigem))
+        + fichas_completas(df_page["TAG"].tolist(), resumo, esperados, tags,
+                           sigem, cache_key)
     )
 
 
@@ -1791,10 +1812,11 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
                 st.rerun()
 
         meus = esperados[esperados["TAG"] == tag_id]
+        postados = meus[meus["STATUS_SIGEM"].map(POSTADO)]["DOCUMENTO_ESPERADO"].tolist()
         render_html('<div class="gplan-panel">'
                     + tag_ficha_html(tag_id, resumo, esperados, tags)
                     + "</div>"
-                    + fichas_relatorios_html(meus["DOCUMENTO_ESPERADO"].tolist(), esperados,
+                    + fichas_relatorios_html(postados, esperados,
                                              _revisoes_por_doc(cache_key, sigem)))
         return
 
@@ -2523,7 +2545,7 @@ def main():
             "</div></div>"
         )
 
-    dashboard_page = st.Page(lambda: _sob_carga("Carregando o painel", lambda: render_dashboard(resumo, esperados, tags, sigem)), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
+    dashboard_page = st.Page(lambda: _sob_carga("Carregando o painel", lambda: render_dashboard(resumo, esperados, tags, sigem, cache_key)), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
     relatorios_page = st.Page(lambda: _sob_carga("Carregando os relatórios", lambda: render_relatorios(esperados, resumo, tags, sigem, cache_key)), title="Relatórios", icon=":material/description:", url_path="relatorios")
     progresso_page = st.Page(lambda: _sob_carga("Abrindo o Progresso", lambda: render_progresso(resumo, esperados, tags, sigem, cache_key)), title="Progresso", icon=":material/insights:", url_path="progresso")
     pesquisa_page = st.Page(lambda: _sob_carga("Carregando as tags", lambda: render_pesquisa_tag(resumo, esperados, tags, sigem, cache_key)), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
