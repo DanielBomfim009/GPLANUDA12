@@ -274,7 +274,7 @@ STATUS_APROVADOS = {"SEM COMENTÁRIOS", "COM COMENTÁRIOS", "PARA CONSTRUÇÃO"}
 # (planilha, filtros), e o Streamlit nao percebe mudanca numa funcao chamada
 # por dentro -- mudei a regra de avanco e a arvore continuou servindo o numero
 # velho. Subir esse numero ao mexer em como o avanco e calculado.
-REGRA_VERSAO = 7
+REGRA_VERSAO = 8
 
 
 def aprovado(serie: pd.Series) -> pd.Series:
@@ -571,6 +571,16 @@ def inject_css():
           text-decoration:none !important; transition:background 120ms;
         }
         a.rel-sigem:hover { background:rgba(91,141,239,0.26); border-color:rgba(91,141,239,0.45); }
+        /* Abre a ficha do relatorio. Fica em coluna propria porque o endereco
+           do documento e longo demais para virar area de clique. */
+        a.btn-detalhes {
+          display:inline-block; font-size:11.5px; font-weight:600; white-space:nowrap;
+          color:#c9d4ea !important; background:rgba(255,255,255,0.06);
+          border:1px solid var(--border-strong); border-radius:7px; padding:4px 12px;
+          text-decoration:none !important; transition:background 120ms, border-color 120ms;
+        }
+        a.btn-detalhes:hover { background:rgba(91,141,239,0.2);
+                               border-color:rgba(91,141,239,0.45); color:#a9c5ff !important; }
         .prg-trilha { font-size:12.5px; color:var(--text-2); margin-bottom:18px; }
         .prg-sep { color:var(--text-3); margin:0 2px; }
         a.prg-link { color:#a9c5ff !important; text-decoration:none !important; font-weight:600; }
@@ -1357,18 +1367,19 @@ def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.Da
               <td class="gtbl-muted">{esc(str(r['GRUPO']).title())}</td>
               <td class="gtbl-strong">{esc(r['RELATORIO'])}</td>
               <td class="gtbl-muted">{esc(r['REFERENCIA'])}</td>
-              <td>{doc_link(r['DOCUMENTO_ESPERADO'], POSTADO(r['STATUS_SIGEM']))}</td>
+              <td class="gtbl-mono">{esc(r['DOCUMENTO_ESPERADO'])}</td>
               <td class="gtbl-num">{yes_no_badge(r['EXISTE_NO_SIGEM'])}</td>
               <td>{status_badge(r['STATUS_SIGEM'])}</td>
               <td class="gtbl-num gtbl-muted">{esc(r['REVISAO_SIGEM'])}</td>
               <td class="gtbl-num gtbl-muted">{esc(r['DATA_SIGEM'])}</td>
+              <td class="gtbl-num">{botao_detalhes(r['DOCUMENTO_ESPERADO'], POSTADO(r['STATUS_SIGEM']))}</td>
             </tr>
         """
     render_html(
         '<div class="gplan-panel">'
         + html_table(
             ["Tag", "Descrição", "Grupo", "Relatório", "Referência", "Documento esperado",
-             "#Existe no SIGEM", "Status SIGEM", "#Revisão", "#Data"],
+             "#Existe no SIGEM", "Status SIGEM", "#Revisão", "#Data", "#Detalhes"],
             rows,
             "Nenhum relatório encontrado para essa busca.",
         )
@@ -1403,17 +1414,21 @@ def doc_ancora(doc: object) -> str:
     return "rel-" + "".join(c if c.isalnum() else "-" for c in str(doc))
 
 
-def doc_link(doc: object, tem_ficha: bool = True) -> str:
-    """Link para a ficha do relatorio, na propria pagina.
+def botao_detalhes(doc: object, tem_ficha: bool = True) -> str:
+    """Botao que abre a ficha do relatorio, em coluna propria.
 
-    Sem ficha nao vira link: os 15.203 relatorios nunca postados nao tem
-    historico nenhum para mostrar, e um link que abre o nada e pior que
-    texto. O status deles ja aparece na propria linha.
+    O endereco do documento fica como texto: ele e longo e cheio de ponto e
+    underline, e sublinhado de link no meio disso atrapalha a leitura em vez
+    de convidar ao clique. O botao diz o que faz.
+
+    Sem ficha nao ha botao: os 15.203 relatorios nunca postados nao tem
+    historico para mostrar, e um botao que abre o nada e pior que nada. O
+    status deles ja aparece na propria linha.
     """
     if not tem_ficha:
-        return f'<span class="gtbl-mono">{esc(doc)}</span>'
-    return (f'<a class="gtbl-mono gtbl-link" href="#{doc_ancora(doc)}" '
-            f'title="Abrir ficha do relatório">{esc(doc)}</a>')
+        return '<span class="gtbl-muted">—</span>'
+    return (f'<a class="btn-detalhes" href="#{doc_ancora(doc)}" '
+            f'title="Ver revisões e comentários">Detalhes</a>')
 
 
 @st.cache_data(show_spinner=False, max_entries=3)
@@ -1596,11 +1611,13 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
             meus["REVISAO_SIGEM"].values):
         linhas.append(
             f'<tr><td class="gtbl-strong">{esc(rel)}</td><td>{esc(ref)}</td>'
-            f"<td>{doc_link(doc, POSTADO(stat))}</td><td>{status_badge(stat)}</td>"
-            f"<td>{esc(format_missing(rev))}</td></tr>"
+            f"<td>{esc(doc)}</td><td>{status_badge(stat)}</td>"
+            f"<td>{esc(format_missing(rev))}</td>"
+            f'<td class="gtbl-num">{botao_detalhes(doc, POSTADO(stat))}</td></tr>' 
         )
     tabela = html_table(
-        ["Relatório", "Referência", "Documento esperado", "Status SIGEM", "#Revisão"],
+        ["Relatório", "Referência", "Documento esperado", "Status SIGEM", "#Revisão",
+         "#Detalhes"],
         "".join(linhas), classe="gtbl gtbl-rel",
     )
 
