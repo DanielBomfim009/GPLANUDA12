@@ -555,9 +555,12 @@ def inject_css():
         /* etapa do caminho, nao alerta: azul, a mesma familia da pill de TAG */
         .gtbl-badge.andamento { color:#a9c5ff; background:rgba(91,141,239,0.14); border:1px solid rgba(91,141,239,0.26); }
         .gtbl-empty { padding:34px 4px; text-align:center; color:var(--text-3); font-size:13px; }
-        /* o motivo da recusa e o que precisa ser tratado: vermelho e legivel,
-           nao pill -- o texto da fiscalizacao pode ser longo */
-        .rel-com { color:#fca5a5; font-size:12.5px; white-space:normal; max-width:520px; }
+        /* O motivo da recusa e o que precisa ser tratado: vermelho e legivel,
+           nao pill -- o texto da fiscalizacao pode ser longo.
+           Precisa de ".gtbl td.rel-com": so ".rel-com" perde em especificidade
+           para ".gtbl td { color:var(--text-1) }" e o texto saia branco. */
+        .gtbl td.rel-com { color:#fca5a5; font-size:12.5px; white-space:pre-wrap;
+                           max-width:520px; line-height:1.45; }
         .rel-titulo { font-size:15px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
                       letter-spacing:-0.2px; word-break:break-all; }
         .rel-sit { flex-shrink:0; align-self:center; }
