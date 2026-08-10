@@ -259,7 +259,54 @@ def load_data(cache_key: str):
     sigem = pd.read_excel(excel_file, sheet_name="04_BASE_SIGEM")
     resumo = pd.read_excel(excel_file, sheet_name="07_TAG_RESUMO")
     esperados = pd.read_excel(excel_file, sheet_name="08_RELATORIOS_ESPERADOS")
+    resumo = aplicar_regra_aprovados(resumo, esperados)
     return tags, cabos, tubing, sigem, resumo, esperados
+
+
+# Um relatorio so conta como avanco depois de aprovado pela fiscalizacao.
+# Postado nao basta: recusado, em analise e cancelado seguem sendo pendencia.
+STATUS_APROVADOS = {"SEM COMENTÁRIOS", "COM COMENTÁRIOS", "PARA CONSTRUÇÃO"}
+
+# Entra na chave do cache. O HTML da arvore e das fichas fica guardado por
+# (planilha, filtros), e o Streamlit nao percebe mudanca numa funcao chamada
+# por dentro -- mudei a regra de avanco e a arvore continuou servindo o numero
+# velho. Subir esse numero ao mexer em como o avanco e calculado.
+REGRA_VERSAO = 3
+
+
+def aprovado(serie: pd.Series) -> pd.Series:
+    return serie.astype(str).str.strip().str.upper().isin(STATUS_APROVADOS)
+
+
+def aplicar_regra_aprovados(resumo: pd.DataFrame, esperados: pd.DataFrame) -> pd.DataFrame:
+    """Recalcula o avanco por TAG contando so relatorio aprovado.
+
+    A conta sai da 08_RELATORIOS_ESPERADOS, que tem o status de cada relatorio,
+    e nao da coluna ja pronta da 07_TAG_RESUMO: assim o app nao pode divergir
+    da base, mesmo se a planilha for gerada por um pipeline mais antigo.
+
+    RELATORIOS_POSTADOS continua sendo o que existe no SIGEM em qualquer
+    status. A diferenca entre postados e aprovados e justamente a fila de
+    pendencia -- 722 recusados, 510 em analise, 49 cancelados na base de hoje.
+    """
+    e = esperados.copy()
+    e["_postado"] = e["EXISTE_NO_SIGEM"].astype(str).str.strip().str.upper().eq("SIM")
+    e["_aprovado"] = aprovado(e["STATUS_SIGEM"])
+    por_tag = e.groupby("TAG").agg(
+        _esperados=("TAG", "size"),
+        _postados=("_postado", "sum"),
+        _aprovados=("_aprovado", "sum"),
+    )
+
+    df = resumo.merge(por_tag, left_on="TAG", right_index=True, how="left")
+    for c in ("_esperados", "_postados", "_aprovados"):
+        df[c] = df[c].fillna(0).astype(int)
+    df["RELATORIOS_ESPERADOS"] = df["_esperados"]
+    df["RELATORIOS_POSTADOS"] = df["_postados"]
+    df["RELATORIOS_APROVADOS"] = df["_aprovados"]
+    df["RELATORIOS_PENDENTES"] = df["_esperados"] - df["_aprovados"]
+    df["AVANCO_DOCUMENTAL"] = (df["_aprovados"] / df["_esperados"]).fillna(0.0)
+    return df.drop(columns=["_esperados", "_postados", "_aprovados"])
 
 
 def paginate(df: pd.DataFrame, key: str, search_signature: str) -> pd.DataFrame:
@@ -344,7 +391,9 @@ def count_rows(df: pd.DataFrame, report: str, origin: str | None, emitted: bool,
     if origin is not None:
         subset = subset[subset["ORIGEM_REGRA"] == origin]
     if emitted:
-        subset = subset[subset["EXISTE_NO_SIGEM"] == "SIM"]
+        # aprovado, nao apenas postado: a barra do Dashboard tem que contar a
+        # mesma coisa que o avanco da TAG, senao as duas telas se contradizem
+        subset = subset[aprovado(subset["STATUS_SIGEM"])]
     if unique_doc:
         return int(subset["DOCUMENTO_ESPERADO"].nunique())
     return int(len(subset))
@@ -448,8 +497,7 @@ def inject_css():
         .kpi-icon { width:32px; height:32px; border-radius:9px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
         .kpi-icon svg { width:16px; height:16px; }
         .kpi-label { font-size: 11.5px; color: var(--text-2); font-weight:600; letter-spacing:0.2px; }
-        .kpi-value { font-size: 30px; font-weight: 800; color: var(--text-1); letter-spacing:-0.8px; margin-bottom:4px; }
-        .kpi-sub { font-size: 12px; color: var(--text-3); margin-bottom: 14px; }
+        .kpi-value { font-size: 30px; font-weight: 800; color: var(--text-1); letter-spacing:-0.8px; margin-bottom:14px; }
         .kpi-progress-row { display:flex; align-items:center; gap:10px; }
         .kpi-track { flex:1; height:5px; background: rgba(255,255,255,0.06); border-radius:3px; overflow:hidden; }
         .kpi-fill { height:100%; border-radius:3px; }
@@ -1085,7 +1133,7 @@ def top10_panel(top10: pd.DataFrame) -> str:
     for _, r in top10.iterrows():
         pendentes = int(r["RELATORIOS_PENDENTES"])
         esperados = int(r["RELATORIOS_ESPERADOS"])
-        emitidos = int(r["RELATORIOS_POSTADOS"])
+        emitidos = int(r["RELATORIOS_APROVADOS"])
         conclusao = br_pct(r['AVANCO_DOCUMENTAL'] * 100).replace(",0%", "%")
         ratio = (pendentes / esperados) if esperados else 0
         tone = "crit" if ratio >= 0.8 else ("warn" if ratio >= 0.4 else "ok")
@@ -1109,7 +1157,7 @@ def top10_panel(top10: pd.DataFrame) -> str:
     )
 
 
-def kpi_card(label: str, value: str, sub: str, pct: float, color: str, icon: str) -> str:
+def kpi_card(label: str, value: str, pct: float, color: str, icon: str) -> str:
     pct_display = br_pct(pct * 100)
     width = max(0.0, min(pct, 1.0)) * 100
     icon_svg = KPI_ICONS.get(icon, "")
@@ -1122,7 +1170,6 @@ def kpi_card(label: str, value: str, sub: str, pct: float, color: str, icon: str
             </div>
           </div>
           <div class="kpi-value">{value}</div>
-          <div class="kpi-sub">{sub}</div>
           <div class="kpi-progress-row">
             <div class="kpi-track"><div class="kpi-fill" style="width:{width:.1f}%; background:{color};"></div></div>
             <div class="kpi-pct">{pct_display}</div>
@@ -1137,25 +1184,27 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     total_tags = len(resumo)
     total_esperados = int(resumo["RELATORIOS_ESPERADOS"].sum())
     total_emitidos = int(resumo["RELATORIOS_POSTADOS"].sum())
-    total_pendentes = total_esperados - total_emitidos
-    avanco_geral = (total_emitidos / total_esperados) if total_esperados else 0
-    tags_completas = int((resumo["STATUS_DOCUMENTAL"] == "PRONTA DOCUMENTAL").sum())
+    total_aprovados = int(resumo["RELATORIOS_APROVADOS"].sum())
+    # pendencia agora inclui o que foi postado mas nao passou: recusado, em
+    # analise e cancelado voltam para a fila em vez de contarem como entregue
+    total_pendentes = total_esperados - total_aprovados
+    avanco_geral = (total_aprovados / total_esperados) if total_esperados else 0
+    tags_completas = int((resumo["AVANCO_DOCUMENTAL"] >= 1.0).sum())
 
     cols = st.columns(5)
     kpis = [
-        ("Total de tags", f"{total_tags:,}".replace(",", "."), "Base principal", 1.0, "#5b8def", "shield"),
-        ("Tags completas", f"{tags_completas:,}".replace(",", "."), "Pronta documental",
+        ("Total de tags", f"{total_tags:,}".replace(",", "."), 1.0, "#5b8def", "shield"),
+        ("Tags completas", f"{tags_completas:,}".replace(",", "."),
          (tags_completas / total_tags) if total_tags else 0, "#34d399", "check"),
-        ("Pendentes", f"{total_pendentes:,}".replace(",", "."), "Aguardando entrega",
+        ("Pendentes", f"{total_pendentes:,}".replace(",", "."),
          (total_pendentes / total_esperados) if total_esperados else 0, "#f87171", "clock"),
-        ("Emitidos SIGEM", f"{total_emitidos:,}".replace(",", "."), "Com status localizado",
-         avanco_geral, "#fbbf24", "archive"),
-        ("Avanço geral", br_pct(avanco_geral * 100), "Progressão do projeto",
-         avanco_geral, "#9d6bff", "trend"),
+        ("Emitidos SIGEM", f"{total_emitidos:,}".replace(",", "."),
+         (total_emitidos / total_esperados) if total_esperados else 0, "#fbbf24", "archive"),
+        ("Avanço geral", br_pct(avanco_geral * 100), avanco_geral, "#9d6bff", "trend"),
     ]
-    for col, (label, value, sub, pct, color, icon) in zip(cols, kpis):
+    for col, (label, value, pct, color, icon) in zip(cols, kpis):
         with col:
-            render_html(kpi_card(label, value, sub, pct, color, icon))
+            render_html(kpi_card(label, value, pct, color, icon))
 
     st.write("")
     col_left, col_right = st.columns([1.6, 1])
@@ -1199,7 +1248,7 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     grouped = resumo.groupby("GRUPO_REGRA").agg(
         tags=("TAG", "count"),
         esperados=("RELATORIOS_ESPERADOS", "sum"),
-        emitidos=("RELATORIOS_POSTADOS", "sum"),
+        emitidos=("RELATORIOS_APROVADOS", "sum"),
     ).reset_index()
     grouped["avanco"] = (grouped["emitidos"] / grouped["esperados"]).fillna(0) * 100
     grouped = grouped.sort_values("tags", ascending=False)
@@ -1331,8 +1380,9 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
         ("Tem cabo", cabo_txt),
         ("Tem tubing", "Sim" if str(r["TEM_TUBING"]).upper() == "SIM" else "Não"),
         ("Relatórios esperados", int(r["RELATORIOS_ESPERADOS"])),
-        ("Relatórios entregues", int(r["RELATORIOS_POSTADOS"])),
-        ("Relatórios pendentes", int(r["RELATORIOS_PENDENTES"])),
+        ("Postados no SIGEM", int(r["RELATORIOS_POSTADOS"])),
+        ("Aprovados", int(r["RELATORIOS_APROVADOS"])),
+        ("Pendentes", int(r["RELATORIOS_PENDENTES"])),
         ("Avanço", br_pct(r['AVANCO_DOCUMENTAL'] * 100)),
         ("SOP", da_base("SOP")),
         ("SSOP", da_base("SSOP")),
@@ -1563,7 +1613,7 @@ def agrega_nivel(df: pd.DataFrame, coluna: str, subnivel: str | None = None) -> 
     agg = dict(
         tags=("TAG", "count"),
         esperados=("RELATORIOS_ESPERADOS", "sum"),
-        emitidos=("RELATORIOS_POSTADOS", "sum"),
+        emitidos=("RELATORIOS_APROVADOS", "sum"),
         completas=("COMPLETA", "sum"),
         valor=("PRECO_UNITARIO", "sum"),
         valor_avancado=("VALOR_AVANCADO", "sum"),
@@ -1749,7 +1799,7 @@ def fichas_tags_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
 
 def _totais(df: pd.DataFrame) -> str:
     esp = int(df["RELATORIOS_ESPERADOS"].sum())
-    emi = int(df["RELATORIOS_POSTADOS"].sum())
+    emi = int(df["RELATORIOS_APROVADOS"].sum())
     pct = (emi / esp * 100) if esp else 0
     return (
         '<div class="prg-tot">'
@@ -1787,7 +1837,7 @@ def _no(tipo: str, nome: object, r, nivel: int, filhos: str = "",
     resumo = (
         f'<span class="arv-num arv-sub">{sub}</span>'
         f'<span class="arv-num">{br_num(n_tags)} {"tag" if n_tags == 1 else "tags"}</span>'
-        f'<span class="arv-num">{br_num(int(r["emitidos"]))}/{br_num(int(r["esperados"]))} relat.</span>'
+        f'<span class="arv-num">{br_num(int(r["emitidos"]))}/{br_num(int(r["esperados"]))} aprov.</span>'
         f'<span class="arv-num arv-val">{br_moeda(r["valor"])}</span>'
         '<span class="arv-avanco">'
         f'<span class="arv-track"><span class="arv-fill {tom}" style="width:{max(pct,1.5):.1f}%;"></span></span>'
@@ -1821,7 +1871,7 @@ def _modal_nivel(tipo: str, nome: object, sub: pd.DataFrame, rotulo_tipo: str) -
     mais a lista do nivel imediatamente abaixo."""
     valor_ancora = "(sem)" if vazio(nome) else str(nome)
     esp = int(sub["RELATORIOS_ESPERADOS"].sum())
-    emi = int(sub["RELATORIOS_POSTADOS"].sum())
+    emi = int(sub["RELATORIOS_APROVADOS"].sum())
     pct = (emi / esp * 100) if esp else 0
     tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
     n_mal = sub[~sub.MALHA.apply(vazio)].MALHA.nunique()
@@ -1913,7 +1963,7 @@ def _tabela_niveis(sub: pd.DataFrame, coluna: str, subnivel: str = None) -> str:
             f'<td class="gtbl-num"><span class="gtbl-badge {tom}">{br_pct(pct)}</span></td></tr>'
         )
     cab = [rotulo, "#Prioridade"] + ([conta_sub] if conta_sub else []) + \
-          ["#TAGs", "#Emit./Esp.", "#Valor", "#Avanço"]
+          ["#TAGs", "#Aprov./Esp.", "#Valor", "#Avanço"]
     return html_table(cab, "".join(linhas), f"Nenhum {rotulo.lower()}.")
 
 
@@ -1974,11 +2024,11 @@ SEM = "(sem)"
 
 
 
-CABECALHO_TAGS = ["Tag", "Descrição", "#Prioridade", "#Emit./Esp.", "#Avanço",
+CABECALHO_TAGS = ["Tag", "Descrição", "#Prioridade", "#Aprov./Esp.", "#Avanço",
                   "#Localização", "#Calibração", "#Montagem", "#Status final",
                   "#Preço unit."]
 
-_COLS_TAGS = ("TAG", "DESCRICAO", "SUBGRUPO_PRIORIDADE", "RELATORIOS_POSTADOS",
+_COLS_TAGS = ("TAG", "DESCRICAO", "SUBGRUPO_PRIORIDADE", "RELATORIOS_APROVADOS",
               "RELATORIOS_ESPERADOS", "AVANCO_DOCUMENTAL", "STATUS_LOCALIZACAO",
               "STATUS_CALIBRACAO", "STATUS_MONTAGEM", "STATUS_FINAL", "PRECO_UNITARIO")
 
@@ -2063,7 +2113,7 @@ def main():
     )
     inject_css()
 
-    cache_key = get_source_cache_key()
+    cache_key = f"{get_source_cache_key()}|r{REGRA_VERSAO}"
     if cache_key == "missing":
         st.error(
             "Não encontrei a planilha no Supabase Storage nem localmente. "
