@@ -312,6 +312,22 @@ def aplicar_regra_aprovados(resumo: pd.DataFrame, esperados: pd.DataFrame) -> pd
     return df.drop(columns=["_esperados", "_postados", "_aprovados"])
 
 
+def faixa_resumo(itens: list) -> str:
+    """Resumo do recorte, acima da tabela.
+
+    As abas de lista eram filtro e tabela, nada mais: chegava-se a 25.100
+    linhas sem ideia da proporcao entre elas. A faixa responde antes de
+    filtrar. `itens` sao (rotulo, valor, tom) -- tom pinta so o que pede
+    atencao, senao vira semaforo e nada se destaca.
+    """
+    celulas = "".join(
+        f'<div class="fx-item"><span class="fx-lbl">{esc(l)}</span>'
+        f'<span class="fx-val {t or ""}">{esc(v)}</span></div>'
+        for l, v, t in itens
+    )
+    return f'<div class="gplan-panel fx-faixa">{celulas}</div>'
+
+
 def paginate(df: pd.DataFrame, key: str, search_signature: str) -> pd.DataFrame:
     total_rows = len(df)
     total_pages = max(1, math.ceil(total_rows / PAGE_SIZE))
@@ -555,6 +571,43 @@ def inject_css():
         /* etapa do caminho, nao alerta: azul, a mesma familia da pill de TAG */
         .gtbl-badge.andamento { color:#a9c5ff; background:rgba(91,141,239,0.14); border:1px solid rgba(91,141,239,0.26); }
         .gtbl-empty { padding:34px 4px; text-align:center; color:var(--text-3); font-size:13px; }
+        /* Recusados ha mais tempo: linha inteira clicavel, leva para a aba
+           Relatorios ja buscando a TAG. */
+        /* As duas colunas do Dashboard num grid so, para terminarem juntas.
+           O painel de recusados estica para fechar o bloco. */
+        .dash-linha { display:grid; grid-template-columns:1.6fr 1fr; gap:22px;
+                      align-items:stretch; margin-bottom:22px; }
+        .dash-dir { display:flex; flex-direction:column; gap:22px; }
+        .dash-linha > .gplan-panel, .dash-dir > .gplan-panel { margin-bottom:0 !important; }
+        .dash-dir > .gplan-panel:last-child { flex:1; display:flex; flex-direction:column; }
+        .dash-dir .rec-lista { flex:1; display:flex; flex-direction:column; justify-content:space-between; }
+        @media (max-width:1100px) { .dash-linha { grid-template-columns:1fr; } }
+        /* faixa de resumo das abas de lista */
+        .fx-faixa { display:grid; grid-auto-flow:column; grid-auto-columns:1fr;
+                    gap:10px; padding:16px 22px !important; margin-bottom:18px !important; }
+        .fx-item { display:flex; flex-direction:column; gap:5px; }
+        .fx-lbl { font-size:10.5px; font-weight:600; letter-spacing:0.6px;
+                  text-transform:uppercase; color:var(--text-3); }
+        .fx-val { font-size:19px; font-weight:800; color:var(--text-1);
+                  letter-spacing:-0.4px; font-variant-numeric:tabular-nums; }
+        .fx-val.ruim { color:#fca5a5; }
+        .fx-val.bom { color:#6ee7d0; }
+        @media (max-width:900px) { .fx-faixa { grid-auto-flow:row; grid-auto-columns:auto;
+                                               grid-template-columns:repeat(2,1fr); } }
+        .rec-resumo { font-size:12px; color:var(--text-3); margin-bottom:10px; }
+        a.rec-linha {
+          display:grid; grid-template-columns:1fr auto auto; align-items:center; gap:12px;
+          padding:7px 10px; margin-bottom:4px; border-radius:8px;
+          background:var(--dark-card-2); border:1px solid var(--border-color);
+          text-decoration:none !important; transition:border-color 120ms, background 120ms;
+        }
+        a.rec-linha:last-child { margin-bottom:0; }
+        a.rec-linha:hover { background:rgba(255,255,255,0.04);
+                            border-color:rgba(248,113,113,0.4); }
+        .rec-tag { font-size:12.5px; font-weight:600; color:var(--text-1); }
+        .rec-rel { font-size:11px; color:var(--text-3); }
+        .rec-dias { font-size:11.5px; font-weight:600; color:#fca5a5;
+                    font-variant-numeric:tabular-nums; white-space:nowrap; }
         /* O motivo da recusa e o que precisa ser tratado: vermelho e legivel,
            nao pill -- o texto da fiscalizacao pode ser longo.
            Precisa de ".gtbl td.rel-com": so ".rel-com" perde em especificidade
@@ -1167,6 +1220,47 @@ def fichas_modais_html(tags_ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
     return blocos
 
 
+TOPO_RECUSADOS = 6
+
+
+def painel_recusados(esperados: pd.DataFrame, sigem: pd.DataFrame) -> str:
+    """O que esta parado ha mais tempo por recusa da fiscalizacao.
+
+    Cada recusa e de uma TAG diferente -- 722 recusados em 722 TAGs, nenhuma
+    com duas -- entao agrupar por TAG daria a mesma lista. A linha traz os
+    dois: a TAG e o relatorio dela que voltou.
+    """
+    rec = esperados[esperados["STATUS_SIGEM"].astype(str).str.strip().str.upper() == "RECUSADO"]
+    if rec.empty:
+        return ('<div class="gplan-panel"><div class="gplan-panel-title">Recusados há mais tempo</div>'
+                '<div class="gtbl-empty">Nenhum relatório recusado.</div></div>')
+
+    dt = pd.to_datetime(sigem["DATA"], dayfirst=True, errors="coerce")
+    ultima = pd.DataFrame({"doc": sigem["DOCUMENTO"], "dt": dt}).dropna() \
+        .sort_values("dt").groupby("doc")["dt"].last()
+    hoje = pd.Timestamp.now(tz=BR_TZ).tz_localize(None).normalize()
+    rec = rec.assign(_dt=rec["DOCUMENTO_ESPERADO"].map(ultima))
+    rec = rec.assign(_dias=(hoje - rec["_dt"]).dt.days)
+    piores = rec.dropna(subset=["_dias"]).sort_values("_dias", ascending=False).head(TOPO_RECUSADOS)
+
+    linhas = "".join(
+        f'<a class="rec-linha" href="/relatorios?busca={quote(str(t))}" target="_self" '
+        f'title="Ver os relatórios de {esc(t)}">'
+        f'<span class="rec-tag">{esc(t)}</span>'
+        f'<span class="rec-rel">{esc(r)}</span>'
+        f'<span class="rec-dias">{br_num(int(d))} dias</span></a>'
+        for t, r, d in zip(piores["TAG"], piores["RELATORIO"], piores["_dias"])
+    )
+    media = int(rec["_dias"].mean())
+    return (
+        '<div class="gplan-panel">'
+        '<div class="gplan-panel-title">Recusados há mais tempo</div>'
+        f'<div class="rec-resumo">{br_num(len(rec))} relatórios recusados · '
+        f'{br_num(media)} dias parados em média</div>'
+        f'<div class="rec-lista">{linhas}</div></div>' 
+    )
+
+
 def top10_panel(top10: pd.DataFrame) -> str:
     rows = ""
     for _, r in top10.iterrows():
@@ -1217,7 +1311,8 @@ def kpi_card(label: str, value: str, pct: float, color: str, icon: str) -> str:
     """
 
 
-def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame):
+def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame,
+                     sigem: pd.DataFrame):
     render_header("Dashboard")
 
     total_tags = len(resumo)
@@ -1246,9 +1341,11 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
             render_html(kpi_card(label, value, pct, color, icon))
 
     st.write("")
-    col_left, col_right = st.columns([1.6, 1])
-
-    with col_left:
+    # Um grid unico, e nao st.columns: cada coluna do Streamlit empilha por
+    # conta propria, entao a esquerda terminava a 772px e a direita a 637px --
+    # e encher a direita so inverteu a sobra. No grid as duas linhas tem a
+    # mesma altura e o painel de recusados estica para fechar o bloco.
+    if True:
         # Ordena do maior quantitativo esperado para o menor: barras em escada
         # leem melhor do que na ordem fixa em que as regras foram declaradas.
         barras = []
@@ -1274,14 +1371,20 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
                   <div class="rep-track"><div class="rep-done" style="width:{pct:.1f}%;"></div><div class="rep-pending" style="width:{100-pct:.1f}%;"></div></div>
                 </a>
             """
-        render_html(f'<div class="gplan-panel"><div class="gplan-panel-title">Esperado × emitido por relatório</div>{rows_html}</div>')
+        esquerda = (f'<div class="gplan-panel">'
+                    f'<div class="gplan-panel-title">Esperado × aprovado por relatório</div>'
+                    f"{rows_html}</div>")
 
-    with col_right:
         status_counts = esperados["STATUS_SIGEM"].value_counts()
         labels = [sentence_case(s) for s in status_counts.index]
         values = status_counts.values.tolist()
         colors = [STATUS_COLOR_MAP.get(label, DEFAULT_STATUS_COLORS[i % len(DEFAULT_STATUS_COLORS)]) for i, label in enumerate(labels)]
-        render_html(status_panel(labels, values, colors, len(esperados)))
+        # A coluna da esquerda tem 13 barras e a direita terminava no donut. Em
+        # vez de esticar o donut, entra o que se olha primeiro numa segunda:
+        # o que esta parado ha mais tempo por recusa.
+        direita = status_panel(labels, values, colors, len(esperados)) \
+            + painel_recusados(esperados, sigem)
+        render_html(f'<div class="dash-linha">{esquerda}<div class="dash-dir">{direita}</div></div>')
 
     st.write("")
     grouped = resumo.groupby("GRUPO_REGRA").agg(
@@ -1365,6 +1468,16 @@ def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.Da
             + br_num(len(esperados))
             + " relatórios</div>"
         )
+
+    st_norm = df["STATUS_SIGEM"].astype(str).str.strip().str.upper()
+    render_html(faixa_resumo([
+        ("No recorte", br_num(len(df)), None),
+        ("Aprovados", br_num(int(st_norm.isin(STATUS_APROVADOS).sum())), "bom"),
+        ("Recusados", br_num(int((st_norm == "RECUSADO").sum())), "ruim"),
+        ("Em análise", br_num(int((st_norm == "EM ANÁLISE").sum())), None),
+        ("Não postados", br_num(int((st_norm == "NAO POSTADO").sum())), None),
+        ("Cancelados", br_num(int((st_norm == "CANCELADO").sum())), None),
+    ]))
 
     df_page = paginate(df, "relatorios", f"{search}|{sel_rel}|{sel_sts}")
 
@@ -1693,6 +1806,15 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
         list_df = list_df[mask]
 
     list_df["AVANCO_DOCUMENTAL"] = (list_df["AVANCO_DOCUMENTAL"] * 100).round(1)
+    av = list_df["AVANCO_DOCUMENTAL"]
+    render_html(faixa_resumo([
+        ("No recorte", br_num(len(list_df)), None),
+        ("Sem nenhum aprovado", br_num(int((av <= 0).sum())), "ruim"),
+        ("Em andamento", br_num(int(((av > 0) & (av < 100)).sum())), None),
+        ("Completas", br_num(int((av >= 100).sum())), "bom"),
+        ("Avanço médio", br_pct(float(av.mean()) if len(av) else 0), None),
+    ]))
+
     list_df_page = paginate(list_df, "pesquisa", search)
 
     rows = ""
@@ -1749,6 +1871,17 @@ def render_sigem(sigem: pd.DataFrame):
     df = df.sort_values(["_REVISAO_SORT", "_DOCUMENTO_SORT"]).drop(columns=["_REVISAO_SORT", "_DOCUMENTO_SORT"])
 
     df["DATA"] = format_date_column(df["DATA"])
+    st_sig = df["STATUS"].astype(str).str.strip().str.upper()
+    render_html(faixa_resumo([
+        ("No recorte", br_num(len(df)), None),
+        ("Aprovados", br_num(int(st_sig.isin(STATUS_APROVADOS).sum())), "bom"),
+        ("Recusados", br_num(int((st_sig == "RECUSADO").sum())), "ruim"),
+        ("Em análise", br_num(int((st_sig == "EM ANÁLISE").sum())), None),
+        ("Documentos", br_num(int(df["DOCUMENTO"].nunique())), None),
+        ("Revisões por documento",
+         f'{len(df) / max(df["DOCUMENTO"].nunique(), 1):.1f}'.replace(".", ","), None),
+    ]))
+
     df_page = paginate(df, "sigem", f"{status_filter}|{text_search}")
 
     rows = ""
@@ -2403,7 +2536,7 @@ def main():
             "</div></div>"
         )
 
-    dashboard_page = st.Page(lambda: _sob_carga("Carregando o painel", lambda: render_dashboard(resumo, esperados, tags)), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
+    dashboard_page = st.Page(lambda: _sob_carga("Carregando o painel", lambda: render_dashboard(resumo, esperados, tags, sigem)), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
     relatorios_page = st.Page(lambda: _sob_carga("Carregando os relatórios", lambda: render_relatorios(esperados, resumo, tags, sigem, cache_key)), title="Relatórios", icon=":material/description:", url_path="relatorios")
     progresso_page = st.Page(lambda: _sob_carga("Abrindo o Progresso", lambda: render_progresso(resumo, esperados, tags, sigem, cache_key)), title="Progresso", icon=":material/insights:", url_path="progresso")
     pesquisa_page = st.Page(lambda: _sob_carga("Carregando as tags", lambda: render_pesquisa_tag(resumo, esperados, tags, sigem, cache_key)), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
