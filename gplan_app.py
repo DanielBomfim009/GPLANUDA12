@@ -461,7 +461,13 @@ def inject_css():
         section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
           order: 1; padding-top: 0 !important; padding-bottom: 0 !important;
         }
-        section[data-testid="stSidebar"] [data-testid="stSidebarNav"] { order: 2; }
+        /* Menu abaixo dos filtros. O dropdown do selectbox e portalado no
+           body com position:fixed e nao vira para cima quando falta espaco:
+           com os cinco itens de menu antes, o ultimo filtro comecava a 617px
+           numa janela de 650 e a lista abria atras da barra de tarefas. Com
+           os filtros no topo o ultimo termina por volta de 330px, e os 300px
+           da lista cabem. */
+        section[data-testid="stSidebar"] [data-testid="stSidebarNav"] { order: 4; }
         section[data-testid="stSidebar"] [data-testid="stSidebarNavSeparator"] { display: none; }
 
         .gplan-brand {
@@ -472,7 +478,7 @@ def inject_css():
         .gplan-brand-name { font-size:16px; font-weight:800; color:var(--text-1); letter-spacing:-0.3px; line-height:1.1; }
         .gplan-brand-sub { font-size:10.5px; color:var(--text-3); margin-top:3px;
                            white-space:nowrap; }
-        .gplan-brand { padding-bottom: 18px !important; }
+        .gplan-brand { padding-bottom: 11px !important; }
         .gplan-brand-mark { width:30px !important; height:30px !important; }
 
         section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a,
@@ -707,16 +713,41 @@ def inject_css():
            gap de 16px que compensava a margem negativa que o Streamlit poe em
            todo markdown -- por isso o titulo dos filtros subia por cima do
            primeiro rotulo. */
-        section[data-testid="stSidebar"] [data-testid="stSidebarContent"] { gap: 7px; }
+        section[data-testid="stSidebar"] [data-testid="stSidebarContent"] { gap: 5px; }
         section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] { margin-bottom: 0 !important; }
-        section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.flt-topo) { margin-top: auto; }
-        .flt-topo { padding:11px 4px 0; border-top:1px solid var(--border-color); }
-        .flt-titulo { font-size:10px; letter-spacing:.9px; text-transform:uppercase;
-                      color:var(--text-3); font-weight:700; }
-        .flt-conta { font-size:10.5px; color:var(--text-2); margin-top:3px; }
+        /* Os filtros ficam logo abaixo do menu, e nao colados no rodape.
+           Empurrado para o fim da coluna, o bloco passava da dobra em tela
+           com barra de tarefas: o ultimo seletor sumia atras dela e o
+           dropdown abria para baixo, fora do monitor. */
+        section[data-testid="stSidebar"] [data-testid="stSidebarContent"] {
+          overflow-y: auto; padding-bottom: 14px;
+        }
+        /* A lista do selectbox e portalada no body com position:fixed e
+           altura fixa de 300px, e nao vira para cima quando falta espaco --
+           as opcoes de baixo ficavam atras da barra de tarefas, inalcancaveis.
+           Como os filtros sao a primeira coisa da lateral, a lista sempre
+           abre por volta de 430px do topo; limitar a altura ao que resta
+           abaixo disso faz ela rolar por dentro em vez de sumir. */
+        @media (max-height: 900px) {
+          div[data-testid="stSelectboxVirtualDropdown"],
+          div[data-testid="stSelectboxVirtualDropdown"] > div,
+          div[data-testid="stSelectboxVirtualDropdown"] ul {
+            max-height: max(100px, calc(100dvh - 470px)) !important;
+          }
+        }
+        .flt-topo { padding:2px 4px 0; display:flex; align-items:baseline;
+                    justify-content:space-between; gap:8px; }
+        section[data-testid="stSidebar"] [data-testid="stSidebarNav"] {
+          border-top: 1px solid var(--border-color); padding-top: 8px; margin-top: 10px; }
+        .flt-titulo { font-size:9.5px; letter-spacing:.6px; text-transform:uppercase;
+                      color:var(--text-3); font-weight:700; white-space:nowrap; }
+        .flt-conta { font-size:10px; color:var(--text-3); white-space:nowrap; }
         .flt-conta b { color:var(--accent-green); }
-        section[data-testid="stSidebar"] .stSelectbox label { font-size:10px !important;
-          color:var(--text-3) !important; margin-bottom:0 !important; }
+        section[data-testid="stSidebar"] .stSelectbox label { font-size:9.5px !important;
+          color:var(--text-3) !important; margin-bottom:0 !important;
+          min-height:0 !important; line-height:1.25 !important; }
+        section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.stSelectbox) {
+          margin-bottom:-9px; }
         section[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] > div {
           background:var(--dark-card-2) !important; border-color:var(--border-color) !important;
           font-size:11.5px !important; min-height:30px !important; }
@@ -2865,7 +2896,11 @@ def sidebar_filtros(tags: pd.DataFrame, resumo: pd.DataFrame,
         return "" if v == padrao else v
 
     with st.sidebar:
-        render_html('<div class="flt-topo"><div class="flt-titulo">Filtros rápidos</div></div>')
+        # O contador so existe depois que os quatro seletores forem lidos, mas
+        # ele mora na mesma linha do titulo, acima deles. Reservar o espaco com
+        # st.empty() e preencher no fim economiza a linha inteira -- e era ela
+        # que empurrava o ultimo item do menu para tras da barra de tarefas.
+        topo = st.empty()
         for chave, rotulo, padrao, fonte, coluna in FILTROS:
             escolhas = {c: escolhido(c, p) for c, _, p, _, _ in FILTROS}
             base = {"tags": tags, "resumo": resumo, "esperados": esperados}[fonte]
@@ -2880,8 +2915,10 @@ def sidebar_filtros(tags: pd.DataFrame, resumo: pd.DataFrame,
         escolhas = {c: escolhido(c, p) for c, _, p, _, _ in FILTROS}
         ativos = {c: v for c, v in escolhas.items() if v}
         alvo = _universo(escolhas, tags, resumo, esperados)
-        render_html(f'<div class="flt-conta"><b>{br_num(len(alvo))}</b> de '
-                    f"{br_num(len(tags))} tags</div>")
+        topo.markdown(
+            '<div class="flt-topo"><span class="flt-titulo">Filtros rápidos</span>'
+            f'<span class="flt-conta"><b>{br_num(len(alvo))}</b> de {br_num(len(tags))}</span>'
+            "</div>", unsafe_allow_html=True)
         if ativos:
             st.button("Limpar filtros", key="gf_limpar", on_click=_limpar_filtros)
 
