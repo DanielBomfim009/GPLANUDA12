@@ -924,16 +924,22 @@ def data_atualizacao(cache_key: str) -> str:
     mudava a cada clique e, no Render (que roda em UTC), aparecia 3h adiantada.
     O cache_key ja carrega o updated_at do arquivo no Supabase; localmente e o
     mtime do xlsx.
+
+    Sao dois formatos: o Supabase devolve ISO-8601 e o disco devolve epoch. A
+    diferenca e que epoch converte para float e ISO nao -- distinguir pelos
+    quatro primeiros digitos nao serve, porque "1786369744" tambem comeca com
+    quatro digitos e caia no ramo errado, deixando o cabecalho em "—".
     """
+    cache_key = str(cache_key or "").split("|")[0]      # tolera a chave de cache
     try:
-        if cache_key and cache_key[:4].isdigit():          # ISO-8601 do Supabase
-            ts = pd.Timestamp(cache_key)
+        ts = pd.Timestamp(float(cache_key), unit="s", tz="UTC")   # epoch do disco
+    except (TypeError, ValueError):
+        try:
+            ts = pd.Timestamp(cache_key)                          # ISO do Supabase
             ts = ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
-        else:                                              # mtime local (epoch)
-            ts = pd.Timestamp(float(cache_key), unit="s", tz="UTC")
-        return ts.tz_convert(BR_TZ).strftime("%d/%m/%Y %H:%M")
-    except Exception:
-        return "—"
+        except Exception:
+            return "—"
+    return ts.tz_convert(BR_TZ).strftime("%d/%m/%Y %H:%M")
 
 
 @contextmanager
@@ -2365,7 +2371,11 @@ def main():
     )
     inject_css()
 
-    cache_key = f"{get_source_cache_key()}|r{REGRA_VERSAO}"
+    # O carimbo da planilha e a chave de cache sao coisas diferentes: a chave
+    # leva a versao da regra colada no fim, e quem le a data precisa do valor
+    # cru. Passar a chave para data_atualizacao deixava o cabecalho em "—".
+    fonte = get_source_cache_key()
+    cache_key = f"{fonte}|r{REGRA_VERSAO}"
     if cache_key == "missing":
         st.error(
             "Não encontrei a planilha no Supabase Storage nem localmente. "
@@ -2373,7 +2383,7 @@ def main():
         )
         st.stop()
 
-    st.session_state["gplan_atualizado_em"] = data_atualizacao(cache_key)
+    st.session_state["gplan_atualizado_em"] = data_atualizacao(fonte)
     tags, cabos, tubing, sigem, resumo, esperados = load_data(cache_key)
 
     with st.sidebar:

@@ -160,6 +160,11 @@ with sync_playwright() as p:
     conferir("Pendentes", int(numero(cartoes.get("Pendentes", "0"))), n_esp - n_aprovados)
     conferir("Avanço geral", round(numero(cartoes.get("Avanço geral", "0")), 1),
              round(avanco * 100, 1))
+    # O cabeçalho já ficou em "—" por eu passar a chave de cache no lugar do
+    # carimbo. Só falta data quem não sabe quando os dados são de fato.
+    carimbo = pg.locator(".gplan-updated").inner_text()
+    conferir("cabeçalho tem a data da planilha",
+             bool(re.search(r"\d{2}/\d{2}/\d{4}", carimbo)), True, carimbo.strip())
 
     # Progresso: os totais e o avanço da árvore
     print("\n  Progresso bate com a planilha")
