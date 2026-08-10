@@ -274,7 +274,7 @@ STATUS_APROVADOS = {"SEM COMENTÁRIOS", "COM COMENTÁRIOS", "PARA CONSTRUÇÃO"}
 # (planilha, filtros), e o Streamlit nao percebe mudanca numa funcao chamada
 # por dentro -- mudei a regra de avanco e a arvore continuou servindo o numero
 # velho. Subir esse numero ao mexer em como o avanco e calculado.
-REGRA_VERSAO = 5
+REGRA_VERSAO = 6
 
 
 def aprovado(serie: pd.Series) -> pd.Series:
@@ -564,6 +564,13 @@ def inject_css():
         .rel-titulo { font-size:15px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
                       letter-spacing:-0.2px; word-break:break-all; }
         .rel-sit { flex-shrink:0; align-self:center; }
+        a.rel-sigem {
+          display:inline-block; font-size:11.5px; font-weight:600; white-space:nowrap;
+          color:#a9c5ff !important; background:rgba(91,141,239,0.14);
+          border:1px solid rgba(91,141,239,0.26); border-radius:6px; padding:3px 10px;
+          text-decoration:none !important; transition:background 120ms;
+        }
+        a.rel-sigem:hover { background:rgba(91,141,239,0.26); border-color:rgba(91,141,239,0.45); }
         .prg-trilha { font-size:12.5px; color:var(--text-2); margin-bottom:18px; }
         .prg-sep { color:var(--text-3); margin:0 2px; }
         a.prg-link { color:#a9c5ff !important; text-decoration:none !important; font-weight:600; }
@@ -1417,17 +1424,21 @@ def _revisoes_por_doc(cache_key: str, _sigem: pd.DataFrame) -> dict:
     cada postagem e uma linha -- da para reconstruir o historico inteiro.
     """
     col_com = coluna_comentario(_sigem)
-    usar = ["DOCUMENTO", "REVISAO", "STATUS", "DATA"] + ([col_com] if col_com else [])
-    s = _sigem[usar].copy()
+    s = _sigem.copy()
+    if col_com is None:
+        s["_com"] = None
+    else:
+        s["_com"] = s[col_com]
+    # ATALHO e o link direto do SIGEM para aquela revisao; base antiga nao tem
+    s["_url"] = s["ATALHO"] if "ATALHO" in s.columns else None
     s["_dt"] = pd.to_datetime(s["DATA"], dayfirst=True, errors="coerce")
     s = s.sort_values("_dt", ascending=False)
     hist: dict[str, list] = {}
-    for doc, rev, status, data, *resto in zip(
+    for doc, rev, status, data, com, url in zip(
             s["DOCUMENTO"].values, s["REVISAO"].values, s["STATUS"].values,
-            s["_dt"].values, *( [s[col_com].values] if col_com else [] )):
+            s["_dt"].values, s["_com"].values, s["_url"].values):
         hist.setdefault(str(doc), []).append(
-            (rev, status, pd.Timestamp(data) if pd.notna(data) else None,
-             resto[0] if resto else None))
+            (rev, status, pd.Timestamp(data) if pd.notna(data) else None, com, url))
     return hist
 
 
@@ -1462,8 +1473,16 @@ def ficha_relatorio_html(doc: str, linhas_esperadas: pd.DataFrame, historico: li
 
     if historico:
         tem_com = any(h[3] is not None and not vazio(h[3]) for h in historico)
+        tem_url = any(h[4] is not None and not vazio(h[4]) for h in historico)
         linhas = []
-        for rev, status, data, com in historico:
+        for rev, status, data, com, url in historico:
+            cel_url = ""
+            if tem_url:
+                # abre em aba nova: o SIGEM e outro sistema, e perder o Gplan
+                # aqui e justamente o que se quis evitar
+                cel_url = (f'<td><a class="rel-sigem" href="{esc(url)}" target="_blank" '
+                           f'rel="noopener">Abrir no SIGEM</a></td>' if url is not None
+                           and not vazio(url) else '<td class="gtbl-muted">—</td>')
             txt = str(status).strip()
             t = ("ok" if txt.upper() in STATUS_APROVADOS else
                  "crit" if txt.upper() in {"RECUSADO", "CANCELADO"} else "andamento")
@@ -1475,12 +1494,13 @@ def ficha_relatorio_html(doc: str, linhas_esperadas: pd.DataFrame, historico: li
             linhas.append(
                 f"<tr><td class=\"gtbl-strong\">{esc(rev)}</td>"
                 f'<td><span class="gtbl-badge {t}">{esc(txt)}</span></td>'
-                f"<td>{data:%d/%m/%Y} </td>{cel_com}</tr>" if data is not None else
+                f"<td>{data:%d/%m/%Y} </td>{cel_url}{cel_com}</tr>" if data is not None else
                 f"<tr><td class=\"gtbl-strong\">{esc(rev)}</td>"
                 f'<td><span class="gtbl-badge {t}">{esc(txt)}</span></td>'
-                f'<td class="gtbl-muted">—</td>{cel_com}</tr>'
+                f'<td class="gtbl-muted">—</td>{cel_url}{cel_com}</tr>'
             )
-        cab = ["Revisão", "Status", "#Data"] + (["Comentário da fiscalização"] if tem_com else [])
+        cab = (["Revisão", "Status", "#Data"] + (["#SIGEM"] if tem_url else [])
+               + (["Comentário da fiscalização"] if tem_com else []))
         corpo = html_table(cab, "".join(linhas))
     else:
         corpo = ('<div class="gtbl-empty">Ainda não postado no SIGEM. '
