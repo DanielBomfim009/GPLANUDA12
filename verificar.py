@@ -126,10 +126,15 @@ with sync_playwright() as p:
     erros_js: list[str] = []
     pg.on("pageerror", lambda e: erros_js.append(str(e)))
 
+    # Espera generosa mas finita. Uma aba que nao abre em 4 minutos nao vai
+    # abrir, e a conferencia tem que reportar isso em vez de ficar pendurada:
+    # a Progresso hoje nem responde em producao, por falta de memoria.
+    ESPERA = int(os.environ.get("ESPERA", "240")) * 1000
+
     def abrir(caminho: str, marcador: str) -> bool:
-        pg.goto(ALVO + caminho, wait_until="domcontentloaded", timeout=900_000)
         try:
-            pg.wait_for_selector(marcador, timeout=600_000)
+            pg.goto(ALVO + caminho, wait_until="domcontentloaded", timeout=ESPERA)
+            pg.wait_for_selector(marcador, timeout=ESPERA)
         except Exception:
             return False
         pg.wait_for_timeout(4000)
@@ -168,8 +173,9 @@ with sync_playwright() as p:
     conferir("Valor total", round(numero(totais.get("VALOR TOTAL", "0")), 2),
              round(float(pd.to_numeric(tags.PRECO_UNITARIO, errors="coerce")
                          .fillna(0).sum()), 2))
-    conferir("SOPs na árvore", pg.locator("details.arv-n1").count(),
-             tags.SOP.fillna("-").astype(str).str.strip().nunique())
+    # o topo da árvore é a FASE; SOP passou a ser o segundo nível
+    conferir("Fases na árvore", pg.locator("details.arv-n1").count(),
+             tags.FASE.fillna("-").astype(str).str.strip().nunique())
 
     conferir("erros de JavaScript", erros_js[:1] or "nenhum", "nenhum")
     navegador.close()

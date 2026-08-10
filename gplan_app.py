@@ -274,7 +274,7 @@ STATUS_APROVADOS = {"SEM COMENTÁRIOS", "COM COMENTÁRIOS", "PARA CONSTRUÇÃO"}
 # (planilha, filtros), e o Streamlit nao percebe mudanca numa funcao chamada
 # por dentro -- mudei a regra de avanco e a arvore continuou servindo o numero
 # velho. Subir esse numero ao mexer em como o avanco e calculado.
-REGRA_VERSAO = 8
+REGRA_VERSAO = 9
 
 
 def aprovado(serie: pd.Series) -> pd.Series:
@@ -688,9 +688,13 @@ def inject_css():
         .arv-n2 .arv-nome { font-weight:600; font-size:12.5px; }
         .arv-n3 { background:var(--dark-card-2); margin-bottom:6px; }
         .arv-n3:last-child { margin-bottom:0; }
-        .arv-n3 .arv-nome { font-weight:500; font-size:12px; }
-        .arv-n3 > .arv-linha { padding:10px 14px; }
+        .arv-n3 .arv-nome { font-weight:600; font-size:12.5px; }
         .arv-n3 > summary { padding:10px 14px; }
+        .arv-n4 { background:var(--dark-card); margin-bottom:6px; }
+        .arv-n4:last-child { margin-bottom:0; }
+        .arv-n4 .arv-nome { font-weight:500; font-size:12px; }
+        .arv-n4 > .arv-linha { padding:10px 14px; }
+        .arv-n4 > summary { padding:10px 14px; }
         .arv-tags { padding:2px 0 4px; }
 
         /* Carregando. Acima do modal (1000000) e da sidebar (999991), senao a
@@ -1780,12 +1784,12 @@ def br_moeda(v: float) -> str:
 def progresso_base(resumo: pd.DataFrame, tags: pd.DataFrame) -> pd.DataFrame:
     """Une o avanco documental (07_TAG_RESUMO) com a hierarquia e o preco
     (01_BASE_TAGS). O avanco por TAG e o mesmo usado nas demais abas."""
-    cols = ["TAG", "SOP", "SSOP", "SUBGRUPO_PRIORIDADE", "SEGMENTO", "MALHA",
+    cols = ["TAG", "FASE", "SOP", "SSOP", "SUBGRUPO_PRIORIDADE", "SEGMENTO", "MALHA",
             "CRITERIO_MEDICAO", "PRECO_UNITARIO",
             "STATUS_LOCALIZACAO", "STATUS_CALIBRACAO", "STATUS_MONTAGEM", "STATUS_FINAL"]
     disponiveis = [c for c in cols if c in tags.columns]
     df = resumo.merge(tags[disponiveis], on="TAG", how="left")
-    for c in ("SOP", "SSOP", "SEGMENTO", "MALHA", "SUBGRUPO_PRIORIDADE"):
+    for c in ("FASE", "SOP", "SSOP", "SEGMENTO", "MALHA", "SUBGRUPO_PRIORIDADE"):
         if c not in df.columns:
             df[c] = "-"
         df[c] = df[c].fillna("-").astype(str).str.strip()
@@ -1909,22 +1913,30 @@ def arvore_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
     (planilha, filtros, pagina) -- o _df nao entra no hash, so acompanha. A
     pagina precisa estar na chave: sem ela a pagina 2 servia a arvore da 1.
     """
+    def recorte(base, coluna, valor):
+        """Linhas de um nivel. Vazio agrupa junto: 1.210 TAGs nao tem fase."""
+        return base[base[coluna] == valor] if not vazio(valor) \
+            else base[base[coluna].apply(vazio)]
+
     blocos = []
-    for _, sop in agrega_nivel(_df, "SOP", subnivel="SSOP").iterrows():
-        d_sop = _df[_df.SOP == sop["SOP"]]
-        ssops = []
-        for _, ss in agrega_nivel(d_sop, "SSOP", subnivel="MALHA").iterrows():
-            d_ssop = d_sop[d_sop.SSOP == ss["SSOP"]]
-            malhas = []
-            for _, ml in agrega_nivel(d_ssop, "MALHA").iterrows():
-                d_malha = d_ssop[d_ssop.MALHA == ml["MALHA"]] if not vazio(ml["MALHA"]) \
-                    else d_ssop[d_ssop.MALHA.apply(vazio)]
-                # a malha sempre tem "+": as TAGs dela ja vem no HTML
-                corpo = (f'<div class="arv-tags">'
-                         f'{_tabela_tags(d_malha, com_modal=True)}</div>')
-                malhas.append(_no("MALHA", ml["MALHA"], ml, nivel=3, filhos=corpo))
-            ssops.append(_no("SSOP", ss["SSOP"], ss, nivel=2, filhos="".join(malhas)))
-        blocos.append(_no("SOP", sop["SOP"], sop, nivel=1, filhos="".join(ssops)))
+    for _, fase in agrega_nivel(_df, "FASE", subnivel="SOP").iterrows():
+        d_fase = recorte(_df, "FASE", fase["FASE"])
+        sops = []
+        for _, sop in agrega_nivel(d_fase, "SOP", subnivel="SSOP").iterrows():
+            d_sop = recorte(d_fase, "SOP", sop["SOP"])
+            ssops = []
+            for _, ss in agrega_nivel(d_sop, "SSOP", subnivel="MALHA").iterrows():
+                d_ssop = recorte(d_sop, "SSOP", ss["SSOP"])
+                malhas = []
+                for _, ml in agrega_nivel(d_ssop, "MALHA").iterrows():
+                    d_malha = recorte(d_ssop, "MALHA", ml["MALHA"])
+                    # a malha sempre tem "+": as TAGs dela ja vem no HTML
+                    corpo = (f'<div class="arv-tags">'
+                             f'{_tabela_tags(d_malha, com_modal=True)}</div>')
+                    malhas.append(_no("MALHA", ml["MALHA"], ml, nivel=4, filhos=corpo))
+                ssops.append(_no("SSOP", ss["SSOP"], ss, nivel=3, filhos="".join(malhas)))
+            sops.append(_no("SOP", sop["SOP"], sop, nivel=2, filhos="".join(ssops)))
+        blocos.append(_no("FASE", fase["FASE"], fase, nivel=1, filhos="".join(sops)))
     return "".join(blocos)
 
 
@@ -1988,7 +2000,7 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
 
     lugar.html(
         '<div class="gplan-panel">'
-        '<div class="gplan-panel-title">SOP · SSOP · MALHA · TAG</div>'
+        '<div class="gplan-panel-title">FASE · SOP · SSOP · MALHA · TAG</div>'
         f'<div class="arvore">{arvore}</div></div>' + niveis + fichas
     )
 
@@ -2000,7 +2012,8 @@ def fichas_niveis_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
                        _df: pd.DataFrame) -> str:
     """As fichas de SOP, SSOP e malha, todas fechadas."""
     partes = []
-    for tipo, rotulo in (("SOP", "SOP"), ("SSOP", "SSOP"), ("MALHA", "Malha")):
+    for tipo, rotulo in (("FASE", "Fase"), ("SOP", "SOP"), ("SSOP", "SSOP"),
+                         ("MALHA", "Malha")):
         for valor, sub in _df.groupby(tipo):
             partes.append(_modal_nivel(tipo, valor, sub, rotulo))
     return "".join(partes)
@@ -2064,7 +2077,8 @@ def _no(tipo: str, nome: object, r, nivel: int, filhos: str = "",
     sub = ""
     if "subniveis" in r and pd.notna(r["subniveis"]):
         n = int(r["subniveis"])
-        nome_sub = {"SOP": ("SSOP", "SSOP"), "SSOP": ("malha", "malhas")}.get(tipo)
+        nome_sub = {"FASE": ("SOP", "SOPs"), "SOP": ("SSOP", "SSOP"),
+                    "SSOP": ("malha", "malhas")}.get(tipo)
         if nome_sub:
             sub = f"{br_num(n)} {nome_sub[0] if n == 1 else nome_sub[1]}"
     n_tags = int(r["tags"])
@@ -2112,14 +2126,18 @@ def _modal_nivel(tipo: str, nome: object, sub: pd.DataFrame, rotulo_tipo: str) -
 
     campos = []
     # a cadeia acima: de onde este nivel pendura
+    if tipo != "FASE":
+        campos.append(("Fase", _distintos(sub.FASE, 2)))
     if tipo in ("SSOP", "MALHA"):
         campos.append(("SOP", _distintos(sub.SOP, 2)))
     if tipo == "MALHA":
         campos.append(("SSOP", _distintos(sub.SSOP, 2)))
     # a cadeia abaixo
-    if tipo == "SOP":
+    if tipo == "FASE":
+        campos.append(("SOPs", br_num(sub.SOP.nunique())))
+    if tipo in ("FASE", "SOP"):
         campos.append(("SSOPs", br_num(sub.SSOP.nunique())))
-    if tipo in ("SOP", "SSOP"):
+    if tipo in ("FASE", "SOP", "SSOP"):
         campos.append(("Malhas", br_num(n_mal) if n_mal else "—"))
     campos += [
         ("Instrumentos", br_num(len(sub))),
@@ -2150,9 +2168,9 @@ def _modal_nivel(tipo: str, nome: object, sub: pd.DataFrame, rotulo_tipo: str) -
     if tipo == "MALHA":
         rotulo_sub, corpo = "Instrumentos", _tabela_tags(sub, com_modal=True)
     else:
-        filho = "SSOP" if tipo == "SOP" else "MALHA"
-        neto = "MALHA" if tipo == "SOP" else None
-        rotulo_sub = "SSOPs" if tipo == "SOP" else "Malhas"
+        filho = {"FASE": "SOP", "SOP": "SSOP", "SSOP": "MALHA"}[tipo]
+        neto = {"FASE": "SSOP", "SOP": "MALHA"}.get(tipo)
+        rotulo_sub = {"FASE": "SOPs", "SOP": "SSOPs", "SSOP": "Malhas"}[tipo]
         corpo = _tabela_niveis(sub, filho, neto)
 
     return (
@@ -2176,8 +2194,8 @@ def _tabela_niveis(sub: pd.DataFrame, coluna: str, subnivel: str = None) -> str:
     Cada linha leva a propria ficha, entao dentro da ficha do SOP da para
     descer para a do SSOP sem fechar nada.
     """
-    rotulo = {"SSOP": "SSOP", "MALHA": "Malha"}[coluna]
-    conta_sub = {"MALHA": "#Malhas"}.get(subnivel)
+    rotulo = {"SOP": "SOP", "SSOP": "SSOP", "MALHA": "Malha"}[coluna]
+    conta_sub = {"SSOP": "#SSOPs", "MALHA": "#Malhas"}.get(subnivel)
     linhas = []
     for _, r in agrega_nivel(sub, coluna, subnivel=subnivel).iterrows():
         nome = r[coluna]
@@ -2326,12 +2344,12 @@ def _graficos(df: pd.DataFrame):
     diferentes (chegou a 218px de desequilibrio) e abria um vao no meio.
     """
     blocos = "".join([
+        grafico_avanco("Fases mais avançadas", agrega_nivel(df, "FASE", subnivel="SOP"),
+                       "FASE", rotulo_sub="SOP"),
         grafico_avanco("SOP mais avançados", agrega_nivel(df, "SOP", subnivel="SSOP"),
                        "SOP", rotulo_sub="SSOP"),
-        grafico_avanco("SSOP mais avançados", agrega_nivel(df, "SSOP"), "SSOP"),
-        grafico_avanco("Segmentos mais avançados",
-                       agrega_nivel(df, "SEGMENTO", subnivel="MALHA"), "SEGMENTO",
-                       rotulo_sub="malhas"),
+        grafico_avanco("SSOP mais avançados", agrega_nivel(df, "SSOP", subnivel="MALHA"),
+                       "SSOP", rotulo_sub="malhas"),
         grafico_avanco("Malhas mais avançadas", agrega_nivel(df, "MALHA"), "MALHA"),
     ])
     render_html(f'<div class="gr-grid">{blocos}</div>')
