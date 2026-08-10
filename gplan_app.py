@@ -274,7 +274,7 @@ STATUS_APROVADOS = {"SEM COMENTÁRIOS", "COM COMENTÁRIOS", "PARA CONSTRUÇÃO"}
 # (planilha, filtros), e o Streamlit nao percebe mudanca numa funcao chamada
 # por dentro -- mudei a regra de avanco e a arvore continuou servindo o numero
 # velho. Subir esse numero ao mexer em como o avanco e calculado.
-REGRA_VERSAO = 6
+REGRA_VERSAO = 7
 
 
 def aprovado(serie: pd.Series) -> pd.Series:
@@ -1480,9 +1480,12 @@ def ficha_relatorio_html(doc: str, linhas_esperadas: pd.DataFrame, historico: li
             if tem_url:
                 # abre em aba nova: o SIGEM e outro sistema, e perder o Gplan
                 # aqui e justamente o que se quis evitar
-                cel_url = (f'<td><a class="rel-sigem" href="{esc(url)}" target="_blank" '
-                           f'rel="noopener">Abrir no SIGEM</a></td>' if url is not None
-                           and not vazio(url) else '<td class="gtbl-muted">—</td>')
+                # gtbl-num porque o cabecalho "#SIGEM" e centralizado: sem a
+                # classe a celula fica a esquerda e a coluna sai torta
+                cel_url = (f'<td class="gtbl-num"><a class="rel-sigem" href="{esc(url)}" '
+                           f'target="_blank" rel="noopener">Abrir no SIGEM</a></td>'
+                           if url is not None and not vazio(url)
+                           else '<td class="gtbl-num gtbl-muted">—</td>')
             txt = str(status).strip()
             t = ("ok" if txt.upper() in STATUS_APROVADOS else
                  "crit" if txt.upper() in {"RECUSADO", "CANCELADO"} else "andamento")
@@ -1491,13 +1494,12 @@ def ficha_relatorio_html(doc: str, linhas_esperadas: pd.DataFrame, historico: li
                 # o motivo da recusa em vermelho: e o que precisa ser tratado
                 cel_com = (f'<td class="rel-com">{esc(com)}</td>' if com is not None
                            and not vazio(com) else '<td class="gtbl-muted">—</td>')
+            cel_data = (f'<td class="gtbl-num">{data:%d/%m/%Y}</td>' if data is not None
+                        else '<td class="gtbl-num gtbl-muted">—</td>')
             linhas.append(
-                f"<tr><td class=\"gtbl-strong\">{esc(rev)}</td>"
+                f'<tr><td class="gtbl-strong">{esc(rev)}</td>'
                 f'<td><span class="gtbl-badge {t}">{esc(txt)}</span></td>'
-                f"<td>{data:%d/%m/%Y} </td>{cel_url}{cel_com}</tr>" if data is not None else
-                f"<tr><td class=\"gtbl-strong\">{esc(rev)}</td>"
-                f'<td><span class="gtbl-badge {t}">{esc(txt)}</span></td>'
-                f'<td class="gtbl-muted">—</td>{cel_url}{cel_com}</tr>'
+                f"{cel_data}{cel_url}{cel_com}</tr>"
             )
         cab = (["Revisão", "Status", "#Data"] + (["#SIGEM"] if tem_url else [])
                + (["Comentário da fiscalização"] if tem_com else []))
