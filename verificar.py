@@ -85,12 +85,17 @@ print("\nREGRAS DOCUMENTAIS")
 # toda TAG tem exatamente um destes: e a regra que define a base inteira
 conferir("CCP + RTFCJI + RIMITPI = TAGs",
          int(esperados.RELATORIO.isin(["CCP", "RTFCJI", "RIMITPI"]).sum()), n_tags)
-ct = set(esperados[esperados.RELATORIO == "CTECRI"].REFERENCIA.astype(str))
-rl = set(esperados[esperados.RELATORIO == "RILTCI"].REFERENCIA.astype(str))
-conferir("CTECRI e RILTCI no mesmo circuito", len(ct & rl), 0,
-         "os dois se excluem por circuito")
+# A exclusividade e por TAG, nao pelo cabo. Um mesmo circuito liga duas
+# pontas: o instrumento responde pelo ensaio de comunicacao e a caixa de
+# juncao pelo de continuidade. Sao ensaios diferentes, em pontas diferentes.
+# O que nao pode e a MESMA TAG cobrar os dois pelo mesmo circuito.
+par = lambda rel: set(map(tuple, esperados[esperados.RELATORIO == rel]
+                          [["TAG", "REFERENCIA"]].astype(str).values))
+conferir("mesma TAG com CTECRI e RILTCI no mesmo circuito",
+         len(par("CTECRI") & par("RILTCI")), 0)
 conferir("CTECRI em circuito de potência",
-         sum(1 for r in ct if r.upper().endswith("-P")), 0,
+         int(esperados[esperados.RELATORIO == "CTECRI"].REFERENCIA
+             .astype(str).str.upper().str.endswith("-P").sum()), 0,
          "cabo de potência não carrega comunicação")
 conferir("esperados no resumo = linhas da 08",
          int(resumo.RELATORIOS_ESPERADOS.sum()), n_esp)
