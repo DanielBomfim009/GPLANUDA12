@@ -201,7 +201,10 @@ def search_any_column(df: pd.DataFrame, text: str) -> pd.Series:
     row-wise .apply() which is orders of magnitude slower on large tables."""
     mask = pd.Series(False, index=df.index)
     for col in df.columns:
-        mask = mask | df[col].astype(str).str.contains(text, case=False, na=False)
+        # regex=False: o usuario digita codigo de documento, e um "." ali e um
+        # ponto literal. Sem isso, buscar C1N_..._3.1.1.1_... casava com 13
+        # linhas em vez de uma, porque cada ponto virava "qualquer caractere".
+        mask = mask | df[col].astype(str).str.contains(text, case=False, na=False, regex=False)
     return mask
 
 
@@ -552,6 +555,12 @@ def inject_css():
         /* etapa do caminho, nao alerta: azul, a mesma familia da pill de TAG */
         .gtbl-badge.andamento { color:#a9c5ff; background:rgba(91,141,239,0.14); border:1px solid rgba(91,141,239,0.26); }
         .gtbl-empty { padding:34px 4px; text-align:center; color:var(--text-3); font-size:13px; }
+        /* o motivo da recusa e o que precisa ser tratado: vermelho e legivel,
+           nao pill -- o texto da fiscalizacao pode ser longo */
+        .rel-com { color:#fca5a5; font-size:12.5px; white-space:normal; max-width:520px; }
+        .rel-titulo { font-size:15px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+                      letter-spacing:-0.2px; word-break:break-all; }
+        .rel-sit { flex-shrink:0; align-self:center; }
         .prg-trilha { font-size:12.5px; color:var(--text-2); margin-bottom:18px; }
         .prg-sep { color:var(--text-3); margin:0 2px; }
         a.prg-link { color:#a9c5ff !important; text-decoration:none !important; font-weight:600; }
@@ -1093,7 +1102,7 @@ def tag_link(value: object) -> str:
 
 
 def fichas_modais_html(tags_ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
-                       tags: pd.DataFrame) -> str:
+                       tags: pd.DataFrame, ficha_rel: bool = True) -> str:
     """Modais das tags visiveis na pagina, abertos/fechados via CSS :target."""
     ids = list(dict.fromkeys(tags_ids))  # unicas, preservando a ordem
     # Indexar uma vez. Antes cada ficha varria resumo, esperados e tags
@@ -1110,7 +1119,8 @@ def fichas_modais_html(tags_ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
         if tag_id not in g_resumo:
             continue
         corpo = tag_ficha_html(tag_id, g_resumo[tag_id], g_esp.get(tag_id, vazio_esp),
-                               g_tags.get(tag_id, vazio_tags), com_cabecalho=False)
+                               g_tags.get(tag_id, vazio_tags), com_cabecalho=False,
+                               ficha_rel=ficha_rel)
         if corpo is None:
             continue
         blocos += f"""
@@ -1276,7 +1286,8 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     )
 
 
-def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame):
+def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame,
+                      sigem: pd.DataFrame, cache_key: str = ""):
     render_header("Relatórios previstos")
 
     # Mantem ORIGEM_REGRA no dataframe (sem exibir): e ela que separa
@@ -1286,6 +1297,14 @@ def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.Da
     df["DATA_SIGEM"] = format_date_column(df["DATA_SIGEM"])
 
     consume_url_filters(esperados)
+
+    # ?busca= chega da ficha da TAG na aba Progresso. Aplicado uma vez, senao
+    # todo rerun sobrescreveria o que o usuario digitou depois.
+    pedido = st.query_params.get("busca")
+    if pedido and st.session_state.get("_busca_token") != pedido:
+        st.session_state["_busca_token"] = pedido
+        st.session_state["mem_rel_busca"] = pedido
+        st.session_state.pop("rel_busca", None)
 
     search = lembrado(st.text_input, "rel_busca", "Pesquisar", placeholder="Pesquisar por tag, descrição, relatório, documento, status...", label_visibility="collapsed")
 
@@ -1329,7 +1348,7 @@ def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.Da
               <td class="gtbl-muted">{esc(str(r['GRUPO']).title())}</td>
               <td class="gtbl-strong">{esc(r['RELATORIO'])}</td>
               <td class="gtbl-muted">{esc(r['REFERENCIA'])}</td>
-              <td class="gtbl-mono">{esc(r['DOCUMENTO_ESPERADO'])}</td>
+              <td>{doc_link(r['DOCUMENTO_ESPERADO'])}</td>
               <td class="gtbl-num">{yes_no_badge(r['EXISTE_NO_SIGEM'])}</td>
               <td>{status_badge(r['STATUS_SIGEM'])}</td>
               <td class="gtbl-num gtbl-muted">{esc(r['REVISAO_SIGEM'])}</td>
@@ -1346,11 +1365,145 @@ def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.Da
         )
         + "</div>"
         + fichas_modais_html(df_page["TAG"].tolist(), resumo, esperados, tags)
+        + fichas_relatorios_html(df_page["DOCUMENTO_ESPERADO"].tolist(), esperados,
+                                 _revisoes_por_doc(cache_key, sigem))
+    )
+
+
+# Nome da coluna de comentario da fiscalizacao na 04_BASE_SIGEM. Ainda nao
+# existe na base; quando existir, e so acrescentar o nome aqui que a ficha
+# passa a mostrar. Enquanto nao houver, a coluna simplesmente nao aparece.
+COLUNAS_COMENTARIO = ("COMENTARIO", "COMENTÁRIO", "COMENTARIO_RECUSA",
+                      "MOTIVO_RECUSA", "OBSERVACAO", "OBSERVAÇÃO")
+
+
+def coluna_comentario(sigem: pd.DataFrame) -> str | None:
+    for c in COLUNAS_COMENTARIO:
+        if c in sigem.columns:
+            return c
+    return None
+
+
+def doc_ancora(doc: object) -> str:
+    """Id do modal de um relatorio."""
+    return "rel-" + "".join(c if c.isalnum() else "-" for c in str(doc))
+
+
+def doc_link(doc: object, ancora: bool = True) -> str:
+    """Com ancora, abre a ficha na propria pagina. Sem, leva para a aba
+    Relatorios ja buscando o documento -- e o que a aba Progresso usa, porque
+    as 20.088 fichas de relatorio nao cabem na pagina unica dela."""
+    if ancora:
+        return (f'<a class="gtbl-mono gtbl-link" href="#{doc_ancora(doc)}" '
+                f'title="Abrir ficha do relatório">{esc(doc)}</a>')
+    return (f'<a class="gtbl-mono gtbl-link" href="/relatorios?busca={quote(str(doc))}" '
+            f'target="_self" title="Ver em Relatórios">{esc(doc)}</a>')
+
+
+@st.cache_data(show_spinner=False, max_entries=3)
+def _revisoes_por_doc(cache_key: str, _sigem: pd.DataFrame) -> dict:
+    """Historico de revisoes de cada documento, ordenado da mais nova.
+
+    Na base do SIGEM o endereco do documento vem separado da revisao, entao
+    cada postagem e uma linha -- da para reconstruir o historico inteiro.
+    """
+    col_com = coluna_comentario(_sigem)
+    usar = ["DOCUMENTO", "REVISAO", "STATUS", "DATA"] + ([col_com] if col_com else [])
+    s = _sigem[usar].copy()
+    s["_dt"] = pd.to_datetime(s["DATA"], dayfirst=True, errors="coerce")
+    s = s.sort_values("_dt", ascending=False)
+    hist: dict[str, list] = {}
+    for doc, rev, status, data, *resto in zip(
+            s["DOCUMENTO"].values, s["REVISAO"].values, s["STATUS"].values,
+            s["_dt"].values, *( [s[col_com].values] if col_com else [] )):
+        hist.setdefault(str(doc), []).append(
+            (rev, status, pd.Timestamp(data) if pd.notna(data) else None,
+             resto[0] if resto else None))
+    return hist
+
+
+def ficha_relatorio_html(doc: str, linhas_esperadas: pd.DataFrame, historico: list) -> str:
+    """Ficha de um relatorio: o que se espera dele e como ele andou no SIGEM."""
+    primeira = linhas_esperadas.iloc[0]
+    tags_doc = sorted({str(t) for t in linhas_esperadas["TAG"]})
+    atual = historico[0] if historico else None
+    status_atual = str(atual[1]).strip() if atual else "Não postado"
+    aprovada = status_atual.upper() in STATUS_APROVADOS
+    tom = "ok" if aprovada else ("crit" if status_atual.upper() in
+                                 {"RECUSADO", "CANCELADO"} else "andamento")
+
+    campos = [
+        ("Relatório", str(primeira["RELATORIO"])),
+        ("Grupo", str(primeira["GRUPO"]).title()),
+        ("Referência", str(primeira["REFERENCIA"])),
+        ("Instrumentos", br_num(len(tags_doc)) if len(tags_doc) > 1 else tags_doc[0]),
+        ("Revisões", br_num(len(historico)) if historico else "—"),
+        ("Situação", status_atual),
+    ]
+    if atual and atual[2] is not None:
+        dias = (pd.Timestamp.now(tz=BR_TZ).tz_localize(None).normalize() - atual[2].normalize()).days
+        campos.append(("Última postagem", f"{atual[2]:%d/%m/%Y}"))
+        # so vira contagem de parado quando a situacao ainda cobra acao
+        if not aprovada:
+            campos.append((f"Parado há", f"{br_num(dias)} dia{'s' if dias != 1 else ''}"))
+
+    cards = "".join(
+        f"<div><span>{esc(l)}</span><span>{esc(v)}</span></div>" for l, v in campos
+    )
+
+    if historico:
+        tem_com = any(h[3] is not None and not vazio(h[3]) for h in historico)
+        linhas = []
+        for rev, status, data, com in historico:
+            txt = str(status).strip()
+            t = ("ok" if txt.upper() in STATUS_APROVADOS else
+                 "crit" if txt.upper() in {"RECUSADO", "CANCELADO"} else "andamento")
+            cel_com = ""
+            if tem_com:
+                # o motivo da recusa em vermelho: e o que precisa ser tratado
+                cel_com = (f'<td class="rel-com">{esc(com)}</td>' if com is not None
+                           and not vazio(com) else '<td class="gtbl-muted">—</td>')
+            linhas.append(
+                f"<tr><td class=\"gtbl-strong\">{esc(rev)}</td>"
+                f'<td><span class="gtbl-badge {t}">{esc(txt)}</span></td>'
+                f"<td>{data:%d/%m/%Y} </td>{cel_com}</tr>" if data is not None else
+                f"<tr><td class=\"gtbl-strong\">{esc(rev)}</td>"
+                f'<td><span class="gtbl-badge {t}">{esc(txt)}</span></td>'
+                f'<td class="gtbl-muted">—</td>{cel_com}</tr>'
+            )
+        cab = ["Revisão", "Status", "#Data"] + (["Comentário da fiscalização"] if tem_com else [])
+        corpo = html_table(cab, "".join(linhas))
+    else:
+        corpo = ('<div class="gtbl-empty">Ainda não postado no SIGEM. '
+                 "Nenhuma revisão registrada.</div>")
+
+    return (
+        f'<div class="fmodal" id="{doc_ancora(doc)}">'
+        '<a class="fmodal-bg" href="#fechado" aria-label="Fechar"></a>'
+        '<div class="fmodal-box"><div class="fmodal-head"><div>'
+        f'<div class="fn-tipo">Relatório · {esc(primeira["RELATORIO"])}</div>'
+        f'<div class="fmodal-title rel-titulo">{esc(doc)}</div></div>'
+        f'<span class="gtbl-badge {tom} rel-sit">{esc(status_atual)}</span>'
+        '<a class="fmodal-x" href="#fechado" aria-label="Fechar">&times;</a></div>'
+        f'<div class="fmodal-body"><div class="detail-grid">{cards}</div>'
+        f'<div class="ficha-sub">Histórico de revisões</div>{corpo}</div></div></div>'
+    )
+
+
+def fichas_relatorios_html(docs, esperados: pd.DataFrame, historico: dict) -> str:
+    """Fichas dos relatorios visiveis na pagina."""
+    unicos = list(dict.fromkeys(str(d) for d in docs))
+    por_doc = {k: v for k, v in
+               esperados[esperados["DOCUMENTO_ESPERADO"].isin(unicos)].groupby("DOCUMENTO_ESPERADO")}
+    return "".join(
+        ficha_relatorio_html(d, por_doc[d], historico.get(d, []))
+        for d in unicos if d in por_doc
     )
 
 
 def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
-                   tags: pd.DataFrame, com_cabecalho: bool = True) -> str | None:
+                   tags: pd.DataFrame, com_cabecalho: bool = True,
+                   ficha_rel: bool = True) -> str | None:
     """Ficha completa da tag como um bloco HTML unico, para servir tanto a aba
     Pesquisa tag quanto o modal aberto pelo Dashboard/Relatorios."""
     resumo_row = resumo[resumo["TAG"] == tag_id]
@@ -1405,7 +1558,7 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
             meus["REVISAO_SIGEM"].values):
         linhas.append(
             f'<tr><td class="gtbl-strong">{esc(rel)}</td><td>{esc(ref)}</td>'
-            f"<td>{esc(doc)}</td><td>{status_badge(stat)}</td>"
+            f"<td>{doc_link(doc, ancora=ficha_rel)}</td><td>{status_badge(stat)}</td>"
             f"<td>{esc(format_missing(rev))}</td></tr>"
         )
     tabela = html_table(
@@ -1425,7 +1578,8 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
     )
 
 
-def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame):
+def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame,
+                        sigem: pd.DataFrame, cache_key: str = ""):
     render_header("Pesquisa tag")
 
     if "gplan_selected_tag" not in st.session_state:
@@ -1451,9 +1605,12 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
                 st.query_params.clear()
                 st.rerun()
 
+        meus = esperados[esperados["TAG"] == tag_id]
         render_html('<div class="gplan-panel">'
                     + tag_ficha_html(tag_id, resumo, esperados, tags)
-                    + "</div>")
+                    + "</div>"
+                    + fichas_relatorios_html(meus["DOCUMENTO_ESPERADO"].tolist(), esperados,
+                                             _revisoes_por_doc(cache_key, sigem)))
         return
 
     search = lembrado(st.text_input, "pesq_busca", "Pesquisar", placeholder="Digite a tag para ver a ficha completa (ex: AIT-120005)...", label_visibility="collapsed")
@@ -1466,7 +1623,8 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
     if campo:
         list_df = list_df.merge(tags[["TAG"] + campo], on="TAG", how="left")
     if search:
-        mask = list_df["TAG"].astype(str).str.contains(search, case=False, na=False) | list_df["DESCRICAO"].astype(str).str.contains(search, case=False, na=False)
+        mask = (list_df["TAG"].astype(str).str.contains(search, case=False, na=False, regex=False)
+                | list_df["DESCRICAO"].astype(str).str.contains(search, case=False, na=False, regex=False))
         list_df = list_df[mask]
 
     list_df["AVANCO_DOCUMENTAL"] = (list_df["AVANCO_DOCUMENTAL"] * 100).round(1)
@@ -1794,7 +1952,7 @@ def fichas_tags_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
                      _tags: pd.DataFrame) -> str:
     """As fichas das 5.098 TAGs. Cada uma varre a 08_RELATORIOS_ESPERADOS, por
     isso o cache -- sem ele isso se repetia a cada clique."""
-    return fichas_modais_html(_ids, _resumo, _esperados, _tags)
+    return fichas_modais_html(_ids, _resumo, _esperados, _tags, ficha_rel=False)
 
 
 def _totais(df: pd.DataFrame) -> str:
@@ -2142,9 +2300,9 @@ def main():
         )
 
     dashboard_page = st.Page(lambda: _sob_carga("Carregando o painel", lambda: render_dashboard(resumo, esperados, tags)), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
-    relatorios_page = st.Page(lambda: _sob_carga("Carregando os relatórios", lambda: render_relatorios(esperados, resumo, tags)), title="Relatórios", icon=":material/description:", url_path="relatorios")
+    relatorios_page = st.Page(lambda: _sob_carga("Carregando os relatórios", lambda: render_relatorios(esperados, resumo, tags, sigem, cache_key)), title="Relatórios", icon=":material/description:", url_path="relatorios")
     progresso_page = st.Page(lambda: _sob_carga("Abrindo o Progresso", lambda: render_progresso(resumo, esperados, tags, cache_key)), title="Progresso", icon=":material/insights:", url_path="progresso")
-    pesquisa_page = st.Page(lambda: _sob_carga("Carregando as tags", lambda: render_pesquisa_tag(resumo, esperados, tags)), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
+    pesquisa_page = st.Page(lambda: _sob_carga("Carregando as tags", lambda: render_pesquisa_tag(resumo, esperados, tags, sigem, cache_key)), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
     sigem_page = st.Page(lambda: _sob_carga("Carregando a base SIGEM", lambda: render_sigem(sigem)), title="Base SIGEM", icon=":material/database:", url_path="sigem")
 
     nav = st.navigation([dashboard_page, progresso_page, relatorios_page, pesquisa_page, sigem_page], position="sidebar")
