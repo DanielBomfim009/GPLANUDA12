@@ -575,12 +575,10 @@ def inject_css():
            Relatorios ja buscando a TAG. */
         /* As duas colunas do Dashboard num grid so, para terminarem juntas.
            O painel de recusados estica para fechar o bloco. */
-        .dash-linha { display:grid; grid-template-columns:1.6fr 1fr; gap:22px;
-                      align-items:stretch; margin-bottom:22px; }
+        .dash-linha { display:grid; grid-template-columns:1.55fr 1fr; gap:22px;
+                      align-items:start; margin-bottom:22px; }
         .dash-dir { display:flex; flex-direction:column; gap:22px; }
         .dash-linha > .gplan-panel, .dash-dir > .gplan-panel { margin-bottom:0 !important; }
-        .dash-dir > .gplan-panel:last-child { flex:1; display:flex; flex-direction:column; }
-        .dash-dir .rec-lista { flex:1; display:flex; flex-direction:column; justify-content:space-between; }
         @media (max-width:1100px) { .dash-linha { grid-template-columns:1fr; } }
         /* faixa de resumo das abas de lista */
         .fx-faixa { display:grid; grid-auto-flow:column; grid-auto-columns:1fr;
@@ -827,17 +825,21 @@ def inject_css():
         .flt-summary { font-size:12.5px; color:var(--text-2); padding:2px 2px 0; }
         .flt-summary strong { color:var(--text-1); }
 
-        .sg-chart-wrap { position:relative; width:100%; max-width:250px; margin: 4px auto 24px; }
+        .sg-corpo { display:flex; align-items:center; gap:20px; }
+        .sg-chart-wrap { position:relative; width:148px; flex-shrink:0; margin:2px 0; }
+        .sg-legend { flex:1; min-width:0; }
+        @media (max-width:780px) { .sg-corpo { flex-direction:column; }
+                                   .sg-chart-wrap { width:180px; } }
         .sg-donut { width:100%; height:auto; display:block; }
         .sg-center {
           position:absolute; inset:0; display:flex; flex-direction:column;
           align-items:center; justify-content:center; pointer-events:none;
         }
-        .sg-center-value { font-size:30px; font-weight:800; color:var(--text-1); letter-spacing:-1px; line-height:1; }
-        .sg-center-label { font-size:11.5px; color:var(--text-3); margin-top:5px; }
+        .sg-center-value { font-size:20px; font-weight:800; color:var(--text-1); letter-spacing:-0.6px; line-height:1; }
+        .sg-center-label { font-size:10px; color:var(--text-3); margin-top:3px; }
         .sg-legend { display:flex; flex-direction:column; }
         .sg-leg-row {
-          display:flex; align-items:center; gap:10px; padding:9px 8px;
+          display:flex; align-items:center; gap:10px; padding:7px 8px;
           margin: 0 -8px; border-radius:7px;
           border-bottom:1px solid rgba(255,255,255,0.04);
         }
@@ -1111,17 +1113,22 @@ def status_panel(labels: list, values: list, colors: list, total: int) -> str:
             f"</a>"
         )
 
+    # Donut e legenda lado a lado, e nao empilhados: empilhado o painel media
+    # 637px e a coluna esquerda 772px, entao nao sobrava altura para o painel
+    # de recusados sem esticar alguma coisa.
     return f"""
         <div class="gplan-panel">
           <div class="gplan-panel-title">Status SIGEM</div>
-          <div class="sg-chart-wrap">
-            <svg class="sg-donut" viewBox="0 0 176 176">{segments}</svg>
-            <div class="sg-center">
-              <div class="sg-center-value">{br_num(total)}</div>
-              <div class="sg-center-label">Relatórios</div>
+          <div class="sg-corpo">
+            <div class="sg-chart-wrap">
+              <svg class="sg-donut" viewBox="0 0 176 176">{segments}</svg>
+              <div class="sg-center">
+                <div class="sg-center-value">{br_num(total)}</div>
+                <div class="sg-center-label">Relatórios</div>
+              </div>
             </div>
+            <div class="sg-legend">{legend}</div>
           </div>
-          <div class="sg-legend">{legend}</div>
         </div>
     """
 
@@ -1220,7 +1227,7 @@ def fichas_modais_html(tags_ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
     return blocos
 
 
-TOPO_RECUSADOS = 6
+TOPO_RECUSADOS = 7
 
 
 def painel_recusados(esperados: pd.DataFrame, sigem: pd.DataFrame) -> str:
@@ -1806,15 +1813,6 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
         list_df = list_df[mask]
 
     list_df["AVANCO_DOCUMENTAL"] = (list_df["AVANCO_DOCUMENTAL"] * 100).round(1)
-    av = list_df["AVANCO_DOCUMENTAL"]
-    render_html(faixa_resumo([
-        ("No recorte", br_num(len(list_df)), None),
-        ("Sem nenhum aprovado", br_num(int((av <= 0).sum())), "ruim"),
-        ("Em andamento", br_num(int(((av > 0) & (av < 100)).sum())), None),
-        ("Completas", br_num(int((av >= 100).sum())), "bom"),
-        ("Avanço médio", br_pct(float(av.mean()) if len(av) else 0), None),
-    ]))
-
     list_df_page = paginate(list_df, "pesquisa", search)
 
     rows = ""
@@ -1871,17 +1869,6 @@ def render_sigem(sigem: pd.DataFrame):
     df = df.sort_values(["_REVISAO_SORT", "_DOCUMENTO_SORT"]).drop(columns=["_REVISAO_SORT", "_DOCUMENTO_SORT"])
 
     df["DATA"] = format_date_column(df["DATA"])
-    st_sig = df["STATUS"].astype(str).str.strip().str.upper()
-    render_html(faixa_resumo([
-        ("No recorte", br_num(len(df)), None),
-        ("Aprovados", br_num(int(st_sig.isin(STATUS_APROVADOS).sum())), "bom"),
-        ("Recusados", br_num(int((st_sig == "RECUSADO").sum())), "ruim"),
-        ("Em análise", br_num(int((st_sig == "EM ANÁLISE").sum())), None),
-        ("Documentos", br_num(int(df["DOCUMENTO"].nunique())), None),
-        ("Revisões por documento",
-         f'{len(df) / max(df["DOCUMENTO"].nunique(), 1):.1f}'.replace(".", ","), None),
-    ]))
-
     df_page = paginate(df, "sigem", f"{status_filter}|{text_search}")
 
     rows = ""
