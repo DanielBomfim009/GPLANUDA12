@@ -274,7 +274,7 @@ STATUS_APROVADOS = {"SEM COMENTÁRIOS", "COM COMENTÁRIOS", "PARA CONSTRUÇÃO"}
 # (planilha, filtros), e o Streamlit nao percebe mudanca numa funcao chamada
 # por dentro -- mudei a regra de avanco e a arvore continuou servindo o numero
 # velho. Subir esse numero ao mexer em como o avanco e calculado.
-REGRA_VERSAO = 3
+REGRA_VERSAO = 5
 
 
 def aprovado(serie: pd.Series) -> pd.Series:
@@ -1102,7 +1102,7 @@ def tag_link(value: object) -> str:
 
 
 def fichas_modais_html(tags_ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
-                       tags: pd.DataFrame, ficha_rel: bool = True) -> str:
+                       tags: pd.DataFrame) -> str:
     """Modais das tags visiveis na pagina, abertos/fechados via CSS :target."""
     ids = list(dict.fromkeys(tags_ids))  # unicas, preservando a ordem
     # Indexar uma vez. Antes cada ficha varria resumo, esperados e tags
@@ -1119,8 +1119,7 @@ def fichas_modais_html(tags_ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
         if tag_id not in g_resumo:
             continue
         corpo = tag_ficha_html(tag_id, g_resumo[tag_id], g_esp.get(tag_id, vazio_esp),
-                               g_tags.get(tag_id, vazio_tags), com_cabecalho=False,
-                               ficha_rel=ficha_rel)
+                               g_tags.get(tag_id, vazio_tags), com_cabecalho=False)
         if corpo is None:
             continue
         blocos += f"""
@@ -1348,7 +1347,7 @@ def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.Da
               <td class="gtbl-muted">{esc(str(r['GRUPO']).title())}</td>
               <td class="gtbl-strong">{esc(r['RELATORIO'])}</td>
               <td class="gtbl-muted">{esc(r['REFERENCIA'])}</td>
-              <td>{doc_link(r['DOCUMENTO_ESPERADO'])}</td>
+              <td>{doc_link(r['DOCUMENTO_ESPERADO'], POSTADO(r['STATUS_SIGEM']))}</td>
               <td class="gtbl-num">{yes_no_badge(r['EXISTE_NO_SIGEM'])}</td>
               <td>{status_badge(r['STATUS_SIGEM'])}</td>
               <td class="gtbl-num gtbl-muted">{esc(r['REVISAO_SIGEM'])}</td>
@@ -1384,20 +1383,27 @@ def coluna_comentario(sigem: pd.DataFrame) -> str | None:
     return None
 
 
+def POSTADO(status: object) -> bool:
+    """Tem historico no SIGEM, logo tem ficha para abrir."""
+    return str(status).strip().upper() not in ("NAO POSTADO", "NÃO POSTADO", "", "NAN")
+
+
 def doc_ancora(doc: object) -> str:
     """Id do modal de um relatorio."""
     return "rel-" + "".join(c if c.isalnum() else "-" for c in str(doc))
 
 
-def doc_link(doc: object, ancora: bool = True) -> str:
-    """Com ancora, abre a ficha na propria pagina. Sem, leva para a aba
-    Relatorios ja buscando o documento -- e o que a aba Progresso usa, porque
-    as 20.088 fichas de relatorio nao cabem na pagina unica dela."""
-    if ancora:
-        return (f'<a class="gtbl-mono gtbl-link" href="#{doc_ancora(doc)}" '
-                f'title="Abrir ficha do relatório">{esc(doc)}</a>')
-    return (f'<a class="gtbl-mono gtbl-link" href="/relatorios?busca={quote(str(doc))}" '
-            f'target="_self" title="Ver em Relatórios">{esc(doc)}</a>')
+def doc_link(doc: object, tem_ficha: bool = True) -> str:
+    """Link para a ficha do relatorio, na propria pagina.
+
+    Sem ficha nao vira link: os 15.203 relatorios nunca postados nao tem
+    historico nenhum para mostrar, e um link que abre o nada e pior que
+    texto. O status deles ja aparece na propria linha.
+    """
+    if not tem_ficha:
+        return f'<span class="gtbl-mono">{esc(doc)}</span>'
+    return (f'<a class="gtbl-mono gtbl-link" href="#{doc_ancora(doc)}" '
+            f'title="Abrir ficha do relatório">{esc(doc)}</a>')
 
 
 @st.cache_data(show_spinner=False, max_entries=3)
@@ -1477,14 +1483,22 @@ def ficha_relatorio_html(doc: str, linhas_esperadas: pd.DataFrame, historico: li
         corpo = ('<div class="gtbl-empty">Ainda não postado no SIGEM. '
                  "Nenhuma revisão registrada.</div>")
 
+    # Fechar volta para a ficha da TAG de onde se veio, e nao para a arvore:
+    # quem abre um relatorio quase sempre quer conferir os outros da mesma TAG
+    # em seguida. So da para saber a origem quando o documento pertence a uma
+    # TAG so -- 161 deles sao compartilhados, ate por 700 TAGs, e nesses o
+    # fechar volta para a arvore mesmo.
+    volta = f"#{ficha_anchor(tags_doc[0])}" if len(tags_doc) == 1 else "#fechado"
+    rotulo_volta = "Voltar para a TAG" if len(tags_doc) == 1 else "Fechar"
     return (
         f'<div class="fmodal" id="{doc_ancora(doc)}">'
-        '<a class="fmodal-bg" href="#fechado" aria-label="Fechar"></a>'
+        f'<a class="fmodal-bg" href="{volta}" aria-label="{rotulo_volta}"></a>'
         '<div class="fmodal-box"><div class="fmodal-head"><div>'
         f'<div class="fn-tipo">Relatório · {esc(primeira["RELATORIO"])}</div>'
         f'<div class="fmodal-title rel-titulo">{esc(doc)}</div></div>'
         f'<span class="gtbl-badge {tom} rel-sit">{esc(status_atual)}</span>'
-        '<a class="fmodal-x" href="#fechado" aria-label="Fechar">&times;</a></div>'
+        f'<a class="fmodal-x" href="{volta}" aria-label="{rotulo_volta}" '
+        f'title="{rotulo_volta}">&times;</a></div>'
         f'<div class="fmodal-body"><div class="detail-grid">{cards}</div>'
         f'<div class="ficha-sub">Histórico de revisões</div>{corpo}</div></div></div>'
     )
@@ -1502,8 +1516,7 @@ def fichas_relatorios_html(docs, esperados: pd.DataFrame, historico: dict) -> st
 
 
 def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
-                   tags: pd.DataFrame, com_cabecalho: bool = True,
-                   ficha_rel: bool = True) -> str | None:
+                   tags: pd.DataFrame, com_cabecalho: bool = True) -> str | None:
     """Ficha completa da tag como um bloco HTML unico, para servir tanto a aba
     Pesquisa tag quanto o modal aberto pelo Dashboard/Relatorios."""
     resumo_row = resumo[resumo["TAG"] == tag_id]
@@ -1558,7 +1571,7 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
             meus["REVISAO_SIGEM"].values):
         linhas.append(
             f'<tr><td class="gtbl-strong">{esc(rel)}</td><td>{esc(ref)}</td>'
-            f"<td>{doc_link(doc, ancora=ficha_rel)}</td><td>{status_badge(stat)}</td>"
+            f"<td>{doc_link(doc, POSTADO(stat))}</td><td>{status_badge(stat)}</td>"
             f"<td>{esc(format_missing(rev))}</td></tr>"
         )
     tabela = html_table(
@@ -1874,7 +1887,7 @@ def arvore_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
 
 
 def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame,
-                     cache_key: str = ""):
+                     sigem: pd.DataFrame, cache_key: str = ""):
     render_header("Progresso")
     df = progresso_base(resumo, tags)
 
@@ -1926,6 +1939,11 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     fichas = fichas_tags_html(cache_key, f_seg, f_malha, pag,
                               df_pag["TAG"].tolist(), resumo, esperados, tags)
 
+    lugar.markdown(tela_carregando("Preparando as fichas dos relatórios", 92,
+                                   coberta=False), unsafe_allow_html=True)
+    fichas += fichas_relatorios_pagina(cache_key, f_seg, f_malha, pag,
+                                       df_pag["TAG"].tolist(), esperados, sigem)
+
     lugar.html(
         '<div class="gplan-panel">'
         '<div class="gplan-panel-title">SOP · SSOP · MALHA · TAG</div>'
@@ -1947,12 +1965,28 @@ def fichas_niveis_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
 
 
 @st.cache_data(show_spinner=False, max_entries=3)
+def fichas_relatorios_pagina(cache_key: str, f_seg: str, f_malha: str, pag: int,
+                             _tags_ids: list, _esperados: pd.DataFrame,
+                             _sigem: pd.DataFrame) -> str:
+    """Fichas dos relatorios das TAGs da pagina, so os ja postados.
+
+    Os 15.203 nunca postados custariam 20 MB para nao dizer nada alem do
+    "Nao postado" que a linha ja mostra. Os 4.885 com historico custam 6 MB e
+    sao os unicos com revisao, data e motivo de recusa para exibir.
+    """
+    meus = _esperados[_esperados["TAG"].isin(set(_tags_ids))]
+    postados = meus[meus["STATUS_SIGEM"].map(POSTADO)]
+    return fichas_relatorios_html(postados["DOCUMENTO_ESPERADO"].tolist(), _esperados,
+                                  _revisoes_por_doc(cache_key, _sigem))
+
+
+@st.cache_data(show_spinner=False, max_entries=3)
 def fichas_tags_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
                      _ids: list, _resumo: pd.DataFrame, _esperados: pd.DataFrame,
                      _tags: pd.DataFrame) -> str:
     """As fichas das 5.098 TAGs. Cada uma varre a 08_RELATORIOS_ESPERADOS, por
     isso o cache -- sem ele isso se repetia a cada clique."""
-    return fichas_modais_html(_ids, _resumo, _esperados, _tags, ficha_rel=False)
+    return fichas_modais_html(_ids, _resumo, _esperados, _tags)
 
 
 def _totais(df: pd.DataFrame) -> str:
@@ -2301,7 +2335,7 @@ def main():
 
     dashboard_page = st.Page(lambda: _sob_carga("Carregando o painel", lambda: render_dashboard(resumo, esperados, tags)), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
     relatorios_page = st.Page(lambda: _sob_carga("Carregando os relatórios", lambda: render_relatorios(esperados, resumo, tags, sigem, cache_key)), title="Relatórios", icon=":material/description:", url_path="relatorios")
-    progresso_page = st.Page(lambda: _sob_carga("Abrindo o Progresso", lambda: render_progresso(resumo, esperados, tags, cache_key)), title="Progresso", icon=":material/insights:", url_path="progresso")
+    progresso_page = st.Page(lambda: _sob_carga("Abrindo o Progresso", lambda: render_progresso(resumo, esperados, tags, sigem, cache_key)), title="Progresso", icon=":material/insights:", url_path="progresso")
     pesquisa_page = st.Page(lambda: _sob_carga("Carregando as tags", lambda: render_pesquisa_tag(resumo, esperados, tags, sigem, cache_key)), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
     sigem_page = st.Page(lambda: _sob_carga("Carregando a base SIGEM", lambda: render_sigem(sigem)), title="Base SIGEM", icon=":material/database:", url_path="sigem")
 
