@@ -450,6 +450,7 @@ def inject_css():
         section[data-testid="stSidebar"] {
           background: linear-gradient(180deg, #0d1224 0%, #0a0e1a 100%);
           border-right: 1px solid var(--border-color);
+          width: 212px !important; min-width: 212px !important;
         }
         /* O st.navigation sempre injeta o menu antes do conteudo do usuario,
            entao a marca caia embaixo. Reordena via flex para o topo. */
@@ -469,7 +470,10 @@ def inject_css():
         }
         .gplan-brand-mark { width:34px; height:34px; flex-shrink:0; }
         .gplan-brand-name { font-size:16px; font-weight:800; color:var(--text-1); letter-spacing:-0.3px; line-height:1.1; }
-        .gplan-brand-sub { font-size:11px; color:var(--text-3); margin-top:3px; }
+        .gplan-brand-sub { font-size:10.5px; color:var(--text-3); margin-top:3px;
+                           white-space:nowrap; }
+        .gplan-brand { padding-bottom: 18px !important; }
+        .gplan-brand-mark { width:30px !important; height:30px !important; }
 
         section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a,
         section[data-testid="stSidebar"] nav a {
@@ -493,6 +497,231 @@ def inject_css():
         section[data-testid="stSidebar"] nav a[aria-current="page"] span {
           color: #ffffff !important;
         }
+
+
+        /* =========================================================
+           Dashboard em tela unica. So vale nesta pagina: o :has()
+           casa apenas quando .du-tela esta no DOM, entao as outras
+           abas continuam com o padding e a rolagem de sempre.
+           ========================================================= */
+        .stApp:has(.du-tela) [data-testid="stMain"] { overflow: hidden !important; }
+        .stApp:has(.du-tela) [data-testid="stHeader"] { height: 2.1rem !important; }
+        .stApp:has(.du-tela) [data-testid="stMainBlockContainer"],
+        .stApp:has(.du-tela) .block-container {
+          box-sizing: border-box; height: 100dvh;
+          display: flex !important; flex-direction: column;
+          padding: 2.4rem 18px 12px !important; max-width: none !important;
+        }
+        .stApp:has(.du-tela) [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] {
+          flex: 1; min-height: 0;
+        }
+        /* O bloco de CSS injetado vira um container vazio de 16px + gap no meio
+           da coluna. Some com ele -- e so <style>, nao tem nada para mostrar. */
+        .stApp:has(.du-tela) [data-testid="stElementContainer"]:has([data-testid="stMarkdownContainer"] > style) {
+          display: none !important;
+        }
+        .stApp:has(.du-tela) [data-testid="stElementContainer"]:has(.du-tela) {
+          flex: 1; min-height: 0; display: flex; flex-direction: column;
+        }
+        /* Todo ancestral entre o container e a tela, e nao so os que tem
+           data-testid: existe um <div> sem nome no meio, e era ele que ficava
+           com min-height:auto e segurava a altura em 950px numa janela de 900. */
+        .stApp:has(.du-tela) [data-testid="stElementContainer"]:has(.du-tela) *:has(.du-tela) {
+          flex: 1; min-height: 0; display: flex; flex-direction: column;
+          margin-bottom: 0 !important;
+        }
+        .du-tela {
+          flex: 1; min-height: 0;
+          display: grid; grid-template-rows: auto auto 1fr auto;
+          gap: clamp(8px, 1.15vh, 13px);
+          font-variant-numeric: tabular-nums;
+        }
+        .du-cab { display:flex; align-items:flex-end; justify-content:space-between; gap:14px; }
+        .du-cab .du-h1 { font-size: clamp(17px,2.3vh,23px); font-weight:700; letter-spacing:-.3px;
+                     margin:0; line-height:1.1; color:var(--text-1); }
+        /* O markdown do Streamlit sublinha todo <a> e pinta de azul; aqui cada
+           link e um cartao, uma barra ou uma linha de tabela. */
+        .du-tela a, .du-tela a:hover, .du-tela a:visited {
+          text-decoration: none !important; color: inherit; }
+        .du-cab p { font-size:11.5px; color:var(--text-3); margin:3px 0 0; }
+        .du-acoes { display:flex; align-items:center; gap:8px; }
+        .du-selo { display:flex; align-items:center; gap:7px; background:var(--dark-card);
+                   border:1px solid var(--border-color); border-radius:100px; padding:6px 13px;
+                   font-size:11px; color:var(--text-2); white-space:nowrap; }
+        .du-selo i { width:6px; height:6px; border-radius:50%; background:var(--accent-green);
+                     box-shadow:0 0 8px var(--accent-green); }
+        .du-selo.filtro { border-color:rgba(251,191,36,.45); color:var(--text-1); }
+        .du-selo.filtro i { background:#fbbf24; box-shadow:0 0 8px #fbbf24; }
+
+        .du-kpis { display:grid; grid-template-columns:repeat(5,1fr); gap:clamp(8px,.85vw,13px); }
+        .du-kpi { background:var(--dark-card); border:1px solid var(--border-color); border-radius:13px;
+                  padding:clamp(9px,1.35vh,14px) clamp(11px,.85vw,15px);
+                  display:flex; flex-direction:column; gap:6px; text-decoration:none; }
+        a.du-kpi:hover { border-color:rgba(91,141,239,.45); }
+        .du-kpi .topo { display:flex; align-items:center; gap:9px; }
+        .du-kpi .tile { width:clamp(26px,3.2vh,33px); height:clamp(26px,3.2vh,33px); border-radius:9px;
+                        flex:none; display:flex; align-items:center; justify-content:center; }
+        .du-kpi .tile svg { width:15px; height:15px; }
+        .du-kpi .rot { font-size:11px; color:var(--text-2); font-weight:600; }
+        .du-kpi .val { font-size:clamp(21px,3.4vh,31px); font-weight:800; letter-spacing:-.8px;
+                       line-height:1; color:var(--text-1); }
+        .du-kpi .sub { font-size:10px; color:var(--text-3); }
+        .du-trilho { height:3px; border-radius:99px; background:rgba(255,255,255,.07); overflow:hidden; }
+        .du-trilho i { display:block; height:100%; border-radius:99px; }
+
+        .du-meio { display:grid; grid-template-columns:1.58fr 1fr; gap:clamp(8px,.85vw,13px); min-height:0; }
+        .du-col { display:grid; grid-template-rows:auto 1fr; gap:clamp(8px,1.15vh,13px); min-height:0; }
+        .du-pn { background:var(--dark-card); border:1px solid var(--border-color); border-radius:13px;
+                 display:flex; flex-direction:column; min-height:0; overflow:hidden; }
+        .du-pn > .du-t { font-size:12px; font-weight:700; color:var(--text-1); flex:none;
+                      padding:clamp(9px,1.2vh,13px) clamp(11px,.9vw,15px) clamp(6px,.85vh,9px); }
+        .du-miolo { flex:1; min-height:0; display:flex; flex-direction:column;
+                    padding:0 clamp(11px,.9vw,15px) clamp(9px,1.2vh,13px); }
+        .du-rodape { flex:none; border-top:1px solid var(--border-color); padding:clamp(6px,.9vh,9px);
+                     text-align:center; font-size:10.5px; color:var(--text-2); text-decoration:none;
+                     display:block; }
+        .du-rodape:hover { color:var(--text-1); background:rgba(255,255,255,.04); }
+
+        .du-grupos { display:grid; grid-template-columns:repeat(auto-fit,minmax(0,1fr));
+                     gap:clamp(6px,.6vw,10px); min-height:0; }
+        .du-gp { background:var(--dark-card-2); border:1px solid var(--border-color); border-radius:10px;
+                 padding:clamp(7px,1vh,11px) clamp(8px,.6vw,12px);
+                 display:flex; flex-direction:column; gap:5px; text-decoration:none; }
+        a.du-gp:hover { border-color:rgba(45,212,191,.45); }
+        .du-gp .lin { display:flex; justify-content:space-between; align-items:baseline; }
+        .du-gp .nm { font-size:10.5px; color:var(--text-2); }
+        .du-tela .du-gp .pc { font-size:10.5px; font-weight:700; color:var(--accent-green); }
+        .du-gp .qt { font-size:clamp(15px,2.15vh,21px); font-weight:800; letter-spacing:-.5px;
+                     line-height:1; color:var(--text-1); }
+        .du-gp .qt em { font-style:normal; font-size:9.5px; color:var(--text-3);
+                        font-weight:400; margin-left:4px; }
+        .du-gp .pe { font-size:9px; color:var(--text-3); display:flex; justify-content:space-between; }
+
+        .du-barras { flex:1; min-height:0; display:grid;
+                     grid-auto-rows:minmax(min-content,1fr); gap:1px; overflow-y:auto; }
+        .du-br { display:grid; align-items:center; min-height:0; line-height:1.15; text-decoration:none;
+                 grid-template-columns:clamp(80px,7.8vw,124px) 1fr clamp(74px,6.4vw,96px) clamp(38px,3.2vw,50px);
+                 gap:clamp(7px,.7vw,11px); }
+        .du-br:hover .nm { color:var(--text-1); }
+        .du-br .nm { font-size:10.5px; color:var(--text-2); white-space:nowrap;
+                     overflow:hidden; text-overflow:ellipsis; }
+        .du-br .tr { height:6px; border-radius:99px; background:rgba(255,255,255,.06); overflow:hidden; }
+        .du-br .tr i { display:block; height:100%; border-radius:99px;
+                       background:linear-gradient(90deg,#1fa98f,var(--accent-green)); }
+        .du-br .fr { font-size:10px; color:var(--text-3); text-align:right; }
+        .du-br .pc { font-size:10.5px; font-weight:700; color:var(--text-1); text-align:right; }
+
+        .du-sigem { flex:1; min-height:0; display:grid; grid-template-columns:auto 1fr;
+                    align-items:center; gap:clamp(9px,.9vw,15px); }
+        .du-rosca { position:relative; width:clamp(84px,11.5vh,118px); aspect-ratio:1; flex:none; }
+        .du-rosca svg { width:100%; height:100%; }
+        .du-rosca .centro { position:absolute; inset:0; display:grid; place-content:center;
+                            text-align:center; pointer-events:none; }
+        .du-rosca .centro b { font-size:clamp(14px,2vh,19px); font-weight:800; letter-spacing:-.5px;
+                              display:block; line-height:1; color:var(--text-1); }
+        .du-rosca .centro span { font-size:8.5px; color:var(--text-3); }
+        .du-leg { display:grid; grid-auto-rows:minmax(min-content,1fr);
+                  height:100%; min-height:0; gap:1px; overflow-y:auto; }
+        .du-lg { display:grid; grid-template-columns:9px 1fr auto auto; align-items:center;
+                 gap:clamp(5px,.5vw,9px); font-size:10.5px; text-decoration:none;
+                 min-height:0; line-height:1.15; }
+        .du-lg:hover .nm { color:var(--text-1); }
+        .du-lg i { width:7px; height:7px; border-radius:50%; }
+        .du-lg .nm { color:var(--text-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .du-lg .n { font-weight:700; color:var(--text-1); }
+        .du-lg .p { color:var(--text-3); font-size:9.5px; min-width:32px; text-align:right; }
+
+        .du-tab { flex:1; min-height:0; display:flex; flex-direction:column; }
+        .du-tab .cabtab, .du-tab .lin { display:grid; align-items:center; gap:6px;
+                                        grid-template-columns:1.35fr 1.1fr .7fr .7fr .78fr; }
+        .du-tab .cabtab { font-size:8.6px; letter-spacing:.7px; text-transform:uppercase;
+                          color:var(--text-3); padding-bottom:5px;
+                          border-bottom:1px solid var(--border-color); flex:none; }
+        .du-tab .corpo { flex:1; min-height:0; display:grid;
+                         grid-auto-rows:minmax(min-content,1fr); overflow-y:auto; }
+        .du-tab .lin { border-bottom:1px solid rgba(255,255,255,.045); font-size:10.5px;
+                       min-height:0; line-height:1.2; }
+        .du-tab .lin:last-child { border-bottom:0; }
+        .du-tela .du-tab .tp { color:var(--text-3); }
+        .du-tab .num { text-align:right; color:var(--text-2); }
+        .du-tab .pnd { text-align:right; }
+        .du-tab .cc { text-align:right; color:var(--text-2); font-size:10px; }
+        /* a pill da tag e a de pendencia vem com o corpo das tabelas grandes;
+           aqui elas sozinhas levavam a linha de 17px para 23px, e as 10 do
+           Top 10 deixavam de caber por 48px */
+        .du-tab .gtbl-badge { padding:0 6px !important; font-size:9.5px !important;
+                              line-height:1.55 !important; }
+        .du-tab .gtbl-tag { padding:1px 7px !important; font-size:10.5px !important;
+                            line-height:1.35 !important; }
+        .du-barras::-webkit-scrollbar, .du-leg::-webkit-scrollbar,
+        .du-tab .corpo::-webkit-scrollbar { width:5px; }
+        .du-barras::-webkit-scrollbar-thumb, .du-leg::-webkit-scrollbar-thumb,
+        .du-tab .corpo::-webkit-scrollbar-thumb {
+          background:rgba(255,255,255,.13); border-radius:99px; }
+
+        .du-pe { display:grid; grid-template-columns:repeat(5,1fr); gap:clamp(8px,.85vw,13px); }
+        .du-mini { background:var(--dark-card); border:1px solid var(--border-color); border-radius:13px;
+                   padding:clamp(8px,1.15vh,12px) clamp(11px,.85vw,15px);
+                   display:flex; align-items:center; gap:11px; text-decoration:none; }
+        a.du-mini:hover { border-color:rgba(91,141,239,.45); }
+        .du-mini .tile { width:clamp(24px,3vh,31px); height:clamp(24px,3vh,31px); border-radius:9px;
+                         flex:none; display:flex; align-items:center; justify-content:center; }
+        .du-mini .tile svg { width:14px; height:14px; }
+        .du-mini .rot { font-size:10px; color:var(--text-3); line-height:1.3; }
+        .du-mini .val { font-size:clamp(14px,2.1vh,20px); font-weight:800; letter-spacing:-.5px;
+                        line-height:1.2; color:var(--text-1); }
+        .du-mini .val.pq { font-size:clamp(11.5px,1.65vh,15px); letter-spacing:-.2px; }
+        .du-vazio { grid-column:1/-1; display:grid; place-content:center; text-align:center;
+                    color:var(--text-2); font-size:13px; gap:6px; }
+
+        /* Abaixo de 700px de altura nao da para manter os numeros legiveis numa
+           tela so. Em vez de espremer ate ninguem conseguir ler, devolvo a
+           rolagem: e o unico ponto em que a tela unica cede. */
+        @media (max-height: 700px), (max-width: 1150px) {
+          .stApp:has(.du-tela) [data-testid="stMain"] { overflow: auto !important; }
+          .stApp:has(.du-tela) [data-testid="stMainBlockContainer"],
+          .stApp:has(.du-tela) .block-container { height:auto; display:block !important; }
+          .du-tela { min-height:640px; grid-template-rows:auto auto auto auto; }
+          .du-meio { min-height:560px; }
+        }
+        @media (max-width: 1150px) {
+          .du-kpis, .du-pe { grid-template-columns:repeat(3,1fr); }
+          .du-meio { grid-template-columns:1fr; }
+        }
+
+        /* --------- filtros da lateral: marca em cima, filtros embaixo -------
+           O st.navigation injeta o menu como irmao do conteudo do usuario, e
+           tudo que mando para a lateral cai num container so -- entao marca e
+           filtros ficariam juntos, os dois acima ou os dois abaixo do menu.
+           Com display:contents esse container some do layout e cada bloco vira
+           filho direto da coluna flex, o que permite intercalar. */
+        section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"],
+        section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] > div,
+        section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] > div > [data-testid="stVerticalBlock"] {
+          display: contents !important;
+        }
+        section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] .stElementContainer,
+        section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stElementContainer"] { order: 3; }
+        section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] .stElementContainer:first-child { order: 1; }
+        /* O display:contents tirou o bloco vertical do layout, e com ele o
+           gap de 16px que compensava a margem negativa que o Streamlit poe em
+           todo markdown -- por isso o titulo dos filtros subia por cima do
+           primeiro rotulo. */
+        section[data-testid="stSidebar"] [data-testid="stSidebarContent"] { gap: 7px; }
+        section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] { margin-bottom: 0 !important; }
+        section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.flt-topo) { margin-top: auto; }
+        .flt-topo { padding:11px 4px 0; border-top:1px solid var(--border-color); }
+        .flt-titulo { font-size:10px; letter-spacing:.9px; text-transform:uppercase;
+                      color:var(--text-3); font-weight:700; }
+        .flt-conta { font-size:10.5px; color:var(--text-2); margin-top:3px; }
+        .flt-conta b { color:var(--accent-green); }
+        section[data-testid="stSidebar"] .stSelectbox label { font-size:10px !important;
+          color:var(--text-3) !important; margin-bottom:0 !important; }
+        section[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] > div {
+          background:var(--dark-card-2) !important; border-color:var(--border-color) !important;
+          font-size:11.5px !important; min-height:30px !important; }
+        section[data-testid="stSidebar"] .stButton button { width:100%; font-size:11px !important;
+          padding:4px 10px !important; border-radius:8px !important; }
 
         .gplan-header { display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px; }
         .gplan-header h1 { font-size: 24px; font-weight: 700; color: var(--text-1); margin: 0; letter-spacing: -0.4px; }
@@ -1049,11 +1278,16 @@ def _sob_carga(texto: str, montar):
 def render_header(title: str, extra_pill: str | None = None):
     now = st.session_state.get("gplan_atualizado_em", "—")
     extra_html = f'<div class="gplan-count-pill">{extra_pill}</div>' if extra_pill else ""
+    # O filtro da lateral vale para o app inteiro, entao ele tem que aparecer
+    # em toda aba. Sem isso alguem abre Relatorios, ve 464 tags em vez de 5.098
+    # e nao tem como saber que esta olhando um recorte.
+    filtro = st.session_state.get("_flt_selo", "")
     render_html(
         f"""
         <div class="gplan-header">
           <h1>{title}</h1>
-          <div style="display:flex; gap:12px;">
+          <div style="display:flex; gap:12px; align-items:center;">
+            {filtro}
             {extra_html}
             <div class="gplan-updated"><span class="dot"></span>Atualizado {now}</div>
           </div>
@@ -1081,56 +1315,22 @@ def br_pct(value: float, casas: int = 1) -> str:
     return f"{value:.{casas}f}%".replace(".", ",")
 
 
-def status_panel(labels: list, values: list, colors: list, total: int) -> str:
-    """Painel 'Status SIGEM' inteiro como um unico bloco HTML: donut em SVG puro
-    + legenda com os valores alinhados a direita. Precisa ser um bloco so, porque
-    o Streamlit fecha qualquer <div> deixado aberto entre chamadas de markdown."""
-    radius, stroke = 68.0, 26.0
-    circ = 2 * math.pi * radius
-    total_val = sum(values) or 1
+def com_filtros(href: str) -> str:
+    """Cola os filtros ativos num link.
 
-    segments, offset = "", 0.0
-    for label, value, color in zip(labels, values, colors):
-        length = value / total_val * circ
-        # Cada fatia e um link para Relatorios ja filtrado por aquele status.
-        segments += (
-            f'<a href="/relatorios?status={quote(label)}" target="_self">'
-            f'<title>{esc(label)} · {br_num(value)}</title>'
-            f'<circle class="sg-seg" cx="88" cy="88" r="{radius}" fill="none" stroke="{color}" '
-            f'stroke-width="{stroke}" stroke-dasharray="{length:.2f} {circ - length:.2f}" '
-            f'stroke-dashoffset="{-offset:.2f}" transform="rotate(-90 88 88)"></circle></a>'
-        )
-        offset += length
-
-    legend = ""
-    for label, value, color in zip(labels, values, colors):
-        legend += (
-            f'<a class="sg-leg-row" href="/relatorios?status={quote(label)}" target="_self" '
-            f'title="Ver {esc(label)} em Relatórios">'
-            f'<span class="sg-leg-dot" style="background:{color};"></span>'
-            f'<span class="sg-leg-name">{esc(label)}</span>'
-            f'<span class="sg-leg-val">{br_num(value)}</span>'
-            f"</a>"
-        )
-
-    # Donut e legenda lado a lado, e nao empilhados: empilhado o painel media
-    # 637px e a coluna esquerda 772px, entao nao sobrava altura para o painel
-    # de recusados sem esticar alguma coisa.
-    return f"""
-        <div class="gplan-panel">
-          <div class="gplan-panel-title">Status SIGEM</div>
-          <div class="sg-corpo">
-            <div class="sg-chart-wrap">
-              <svg class="sg-donut" viewBox="0 0 176 176">{segments}</svg>
-              <div class="sg-center">
-                <div class="sg-center-value">{br_num(total)}</div>
-                <div class="sg-center-label">Relatórios</div>
-              </div>
-            </div>
-            <div class="sg-legend">{legend}</div>
-          </div>
-        </div>
+    O menu da lateral troca de aba sem recarregar e o session_state segue
+    vivo. Estes links nao: sao navegacao de verdade, o navegador recarrega e
+    a sessao comeca do zero. Sem os filtros na URL, filtrar por uma fase e
+    clicar numa barra do Dashboard devolvia Relatorios com as 5.098 tags de
+    volta -- e sem nada na tela dizendo que o filtro caiu. De quebra, o
+    endereco passa a poder ser copiado e colado com o filtro junto.
     """
+    partes = [f"{URL_DO_FILTRO.get(chave, chave)}={quote(valor)}"
+              for chave, _rot, padrao, _f, _c in FILTROS
+              if (valor := st.session_state.get(f"gf_{chave}", padrao)) and valor != padrao]
+    if not partes:
+        return href
+    return href + ("&" if "?" in href else "?") + "&".join(partes)
 
 
 def esc(value: object) -> str:
@@ -1251,7 +1451,7 @@ def painel_recusados(esperados: pd.DataFrame, sigem: pd.DataFrame) -> str:
     piores = rec.dropna(subset=["_dias"]).sort_values("_dias", ascending=False).head(TOPO_RECUSADOS)
 
     linhas = "".join(
-        f'<a class="rec-linha" href="/relatorios?busca={quote(str(t))}" target="_self" '
+        f'<a class="rec-linha" href="{com_filtros("/relatorios?busca=" + quote(str(t)))}" target="_self" '
         f'title="Ver os relatórios de {esc(t)}">'
         f'<span class="rec-tag">{esc(t)}</span>'
         f'<span class="rec-rel">{esc(r)}</span>'
@@ -1286,164 +1486,228 @@ def fichas_completas(ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
             + fichas_relatorios_html(docs, esperados, _revisoes_por_doc(cache_key, sigem)))
 
 
-def top10_panel(top10: pd.DataFrame) -> str:
-    rows = ""
-    for _, r in top10.iterrows():
-        pendentes = int(r["RELATORIOS_PENDENTES"])
-        esperados = int(r["RELATORIOS_ESPERADOS"])
-        emitidos = int(r["RELATORIOS_APROVADOS"])
-        conclusao = br_pct(r['AVANCO_DOCUMENTAL'] * 100).replace(",0%", "%")
-        ratio = (pendentes / esperados) if esperados else 0
-        tone = "crit" if ratio >= 0.8 else ("warn" if ratio >= 0.4 else "ok")
-        rows += f"""
-            <tr>
-              <td>{tag_link(r['TAG'])}</td>
-              <td class="gtbl-muted">{esc(str(r['GRUPO_REGRA']).title())}</td>
-              <td class="gtbl-num">{esperados}</td>
-              <td class="gtbl-num">{emitidos}</td>
-              <td class="gtbl-num"><span class="gtbl-badge {tone}">{pendentes}</span></td>
-              <td class="gtbl-num gtbl-strong">{conclusao}</td>
-            </tr>
-        """
-    table = html_table(
-        ["Tag", "Tipo", "#Esperados", "#Emitidos", "#Pendentes", "#Conclusão"], rows
-    )
-    return (
-        '<div class="gplan-panel">'
-        '<div class="gplan-panel-title">Top 10 tags com mais pendências</div>'
-        f"{table}</div>"
-    )
+def du_tile(cor: str, icone: str) -> str:
+    svg = KPI_ICONS.get(icone, "")
+    return (f'<span class="tile" style="background:{cor}22;color:{cor};">'
+            f'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            f'stroke-linecap="round" stroke-linejoin="round">{svg}</svg></span>')
 
 
-def kpi_card(label: str, value: str, pct: float, color: str, icon: str) -> str:
-    pct_display = br_pct(pct * 100)
-    width = max(0.0, min(pct, 1.0)) * 100
-    icon_svg = KPI_ICONS.get(icon, "")
-    return f"""
-        <div class="kpi-card" style="--kpi-accent:{color};">
-          <div class="kpi-top">
-            <div class="kpi-label">{label}</div>
-            <div class="kpi-icon" style="background:{color}22; color:{color};">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{icon_svg}</svg>
-            </div>
-          </div>
-          <div class="kpi-value">{value}</div>
-          <div class="kpi-progress-row">
-            <div class="kpi-track"><div class="kpi-fill" style="width:{width:.1f}%; background:{color};"></div></div>
-            <div class="kpi-pct">{pct_display}</div>
-          </div>
-        </div>
+def du_kpi(rot: str, val: str, sub: str, pct: float, cor: str, icone: str, href: str = "") -> str:
+    corpo = (f'<div class="topo">{du_tile(cor, icone)}<div class="rot">{rot}</div></div>'
+             f'<div class="val">{val}</div><div class="sub">{sub}</div>'
+             f'<div class="du-trilho"><i style="width:{max(0.0, min(pct, 1.0)) * 100:.1f}%;'
+             f'background:{cor};"></i></div>')
+    if href:
+        return f'<a class="du-kpi" href="{com_filtros(href)}" target="_self">{corpo}</a>'
+    return f'<div class="du-kpi">{corpo}</div>'
+
+
+def du_grupos(resumo: pd.DataFrame) -> str:
+    g = resumo.groupby("GRUPO_REGRA").agg(
+        tags=("TAG", "count"), esperados=("RELATORIOS_ESPERADOS", "sum"),
+        aprovados=("RELATORIOS_APROVADOS", "sum"),
+    ).reset_index()
+    g["avanco"] = (g["aprovados"] / g["esperados"]).fillna(0) * 100
+    g = g.sort_values("tags", ascending=False)
+    cartoes = "".join(
+        f'<a class="du-gp" href="{com_filtros("/?grupo=" + quote(sentence_case(r["GRUPO_REGRA"])))}" target="_self" '
+        f'title="Filtrar tudo por {esc(sentence_case(r["GRUPO_REGRA"]))}">'
+        f'<span class="lin"><span class="nm">{esc(sentence_case(r["GRUPO_REGRA"]))}</span>'
+        f'<span class="pc">{br_pct(r["avanco"])}</span></span>'
+        f'<span class="qt">{br_num(int(r["tags"]))}<em>tags</em></span>'
+        f'<span class="du-trilho"><i style="width:{r["avanco"]:.1f}%;'
+        f'background:var(--accent-green);"></i></span>'
+        f'<span class="pe"><span>{br_num(int(r["aprovados"]))} aprovados</span>'
+        f'<span>{br_num(int(r["esperados"]))} esp.</span></span></a>'
+        for _, r in g.iterrows())
+    return ('<div class="du-pn"><div class="du-t">Resumo por grupo de instrumento</div>'
+            f'<div class="du-miolo"><div class="du-grupos">{cartoes}</div></div></div>')
+
+
+def du_barras(esperados: pd.DataFrame) -> str:
+    # Maior avanco em cima: barras em escada leem melhor do que na ordem em
+    # que as regras foram declaradas.
+    linhas = []
+    for label, report, origin, unico in REPORT_ROWS:
+        esperado = count_rows(esperados, report, origin, False, unico)
+        aprov = count_rows(esperados, report, origin, True, unico)
+        pct = (aprov / esperado * 100) if esperado else 0.0
+        linhas.append((pct, label, aprov, esperado))
+    linhas.sort(key=lambda x: -x[0])
+    html = "".join(
+        f'<a class="du-br" href="{com_filtros("/relatorios?rel=" + quote(label))}" target="_self" '
+        f'title="Ver {esc(label)} em Relatórios"><span class="nm">{esc(label)}</span>'
+        f'<span class="tr"><i style="width:{max(pct, 0.6):.1f}%;"></i></span>'
+        f'<span class="fr">{br_num(aprov)} / {br_num(esperado)}</span>'
+        f'<span class="pc">{br_pct(pct)}</span></a>'
+        for pct, label, aprov, esperado in linhas)
+    return ('<div class="du-pn"><div class="du-t">Esperado × aprovado por tipo de relatório</div>'
+            f'<div class="du-miolo"><div class="du-barras">{html}</div></div>'
+            f'<a class="du-rodape" href="{com_filtros("/relatorios")}" target="_self">'
+            'Ver todos os relatórios →</a></div>')
+
+
+def du_status(esperados: pd.DataFrame) -> str:
+    contagem = esperados["STATUS_SIGEM"].value_counts()
+    itens = [(sentence_case(k), int(v)) for k, v in contagem.items()]
+    total = int(len(esperados)) or 1
+    raio, largura = 46.0, 13.0
+    circ = 2 * math.pi * raio
+    fatias, giro = "", 0.0
+    for i, (rotulo, valor) in enumerate(itens):
+        cor = STATUS_COLOR_MAP.get(rotulo, DEFAULT_STATUS_COLORS[i % len(DEFAULT_STATUS_COLORS)])
+        comp = valor / total * circ
+        fatias += (f'<a href="{com_filtros("/relatorios?status=" + quote(rotulo))}" target="_self">'
+                   f'<title>{esc(rotulo)} · {br_num(valor)}</title>'
+                   f'<circle cx="60" cy="60" r="{raio}" fill="none" stroke="{cor}" '
+                   f'stroke-width="{largura}" stroke-dasharray="{comp:.2f} {circ - comp:.2f}" '
+                   f'stroke-dashoffset="{-giro:.2f}" transform="rotate(-90 60 60)"></circle></a>')
+        giro += comp
+    legenda = ""
+    for i, (rotulo, valor) in enumerate(itens):
+        cor = STATUS_COLOR_MAP.get(rotulo, DEFAULT_STATUS_COLORS[i % len(DEFAULT_STATUS_COLORS)])
+        legenda += (f'<a class="du-lg" href="{com_filtros("/relatorios?status=" + quote(rotulo))}" target="_self" '
+                    f'title="Ver {esc(rotulo)} em Relatórios">'
+                    f'<i style="background:{cor};"></i><span class="nm">{esc(rotulo)}</span>'
+                    f'<span class="n">{br_num(valor)}</span>'
+                    f'<span class="p">{br_pct(valor / total * 100)}</span></a>')
+    return ('<div class="du-pn"><div class="du-t">Status SIGEM</div><div class="du-miolo"><div class="du-sigem">'
+            f'<div class="du-rosca"><svg viewBox="0 0 120 120">'
+            f'<circle cx="60" cy="60" r="{raio}" fill="none" stroke="rgba(255,255,255,.06)" '
+            f'stroke-width="{largura}"></circle>{fatias}</svg>'
+            f'<div class="centro"><b>{br_num(int(len(esperados)))}</b><span>relatórios</span></div></div>'
+            f'<div class="du-leg">{legenda}</div></div></div></div>')
+
+
+def du_top10(resumo: pd.DataFrame) -> str:
+    top = resumo.sort_values(["RELATORIOS_PENDENTES", "RELATORIOS_ESPERADOS"],
+                             ascending=False).head(10)
+    linhas = ""
+    for _, r in top.iterrows():
+        pend, espe = int(r["RELATORIOS_PENDENTES"]), int(r["RELATORIOS_ESPERADOS"])
+        razao = (pend / espe) if espe else 0
+        tom = "crit" if razao >= 0.8 else ("warn" if razao >= 0.4 else "ok")
+        linhas += (f'<div class="lin">{tag_link(r["TAG"])}'
+                   f'<span class="tp">{esc(str(r["GRUPO_REGRA"]).title())}</span>'
+                   f'<span class="num">{espe}</span>'
+                   f'<span class="pnd"><span class="gtbl-badge {tom}">{pend}</span></span>'
+                   f'<span class="cc">{br_pct(r["AVANCO_DOCUMENTAL"] * 100)}</span></div>')
+    if not linhas:
+        linhas = '<div class="lin"><span class="tp">Nenhuma tag no filtro.</span></div>'
+    return ('<div class="du-pn"><div class="du-t">Top 10 tags com mais pendências</div><div class="du-miolo">'
+            '<div class="du-tab"><div class="cabtab"><span>Tag</span><span>Tipo</span>'
+            '<span class="num">Esper.</span><span class="pnd">Pend.</span>'
+            '<span class="cc">Concl.</span></div>'
+            f'<div class="corpo">{linhas}</div></div></div>'
+            f'<a class="du-rodape" href="{com_filtros("/pesquisa")}" target="_self">'
+            'Ver todas as tags pendentes →</a></div>')
+
+
+def du_mini(rot: str, val: str, sub: str, cor: str, icone: str, href: str = "") -> str:
+    classe = "val pq" if len(val) > 9 else "val"
+    corpo = (f'{du_tile(cor, icone)}<span><span class="rot">{rot}</span>'
+             f'<span class="{classe}" style="display:block;">{val}</span>'
+             f'<span class="rot">{sub}</span></span>')
+    if href:
+        return f'<a class="du-mini" href="{com_filtros(href) if href.startswith("/") else href}" target="_self">{corpo}</a>'
+    return f'<div class="du-mini">{corpo}</div>'
+
+
+def du_modal_recusados(esperados: pd.DataFrame, sigem: pd.DataFrame) -> str:
+    """O painel de recusados vira modal do cartao 'Recusados'.
+
+    Ele existia solto na coluna direita e nao cabe numa tela sem rolagem. Em
+    vez de perder a informacao, ela passa a abrir por :target -- mesmo custo
+    zero de servidor das fichas.
     """
+    return ('<div class="fmodal" id="du-recusados">'
+            '<a class="fmodal-bg" href="#" aria-label="Fechar"></a>'
+            '<div class="fmodal-box"><div class="fmodal-head">'
+            '<div class="fmodal-title">Recusados há mais tempo</div>'
+            '<a class="fmodal-x" href="#" aria-label="Fechar">&times;</a></div>'
+            f'<div class="fmodal-body">{painel_recusados(esperados, sigem)}</div></div></div>')
 
 
 def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame,
                      sigem: pd.DataFrame, cache_key: str = ""):
-    render_header("Dashboard")
+    """Dashboard inteiro numa tela so, sem rolagem.
+
+    Sai como UM bloco de HTML de proposito. Com st.columns cada coluna empilha
+    por conta propria e as alturas nunca fecham; num grid unico o cabecalho,
+    os KPIs e o rodape pegam so o que precisam e a faixa do meio fica com o
+    resto -- e as listas de dentro se distribuem no que sobrou em vez de ter
+    altura fixa. E por isso que a tela comprime junto com a janela em vez de
+    estourar numa barra de rolagem.
+    """
+    agora = st.session_state.get("gplan_atualizado_em", "—")
+    selo_filtro = st.session_state.get("_flt_selo", "")
+
+    if resumo.empty:
+        render_html('<div class="du-tela"><div class="du-vazio">'
+                    "<div><strong>Nenhuma tag atende aos filtros.</strong></div>"
+                    "<div>Ajuste ou limpe os filtros na barra lateral.</div></div></div>")
+        return
 
     total_tags = len(resumo)
     total_esperados = int(resumo["RELATORIOS_ESPERADOS"].sum())
-    total_emitidos = int(resumo["RELATORIOS_POSTADOS"].sum())
+    total_postados = int(resumo["RELATORIOS_POSTADOS"].sum())
     total_aprovados = int(resumo["RELATORIOS_APROVADOS"].sum())
-    # pendencia agora inclui o que foi postado mas nao passou: recusado, em
-    # analise e cancelado voltam para a fila em vez de contarem como entregue
+    # pendente inclui o que foi postado mas nao passou: recusado, em analise e
+    # cancelado voltam para a fila em vez de contarem como entregue
     total_pendentes = total_esperados - total_aprovados
-    avanco_geral = (total_aprovados / total_esperados) if total_esperados else 0
-    tags_completas = int((resumo["AVANCO_DOCUMENTAL"] >= 1.0).sum())
+    avanco = (total_aprovados / total_esperados) if total_esperados else 0.0
+    completas = int((resumo["AVANCO_DOCUMENTAL"] >= 1.0).sum())
+    st_norm = esperados["STATUS_SIGEM"].astype(str).str.strip().str.upper()
 
-    cols = st.columns(5)
-    kpis = [
-        ("Total de tags", f"{total_tags:,}".replace(",", "."), 1.0, "#5b8def", "shield"),
-        ("Tags completas", f"{tags_completas:,}".replace(",", "."),
-         (tags_completas / total_tags) if total_tags else 0, "#34d399", "check"),
-        ("Pendentes", f"{total_pendentes:,}".replace(",", "."),
-         (total_pendentes / total_esperados) if total_esperados else 0, "#f87171", "clock"),
-        ("Emitidos SIGEM", f"{total_emitidos:,}".replace(",", "."),
-         (total_emitidos / total_esperados) if total_esperados else 0, "#fbbf24", "archive"),
-        ("Avanço geral", br_pct(avanco_geral * 100), avanco_geral, "#9d6bff", "trend"),
-    ]
-    for col, (label, value, pct, color, icon) in zip(cols, kpis):
-        with col:
-            render_html(kpi_card(label, value, pct, color, icon))
-
-    st.write("")
-    # Um grid unico, e nao st.columns: cada coluna do Streamlit empilha por
-    # conta propria, entao a esquerda terminava a 772px e a direita a 637px --
-    # e encher a direita so inverteu a sobra. No grid as duas linhas tem a
-    # mesma altura e o painel de recusados estica para fechar o bloco.
-    if True:
-        # Ordena do maior quantitativo esperado para o menor: barras em escada
-        # leem melhor do que na ordem fixa em que as regras foram declaradas.
-        barras = []
-        for label, report, origin, unique_doc in REPORT_ROWS:
-            barras.append((
-                count_rows(esperados, report, origin, False, unique_doc),
-                label, report, origin, unique_doc,
-            ))
-        barras.sort(key=lambda b: b[0], reverse=True)
-
-        rows_html = ""
-        for esperado, label, report, origin, unique_doc in barras:
-            emitido = count_rows(esperados, report, origin, True, unique_doc)
-            pct = (emitido / esperado * 100) if esperado else 0
-            tag = '<span class="doc-tag">doc/planta</span>' if unique_doc else ""
-            href = f"/relatorios?rel={quote(label)}"
-            # nada de .replace(",", ".") no bloco inteiro: isso trocava o
-            # separador de milhar mas deixava o decimal em ponto (62.9%), e
-            # ainda pegaria qualquer virgula do href ou do title de tabela
-            rows_html += f"""
-                <a class="rep-row" href="{href}" target="_self" title="Ver {label} em Relatórios">
-                  <div class="rep-label"><span class="rep-name">{label}{tag}</span><span class="rep-stat">{br_num(emitido)}/{br_num(esperado)} · {br_pct(pct)}</span></div>
-                  <div class="rep-track"><div class="rep-done" style="width:{pct:.1f}%;"></div><div class="rep-pending" style="width:{100-pct:.1f}%;"></div></div>
-                </a>
-            """
-        esquerda = (f'<div class="gplan-panel">'
-                    f'<div class="gplan-panel-title">Esperado × aprovado por relatório</div>'
-                    f"{rows_html}</div>")
-
-        status_counts = esperados["STATUS_SIGEM"].value_counts()
-        labels = [sentence_case(s) for s in status_counts.index]
-        values = status_counts.values.tolist()
-        colors = [STATUS_COLOR_MAP.get(label, DEFAULT_STATUS_COLORS[i % len(DEFAULT_STATUS_COLORS)]) for i, label in enumerate(labels)]
-        # A coluna da esquerda tem 13 barras e a direita terminava no donut. Em
-        # vez de esticar o donut, entra o que se olha primeiro numa segunda:
-        # o que esta parado ha mais tempo por recusa.
-        direita = status_panel(labels, values, colors, len(esperados)) \
-            + painel_recusados(esperados, sigem)
-        render_html(f'<div class="dash-linha">{esquerda}<div class="dash-dir">{direita}</div></div>')
-
-    st.write("")
-    grouped = resumo.groupby("GRUPO_REGRA").agg(
-        tags=("TAG", "count"),
-        esperados=("RELATORIOS_ESPERADOS", "sum"),
-        emitidos=("RELATORIOS_APROVADOS", "sum"),
-    ).reset_index()
-    grouped["avanco"] = (grouped["emitidos"] / grouped["esperados"]).fillna(0) * 100
-    grouped = grouped.sort_values("tags", ascending=False)
-
-    cards_html = ""
-    for _, row in grouped.iterrows():
-        cards_html += f"""
-            <div class="group-card-v2">
-              <div class="group-card-top"><span class="group-card-name">{row['GRUPO_REGRA'].title()}</span><span class="group-card-pct">{br_pct(row['avanco'])}</span></div>
-              <div class="group-card-value">{br_num(int(row['tags']))} <span class="group-card-unit">tags</span></div>
-              <div class="group-card-track"><div class="group-card-fill" style="width:{row['avanco']:.1f}%;"></div></div>
-              <div class="group-card-nums"><span>{br_num(int(row['emitidos']))} emitidos</span><span>{br_num(int(row['esperados']))} esperados</span></div>
-            </div>
-        """
-    render_html(
-        f'<div class="gplan-panel"><div class="gplan-panel-title">Resumo por grupo</div>'
-        f'<div class="group-grid">{cards_html}</div></div>'
+    kpis = (
+        du_kpi("Total de tags", br_num(total_tags), "instrumentos na base", 1.0,
+               "#5b8def", "shield", "/pesquisa")
+        + du_kpi("Tags completas", br_num(completas),
+                 f"{br_pct(completas / total_tags * 100)} do total",
+                 completas / total_tags, "#34d399", "check")
+        + du_kpi("Pendentes", br_num(total_pendentes),
+                 f"{br_pct(total_pendentes / total_esperados * 100) if total_esperados else '—'} dos esperados",
+                 (total_pendentes / total_esperados) if total_esperados else 0, "#f87171", "clock")
+        + du_kpi("Emitidos SIGEM", br_num(total_postados),
+                 f"{br_pct(total_postados / total_esperados * 100) if total_esperados else '—'} dos esperados",
+                 (total_postados / total_esperados) if total_esperados else 0, "#fbbf24", "archive")
+        + du_kpi("Avanço geral", br_pct(avanco * 100), f"{br_num(total_aprovados)} aprovados",
+                 avanco, "#9d6bff", "trend")
     )
 
-    st.write("")
-    top10 = resumo.sort_values("RELATORIOS_PENDENTES", ascending=False).head(10)
-    # As fichas de relatorio das TAGs do Top 10 vao junto. Sem elas o botao
-    # Detalhes aponta para uma ancora que nao existe nesta pagina e o clique
-    # nao faz nada -- foi o que aconteceu quando liguei a ficha do relatorio
-    # nas outras tres abas e esqueci esta.
+    minis = (
+        du_mini("Cabos mapeados", br_num(int(resumo["QTD_CABOS"].fillna(0).sum())),
+                "com RIR e continuidade", "#5b8def", "shield")
+        + du_mini("Tubing", br_num(int(resumo["QTD_TUBING"].fillna(0).sum())),
+                  "linhas com RIMTU", "#2dd4bf", "check")
+        + du_mini("Recusados", br_num(int(st_norm.eq("RECUSADO").sum())),
+                  "voltaram da inspeção", "#f87171", "clock", "#du-recusados")
+        + du_mini("Em análise", br_num(int(st_norm.eq("EM ANÁLISE").sum())),
+                  "aguardando parecer", "#fbbf24", "archive",
+                  "/relatorios?status=" + quote("Em análise"))
+        + du_mini("Valor total", br_moeda(float(pd.to_numeric(
+            tags["PRECO_UNITARIO"], errors="coerce").fillna(0).sum())),
+            "preço de todas as tags", "#9d6bff", "trend")
+    )
+
+    top = resumo.sort_values(["RELATORIOS_PENDENTES", "RELATORIOS_ESPERADOS"],
+                             ascending=False).head(10)
     render_html(
-        top10_panel(top10)
-        + fichas_completas(top10["TAG"].tolist(), resumo, esperados, tags, sigem, cache_key)
+        '<div class="du-tela">'
+        '<header class="du-cab"><div><div class="du-h1">Dashboard</div>'
+        "<p>Visão geral do andamento de relatórios e integração SIGEM</p></div>"
+        f'<div class="du-acoes">{selo_filtro}'
+        f'<div class="du-selo"><i></i>Atualizado {agora}</div></div></header>'
+        f'<section class="du-kpis">{kpis}</section>'
+        '<section class="du-meio">'
+        f'<div class="du-col">{du_grupos(resumo)}{du_barras(esperados)}</div>'
+        f'<div class="du-col">{du_status(esperados)}{du_top10(resumo)}</div>'
+        "</section>"
+        f'<section class="du-pe">{minis}</section>'
+        "</div>"
+        + du_modal_recusados(esperados, sigem)
+        + fichas_completas(top["TAG"].tolist(), resumo, esperados, tags, sigem, cache_key)
     )
 
 
@@ -1841,7 +2105,7 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
     for _, r in list_df_page.iterrows():
         avanco = r["AVANCO_DOCUMENTAL"]
         tone = "ok" if avanco >= 70 else ("warn" if avanco >= 30 else "crit")
-        href = f"?tag={quote(str(r['TAG']))}"
+        href = com_filtros(f"?tag={quote(str(r['TAG']))}")
         rows += f"""
             <tr>
               <td><a class="gtbl-tag gtbl-link" href="{href}" target="_self">{esc(r['TAG'])}</a></td>
@@ -2455,7 +2719,7 @@ def linhas_tags(sub: pd.DataFrame, com_modal: bool = True) -> pd.Series:
         tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
         # sem modal, a pill leva para a ficha na aba Pesquisa tag
         alvo = tag_link(tag) if com_modal else (
-            f'<a class="gtbl-tag gtbl-link" href="/pesquisa?tag={quote(str(tag))}" '
+            f'<a class="gtbl-tag gtbl-link" href="{com_filtros("/pesquisa?tag=" + quote(str(tag)))}" '
             f'target="_self">{esc(tag)}</a>')
         linhas.append(
             f"<tr><td>{alvo}</td><td>{esc(desc)}</td>"
@@ -2503,6 +2767,149 @@ def _graficos(df: pd.DataFrame):
     render_html(f'<div class="gr-grid">{blocos}</div>')
 
 
+# ---------------------------------------------------------------- filtros
+# grupo e status sao guardados com o rotulo normalizado (Instrumento, Em
+# analise); fase e sop guardam o codigo cru, que ja vem legivel da planilha.
+NORMALIZA = {"grupo", "status"}
+# O ?status= ja era do multiselect da aba Relatorios. Se o filtro global usasse
+# o mesmo nome, clicar numa fatia do donut -- que so quer ver aqueles
+# relatorios -- passava a recortar o app inteiro para as tags que tem aquele
+# status. Sao intencoes diferentes, entao sao parametros diferentes.
+URL_DO_FILTRO = {"status": "st_tag"}
+FILTROS = [
+    ("fase", "Fase", "Todas", "tags", "FASE"),
+    ("sop", "SOP", "Todos", "tags", "SOP"),
+    ("grupo", "Grupo de instrumento", "Todos", "resumo", "GRUPO_REGRA"),
+    ("status", "Status SIGEM", "Todos", "esperados", "STATUS_SIGEM"),
+]
+
+
+def _valores(serie: pd.Series) -> list:
+    limpo = serie.dropna().astype(str).str.strip()
+    return sorted({v for v in limpo if v and v.lower() not in ("nan", "-", "none")})
+
+
+def _tags_do_filtro(chave: str, valor: str, tags, resumo, esperados) -> set:
+    """TAGs que atendem a UM filtro. O status e por tag, nao por relatorio:
+    'Recusado' devolve as tags que tem ao menos um relatorio recusado. Filtrar
+    a lista de relatorios em si mudaria o denominador do avanco e as contas da
+    tela passariam a se contradizer."""
+    if chave == "fase":
+        return set(tags.loc[tags["FASE"].astype(str).str.strip() == valor, "TAG"])
+    if chave == "sop":
+        return set(tags.loc[tags["SOP"].astype(str).str.strip() == valor, "TAG"])
+    if chave == "grupo":
+        return set(resumo.loc[resumo["GRUPO_REGRA"].map(sentence_case) == valor, "TAG"])
+    if chave == "status":
+        return set(esperados.loc[esperados["STATUS_SIGEM"].map(sentence_case) == valor, "TAG"])
+    return set()
+
+
+def _universo(escolhas: dict, tags, resumo, esperados, pular: str = "") -> set:
+    ids = set(tags["TAG"])
+    for chave, valor in escolhas.items():
+        if valor and chave != pular:
+            ids &= _tags_do_filtro(chave, valor, tags, resumo, esperados)
+    return ids
+
+
+def _limpar_filtros():
+    """Callback do botao. Precisa ser callback: mexer na chave de um widget
+    depois que ele ja foi criado no mesmo run levanta excecao no Streamlit --
+    os callbacks rodam antes do rerun, quando ainda e permitido."""
+    for chave, _, padrao, _, _ in FILTROS:
+        st.session_state[f"gf_{chave}"] = padrao
+
+
+def consumir_filtros_url(tags: pd.DataFrame, resumo: pd.DataFrame,
+                         esperados: pd.DataFrame) -> None:
+    """Aplica ?fase=/?sop=/?grupo= que chegam de um clique dentro da propria
+    tela. Um token evita reaplicar a cada rerun, senao a URL sobrescreveria
+    para sempre o que o usuario escolher depois no seletor."""
+    vindo = {c: st.query_params.get(URL_DO_FILTRO.get(c, c), "")
+             for c, *_ in FILTROS if st.query_params.get(URL_DO_FILTRO.get(c, c))}
+    if not vindo:
+        return
+    token = "|".join(f"{c}={v}" for c, v in sorted(vindo.items()))
+    if st.session_state.get("_flt_url") == token:
+        return
+    st.session_state["_flt_url"] = token
+    base = {"tags": tags, "resumo": resumo, "esperados": esperados}
+    for chave, _, padrao, fonte, coluna in FILTROS:
+        if chave not in vindo:
+            continue
+        serie = base[fonte][coluna]
+        validos = _valores(serie.map(sentence_case) if chave in NORMALIZA else serie)
+        if vindo[chave] in validos:
+            st.session_state[f"gf_{chave}"] = vindo[chave]
+
+
+def sidebar_filtros(tags: pd.DataFrame, resumo: pd.DataFrame,
+                    esperados: pd.DataFrame) -> dict:
+    """Filtros da lateral, em cascata e validos para o app inteiro.
+
+    Cada campo so oferece o que ainda sobra depois dos outros: escolher uma
+    FASE reduz a lista de SOPs aos daquela fase, e escolher um SOP reduz os
+    grupos. Sem isso da para montar uma combinacao que nao devolve nada e
+    parece defeito. Quando o valor guardado sai da lista -- porque outro
+    filtro mudou -- ele volta ao padrao em vez de estourar.
+
+    A chave do session_state E a chave do widget, de proposito: com duas
+    chaves o valor vindo da URL era escrito numa e o selectbox continuava
+    lendo a outra, e o seletor nao mexia.
+    """
+    consumir_filtros_url(tags, resumo, esperados)
+
+    def escolhido(chave: str, padrao: str) -> str:
+        v = st.session_state.get(f"gf_{chave}", padrao)
+        return "" if v == padrao else v
+
+    with st.sidebar:
+        render_html('<div class="flt-topo"><div class="flt-titulo">Filtros rápidos</div></div>')
+        for chave, rotulo, padrao, fonte, coluna in FILTROS:
+            escolhas = {c: escolhido(c, p) for c, _, p, _, _ in FILTROS}
+            base = {"tags": tags, "resumo": resumo, "esperados": esperados}[fonte]
+            sub = base[base["TAG"].isin(
+                _universo(escolhas, tags, resumo, esperados, pular=chave))]
+            serie = sub[coluna].map(sentence_case) if chave in NORMALIZA else sub[coluna]
+            opcoes = [padrao] + _valores(serie)
+            if st.session_state.get(f"gf_{chave}", padrao) not in opcoes:
+                st.session_state[f"gf_{chave}"] = padrao
+            st.selectbox(rotulo, opcoes, key=f"gf_{chave}")
+
+        escolhas = {c: escolhido(c, p) for c, _, p, _, _ in FILTROS}
+        ativos = {c: v for c, v in escolhas.items() if v}
+        alvo = _universo(escolhas, tags, resumo, esperados)
+        render_html(f'<div class="flt-conta"><b>{br_num(len(alvo))}</b> de '
+                    f"{br_num(len(tags))} tags</div>")
+        if ativos:
+            st.button("Limpar filtros", key="gf_limpar", on_click=_limpar_filtros)
+
+    rotulos = {c: r for c, r, *_ in FILTROS}
+    st.session_state["_flt_selo"] = (
+        '<div class="du-selo filtro"><i></i>'
+        + " · ".join(f"{rotulos[c]}: {esc(v)}" for c, v in ativos.items())
+        + f" — {br_num(len(alvo))} de {br_num(len(tags))} tags</div>"
+    ) if ativos else ""
+    return escolhas
+
+
+def aplicar_filtros(escolhas: dict, tags: pd.DataFrame, resumo: pd.DataFrame,
+                    esperados: pd.DataFrame):
+    """Recorta as tres bases para o mesmo conjunto de TAGs.
+
+    As tres tem que sair juntas, senao o Dashboard conta 300 tags e soma os
+    25.100 relatorios de todas elas. A base SIGEM crua fica fora: ela e a
+    fonte, e recortar a fonte esconderia documento que nao casa com tag
+    nenhuma -- justamente o que se quer enxergar la."""
+    if not any(escolhas.values()):
+        return tags, resumo, esperados
+    ids = _universo(escolhas, tags, resumo, esperados)
+    return (tags[tags["TAG"].isin(ids)].copy(),
+            resumo[resumo["TAG"].isin(ids)].copy(),
+            esperados[esperados["TAG"].isin(ids)].copy())
+
+
 def main():
     favicon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "favicon.png")
     st.set_page_config(
@@ -2544,6 +2951,9 @@ def main():
             '<div class="gplan-brand-sub">Instrumentação · U-12</div>'
             "</div></div>"
         )
+
+    escolhas = sidebar_filtros(tags, resumo, esperados)
+    tags, resumo, esperados = aplicar_filtros(escolhas, tags, resumo, esperados)
 
     dashboard_page = st.Page(lambda: _sob_carga("Carregando o painel", lambda: render_dashboard(resumo, esperados, tags, sigem, cache_key)), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
     relatorios_page = st.Page(lambda: _sob_carga("Carregando os relatórios", lambda: render_relatorios(esperados, resumo, tags, sigem, cache_key)), title="Relatórios", icon=":material/description:", url_path="relatorios")

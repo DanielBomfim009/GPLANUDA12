@@ -142,7 +142,7 @@ with sync_playwright() as p:
 
     print("\n  todas as abas abrem")
     for caminho, nome, marcador in [
-        ("", "Dashboard", ".gplan-panel"),
+        ("", "Dashboard", ".du-tela"),
         ("/relatorios", "Relatórios", "table.gtbl"),
         ("/pesquisa", "Pesquisa tag", "table.gtbl"),
         ("/sigem", "Base SIGEM", "table.gtbl"),
@@ -152,9 +152,13 @@ with sync_playwright() as p:
 
     # Dashboard: os cinco cartões contra a planilha
     print("\n  Dashboard bate com a planilha")
-    abrir("", ".gplan-panel")
-    cartoes = {c.split("|")[0]: c.split("|")[1]
-               for c in pg.evaluate(TXT % "[class*=kpi-card]") if "|" in c}
+    abrir("", ".du-tela")
+
+    def cartoes_kpi() -> dict:
+        return {c.split("|")[0]: c.split("|")[1]
+                for c in pg.evaluate(TXT % ".du-kpi") if "|" in c}
+
+    cartoes = cartoes_kpi()
     conferir("Total de tags", int(numero(cartoes.get("Total de tags", "0"))), n_tags)
     conferir("Emitidos SIGEM", int(numero(cartoes.get("Emitidos SIGEM", "0"))), n_postados)
     conferir("Pendentes", int(numero(cartoes.get("Pendentes", "0"))), n_esp - n_aprovados)
@@ -162,9 +166,56 @@ with sync_playwright() as p:
              round(avanco * 100, 1))
     # O cabeçalho já ficou em "—" por eu passar a chave de cache no lugar do
     # carimbo. Só falta data quem não sabe quando os dados são de fato.
-    carimbo = pg.locator(".gplan-updated").inner_text()
+    carimbo = pg.locator(".du-selo:not(.filtro)").first.inner_text()
     conferir("cabeçalho tem a data da planilha",
              bool(re.search(r"\d{2}/\d{2}/\d{4}", carimbo)), True, carimbo.strip())
+
+    # Tela única: a promessa é caber sem rolar e sem esconder nada. Painel que
+    # corta conteúdo por dentro é pior que barra de rolagem -- some informação
+    # e nada na tela avisa.
+    print("\n  Dashboard cabe numa tela")
+    medida = pg.evaluate("""() => {
+        const m = document.querySelector('[data-testid=stMain]');
+        const cortados = [...document.querySelectorAll('.du-tela *')].filter(e => {
+            const o = getComputedStyle(e).overflowY;
+            return (o === 'hidden' || o === 'clip')
+                   && e.scrollHeight > e.clientHeight + 1 && e.clientHeight > 0; });
+        return {rolagem: m.scrollHeight - m.clientHeight,
+                horizontal: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+                cortados: cortados.length,
+                barras: document.querySelectorAll('.du-br').length,
+                linhas: document.querySelectorAll('.du-tab .lin').length,
+                grupos: document.querySelectorAll('.du-gp').length};
+    }""")
+    conferir("sem rolagem vertical", medida["rolagem"], 0)
+    conferir("sem rolagem horizontal", medida["horizontal"], 0)
+    conferir("nada cortado dentro dos painéis", medida["cortados"], 0)
+    conferir("barras = tipos de relatório", medida["barras"], 13)
+    conferir("linhas do Top 10", medida["linhas"], 10)
+    conferir("cartões de grupo", medida["grupos"], int(resumo.GRUPO_REGRA.nunique()))
+    # Todo botão precisa ter para onde ir. O botão Detalhes do Dashboard já
+    # apontou para âncora inexistente e o clique não fazia nada, sem erro.
+    conferir("botões Detalhes sem destino", pg.evaluate("""() =>
+        [...document.querySelectorAll('a.btn-detalhes')]
+            .filter(a => !document.getElementById(a.getAttribute('href').slice(1))).length"""), 0)
+
+    # Filtro: tem que recortar as três bases juntas. Recortar só uma daria um
+    # Dashboard com 464 tags somando os 25.100 relatórios de todas elas.
+    print("\n  Filtro recorta tudo junto")
+    fase = str(tags.FASE.dropna().astype(str).str.strip().value_counts().index[0])
+    ids = set(tags.loc[tags.FASE.astype(str).str.strip() == fase, "TAG"])
+    esp_f = esperados[esperados.TAG.isin(ids)]
+    apr_f = int(esp_f.STATUS_SIGEM.astype(str).str.strip().str.upper().isin(APROVADOS).sum())
+    from urllib.parse import quote as _q
+    if abrir("/?fase=" + _q(fase), ".du-tela"):
+        c = cartoes_kpi()
+        conferir(f"tags na fase {fase[:18]}", int(numero(c.get("Total de tags", "0"))), len(ids))
+        conferir("pendentes da fase", int(numero(c.get("Pendentes", "0"))), len(esp_f) - apr_f)
+        conferir("avanço da fase", round(numero(c.get("Avanço geral", "0")), 1),
+                 round(apr_f / len(esp_f) * 100, 1) if len(esp_f) else 0.0)
+        conferir("filtro aparece no cabeçalho", pg.locator(".du-selo.filtro").count(), 1)
+    else:
+        conferir("Dashboard filtrado abre", False, True)
 
     # Progresso: os totais e o avanço da árvore
     print("\n  Progresso bate com a planilha")
