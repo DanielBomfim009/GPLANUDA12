@@ -122,16 +122,39 @@ except ValueError:
     conferir("aba 06_BASE_GITEC existe", False, True)
 
 if not gitec.empty:
-    fases = set(gitec.FASE.dropna().astype(str).str.strip().unique())
-    conferir("só escopo de montagem", fases, {"Montagem Eletromecânica"})
+    # A planilha é um controle por TAG, e item de PPU, critério e preço moram
+    # nela. O que vale da GITEC é o que mede esses itens: cabo e tubing são
+    # outro controle, e compra não é montagem.
+    itens = set(tags.ITEM_PPU.astype(str).str.strip())
+    conferir("todo item medido é PPU da base",
+             int((~gitec.ITEM_PPU_GITEC.astype(str).str.strip().isin(itens)).sum()), 0)
+    conferir("nenhum item de cabo entrou",
+             int(gitec.ITEM_PPU_GITEC.astype(str).str.strip().eq("4.3.8.1.8").sum()), 0)
     conferir("toda medição tem tag da base",
              int((~gitec.TAG.isin(set(tags.TAG))).sum()), 0)
-    conferir("tags medidas = tags marcadas no resumo",
+    # medir a tag sob um item diferente do dela é divergência entre as duas
+    # bases; tem de estar declarada na 11_VALIDACOES, nunca escondida
+    ppu_tag = dict(zip(tags.TAG, tags.ITEM_PPU.astype(str).str.strip()))
+    divergentes = int(sum(1 for t, i in zip(gitec.TAG, gitec.ITEM_PPU_GITEC.astype(str).str.strip())
+                          if ppu_tag.get(t, i) != i))
+    declaradas = int(validacoes.TIPO_VALIDACAO.astype(str).eq("GITEC_ITEM_DIVERGENTE").sum())
+    conferir("divergência de item declarada", declaradas, divergentes)
+    # Estar na GITEC não é estar medido: o evento entra lá quando vai para a
+    # fiscalização e só vira medição quando ela aprova. Enquanto não aprovar,
+    # nada foi medido — e o valor ainda pode não virar medição nenhuma.
+    ap = gitec.STATUS.astype(str).str.strip().str.upper().str.startswith("APROVADO")
+    conferir("medido = só o aprovado",
              int((resumo.MEDIDO_GITEC.astype(str).str.upper() == "SIM").sum()),
-             int(gitec.TAG.nunique()))
-    conferir("valor medido = soma da aba",
+             int(gitec.loc[ap, "TAG"].nunique()))
+    conferir("valor medido = soma dos aprovados",
              round(float(resumo.VALOR_GITEC.fillna(0).sum()), 2),
-             round(float(gitec.VALOR.fillna(0).sum()), 2))
+             round(float(gitec.loc[ap, "VALOR"].fillna(0).sum()), 2))
+    conferir("aguardando aprovação em coluna própria",
+             round(float(resumo.VALOR_GITEC_VERIF.fillna(0).sum()), 2),
+             round(float(gitec.loc[~ap, "VALOR"].fillna(0).sum()), 2))
+    conferir("em verificação não entra como medido",
+             int(((resumo.MEDIDO_GITEC.astype(str).str.upper() == "SIM")
+                  & (resumo.VALOR_GITEC.fillna(0) <= 0)).sum()), 0)
     # medir sem a documentação fechar é o que motivou o cartão; medir uma tag
     # que nem montada está seria erro de base, e vale saber na hora
     medidas = set(gitec.TAG)
@@ -177,6 +200,7 @@ with sync_playwright() as p:
         ("/pesquisa", "Pesquisa tag", "table.gtbl"),
         ("/sigem", "Base SIGEM", "table.gtbl"),
         ("/progresso", "Progresso", "details.arv-n1"),
+        ("/gitec", "Gitec", ".fx-tiles"),
     ]:
         conferir(nome, abrir(caminho, marcador), True)
 
@@ -219,8 +243,8 @@ with sync_playwright() as p:
     conferir("carimbo saiu do cabeçalho",
              pg.evaluate("() => document.querySelectorAll('.du-cab .du-selo').length"), 0)
     conferir("carimbo virou cartão",
-             bool(re.search(r"\d{2}/\d{2}/\d{4}", rodape.get("Atualizado em", ""))), True,
-             rodape.get("Atualizado em", ""))
+             bool(re.search(r"\d{2}/\d{2}/\d{4}", rodape.get("Última atualização", ""))), True,
+             rodape.get("Última atualização", ""))
 
     # Tela única: a promessa é caber sem rolar e sem esconder nada. Painel que
     # corta conteúdo por dentro é pior que barra de rolagem -- some informação

@@ -262,8 +262,15 @@ def load_data(cache_key: str):
     sigem = pd.read_excel(excel_file, sheet_name="04_BASE_SIGEM")
     resumo = pd.read_excel(excel_file, sheet_name="07_TAG_RESUMO")
     esperados = pd.read_excel(excel_file, sheet_name="08_RELATORIOS_ESPERADOS")
+    # A medicao de campo so existe em planilha gerada pelo pipeline novo; a
+    # antiga que estiver no Supabase continua abrindo, com a aba vazia.
+    if "06_BASE_GITEC" in excel_file.sheet_names:
+        gitec = pd.read_excel(excel_file, sheet_name="06_BASE_GITEC")
+    else:
+        gitec = pd.DataFrame(columns=["TAG", "ITEM_PPU_GITEC", "FASE", "AGRUPAMENTO",
+                                      "ETAPA", "STATUS", "VALOR", "DATA_EXECUCAO"])
     resumo = aplicar_regra_aprovados(resumo, esperados)
-    return tags, cabos, tubing, sigem, resumo, esperados
+    return tags, cabos, tubing, sigem, resumo, esperados, gitec
 
 
 # Um relatorio so conta como avanco depois de aprovado pela fiscalizacao.
@@ -1527,6 +1534,9 @@ KPI_ICONS = {
     "clock": '<circle cx="12" cy="12" r="9"/><path d="M12 7v6l4 2"/>',
     "archive": '<path d="M4 4h16v16H4z"/><path d="M4 9h16"/>',
     "trend": '<path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/>',
+    "calendario": ('<rect x="3" y="5" width="18" height="16" rx="2"/>'
+                   '<path d="M3 10h18M8 3v4M16 3v4"/>'
+                   '<rect x="7" y="13" width="3" height="3" rx="0.5" fill="currentColor"/>'),
 }
 
 
@@ -1909,12 +1919,12 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
 
     # A medicao de campo entra pela GITEC. Planilha antiga nao tem essas
     # colunas, entao tudo aqui degrada para zero em vez de estourar.
+    # Estar na GITEC nao e estar medido: o evento vai para a fiscalizacao e so
+    # vira medicao quando ela aprova. VALOR_GITEC ja traz so o aprovado.
     tem_gitec = "VALOR_GITEC" in resumo.columns
-    medido = float(resumo["VALOR_GITEC"].fillna(0).sum()) if tem_gitec else 0.0
-    medido_apr = float(resumo.loc[
-        resumo.get("STATUS_GITEC", pd.Series("", index=resumo.index))
-        .astype(str).str.upper().str.startswith("APROVADO"), "VALOR_GITEC"
-    ].fillna(0).sum()) if tem_gitec else 0.0
+    medido_apr = float(resumo["VALOR_GITEC"].fillna(0).sum()) if tem_gitec else 0.0
+    em_verif = (float(resumo["VALOR_GITEC_VERIF"].fillna(0).sum())
+                if "VALOR_GITEC_VERIF" in resumo.columns else 0.0)
     montagem = (tags["STATUS_MONTAGEM"].astype(str).str.strip().str.upper()
                 if "STATUS_MONTAGEM" in tags.columns else pd.Series(dtype=str))
     montados = int(montagem.eq("MONTADO").sum())
@@ -1935,12 +1945,14 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
         du_mini("Tags montadas", br_num(montados),
                 f"{br_pct(montados / total_tags * 100)} do total" if total_tags else "",
                 "#5b8def", "shield")
-        + du_mini("Previsto de medição", br_moeda(previsto),
-                  f"{br_num(len(prontas))} prontas e não medidas", "#2dd4bf", "check")
+        + du_mini("Previsto de medição", br_moeda(previsto), "", "#2dd4bf", "check")
         + du_mini("Valor total", br_moeda(float(preco_tag.sum())), "", "#9d6bff", "trend")
-        + du_mini("Medido na GITEC", br_moeda(medido),
-                  f"{br_moeda(medido_apr)} aprovados" if medido else "", "#fbbf24", "archive")
-        + du_mini("Atualizado em", agora, "", "#7c8aa8", "clock")
+        # medido de verdade e o aprovado; o que esta em verificacao ainda pode
+        # voltar, entao fica embaixo em vez de somar no numero grande
+        + du_mini("Medido na GITEC", br_moeda(medido_apr),
+                  f"{br_moeda(em_verif)} aguardando aprovação" if em_verif else "",
+                  "#fbbf24", "archive", "/gitec")
+        + du_mini("Última atualização", agora, "Sincronizado", "#5b8def", "calendario")
     )
 
     top = resumo.sort_values(["RELATORIOS_PENDENTES", "RELATORIOS_ESPERADOS"],
@@ -2692,6 +2704,157 @@ def render_sigem(sigem: pd.DataFrame, esperados: pd.DataFrame | None = None,
 
 
 SEM_VALOR = {"-", "", "NAN", "NONE"}
+
+
+def render_gitec(gitec: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame,
+                 esperados: pd.DataFrame, sigem: pd.DataFrame, cache_key: str = ""):
+    """A medição de campo: o que a GITEC já mediu dos instrumentos da base.
+
+    É o outro lado da conta do controle documental. A documentação diz o que
+    pode ser medido; esta aba diz o que foi. O cruzamento das duas é o que
+    mostra instrumento medido antes de a documentação fechar, e instrumento
+    pronto que ainda não virou medição.
+    """
+    render_header("Gitec")
+
+    if gitec.empty:
+        render_html('<div class="gplan-panel"><div class="gtbl-empty">'
+                    "Nenhuma medição da GITEC nesta planilha. Rode o pipeline com a "
+                    "06_BASE_GITEC.xlsx na pasta das bases.</div></div>")
+        return
+
+    g = gitec.copy()
+    g["VALOR"] = pd.to_numeric(g["VALOR"], errors="coerce").fillna(0.0)
+    g["_dt"] = pd.to_datetime(g["DATA_EXECUCAO"], errors="coerce", dayfirst=True)
+    # medido e so o aprovado; o resto esta com a fiscalizacao e pode nao virar
+    # medicao nenhuma
+    aprovado_m = g["STATUS"].astype(str).str.strip().str.upper().str.startswith("APROVADO")
+    medido_apr = float(g.loc[aprovado_m, "VALOR"].sum())
+    em_verif = float(g.loc[~aprovado_m, "VALOR"].sum())
+    tags_medidas = set(g.loc[aprovado_m, "TAG"])
+    tags_fila = set(g.loc[~aprovado_m, "TAG"]) - tags_medidas
+
+    preco_tag = pd.to_numeric(tags.set_index("TAG")["PRECO_UNITARIO"],
+                              errors="coerce").fillna(0.0)
+    medidas = tags_medidas
+    # pronta e ainda nao aprovada continua prevista, mesmo ja estando na fila
+    prontas = resumo[(resumo["AVANCO_DOCUMENTAL"] >= 1.0) & (~resumo["TAG"].isin(medidas))]
+    previsto = float(preco_tag.reindex(prontas["TAG"]).fillna(0).sum())
+    total_obra = float(preco_tag.sum())
+    montagem = (tags["STATUS_MONTAGEM"].astype(str).str.strip().str.upper()
+                if "STATUS_MONTAGEM" in tags.columns else pd.Series(dtype=str))
+    montadas = set(tags.loc[montagem.eq("MONTADO"), "TAG"]) if len(montagem) else set()
+
+    tiles = (
+        fx_tile("Instrumentos medidos", br_num(len(tags_medidas)), "tag", "#2dd4bf",
+                f"{br_pct(len(tags_medidas) / len(tags) * 100)} da base")
+        + fx_tile("Aguardando aprovação", br_num(len(tags_fila)), "relogio", "#fbbf24")
+        + fx_tile("Montadas sem medição", br_num(len(montadas - medidas)), "alerta", "#f87171")
+        + fx_tile("Itens de PPU medidos", br_num(g["ITEM_PPU_GITEC"].nunique()), "chip", "#9d6bff")
+        + fx_tile("Última medição", f"{g['_dt'].max():%d/%m/%Y}" if g["_dt"].notna().any()
+                  else "—", "relogio", "#5b8def")
+        + fx_tile("Medição do contrato", br_pct(medido_apr / total_obra * 100)
+                  if total_obra else "—", "seta", "#34d399")
+    )
+
+    kpis = (
+        fx_kpi("Medido e aprovado", br_moeda(medido_apr),
+               f"{br_pct(medido_apr / total_obra * 100)} do valor da obra" if total_obra else "",
+               (medido_apr / total_obra * 100) if total_obra else 0, "#34d399", "ok")
+        + fx_kpi("Aguardando aprovação", br_moeda(em_verif), "ainda não é medição",
+                 (em_verif / total_obra * 100) if total_obra else 0, "#fbbf24", "relogio")
+        + fx_kpi("Previsto de medição", br_moeda(previsto),
+                 f"{br_num(len(prontas))} prontas e fora da GITEC",
+                 (previsto / total_obra * 100) if total_obra else 0, "#2dd4bf", "nuvem")
+        + fx_kpi("Valor da obra", br_moeda(total_obra), "", 100, "#9d6bff", "moeda")
+    )
+
+    # por item de PPU: é a chave que liga os dois contratos
+    por_item = g.groupby("ITEM_PPU_GITEC").agg(
+        tags_=("TAG", "nunique"), valor=("VALOR", "sum")).reset_index()
+    nome_item = (tags.dropna(subset=["ITEM_PPU"])
+                 .groupby(tags["ITEM_PPU"].astype(str).str.strip())["TIPO_ORIGEM"]
+                 .agg(lambda x: sentence_case(x.mode().iloc[0]) if len(x.mode()) else "—")
+                 .to_dict())
+    linhas_item = "".join(
+        f'<tr><td class="gtbl-strong">{esc(r["ITEM_PPU_GITEC"])}</td>'
+        f'<td class="gtbl-muted">{esc(nome_item.get(str(r["ITEM_PPU_GITEC"]).strip(), "—"))}</td>'
+        f'<td class="gtbl-num">{br_num(int(r["tags_"]))}</td>'
+        f'<td class="gtbl-num gtbl-strong">{br_moeda(r["valor"])}</td></tr>'
+        for _, r in por_item.sort_values("valor", ascending=False).iterrows())
+    painel_item = fx_painel(
+        "Medição por item de PPU", "chip",
+        html_table(["Item", "Tipo", "#Instrumentos", "#Valor"], linhas_item),
+        conta=f"{len(por_item)} itens", classe_corpo="zero")
+
+    # movimentação: quanto foi medido em cada mês
+    mov = g.dropna(subset=["_dt"]).copy()
+    painel_mov = ""
+    if not mov.empty:
+        mov["mes"] = mov["_dt"].dt.to_period("M")
+        por_mes = mov.groupby("mes").agg(n=("TAG", "nunique"), valor=("VALOR", "sum")).reset_index()
+        teto = float(por_mes["valor"].max()) or 1.0
+        barras = "".join(
+            f'<div class="du-br"><span class="nm">{r["mes"].strftime("%m/%Y")}</span>'
+            f'<span class="tr"><i style="width:{r["valor"] / teto * 100:.1f}%;"></i></span>'
+            f'<span class="fr">{br_num(int(r["n"]))} tags</span>'
+            f'<span class="pc">{br_moeda(r["valor"])}</span></div>'
+            for _, r in por_mes.sort_values("mes").iterrows())
+        painel_mov = fx_painel("Movimentação por mês", "relogio",
+                               f'<div class="du-barras">{barras}</div>',
+                               conta=f"{len(por_mes)} meses")
+
+    # a tabela das medições, com o cruzamento documental de cada tag
+    avanco = dict(zip(resumo["TAG"], resumo["AVANCO_DOCUMENTAL"]))
+    g = g.sort_values("_dt", ascending=False)
+    pagina = paginate(g, "gitec", "")
+    linhas = ""
+    for _, r in pagina.iterrows():
+        pct = float(avanco.get(r["TAG"], 0)) * 100
+        tom = "ok" if pct >= 100 else ("warn" if pct >= 50 else "crit")
+        ap = str(r["STATUS"]).strip().upper().startswith("APROVADO")
+        data = (f"{r['_dt']:%d/%m/%Y}" if pd.notna(r["_dt"]) else "—")
+        linhas += (
+            f'<tr><td>{tag_link(r["TAG"])}</td>'
+            f'<td class="gtbl-muted">{esc(r["ITEM_PPU_GITEC"])}</td>'
+            f'<td class="gtbl-muted">{esc(str(r["AGRUPAMENTO"])[:52])}</td>'
+            f'<td><span class="gtbl-badge {"ok" if ap else "andamento"}">'
+            f'{esc(sentence_case(r["STATUS"]))}</span></td>'
+            f'<td class="gtbl-num">{data}</td>'
+            f'<td class="gtbl-num gtbl-strong">{br_moeda(r["VALOR"])}</td>'
+            f'<td class="gtbl-num"><span class="gtbl-badge {tom}">{br_pct(pct)}</span></td></tr>')
+    tabela = fx_painel(
+        "Medições", "folha",
+        html_table(["Tag", "Item", "Agrupamento", "Status", "#Data", "#Valor",
+                    "#Avanço documental"], linhas),
+        conta=f"{br_num(len(g))} eventos", classe_corpo="zero")
+
+    render_html(
+        '<div class="fx">'
+        f'<div class="fx-tiles">{tiles}</div>'
+        '<div class="fx-corpo"><div class="fx-col">'
+        + fx_painel("Resumo da medição", "grade", f'<div class="fx-kpis">{kpis}</div>')
+        + painel_item + tabela
+        + '</div><div class="fx-col">'
+        + fx_painel("Medido x aguardando", "seta",
+                    fx_rosca(int(medido_apr), int(medido_apr + em_verif) or 1)
+                    + '<div class="fx-leg">'
+                    + fx_lg("Aprovado", br_moeda(medido_apr), "", "#34d399")
+                    + fx_lg("Aguardando aprovação", br_moeda(em_verif), "", "#fbbf24")
+                    + "</div>", classe_corpo="centro")
+        + painel_mov
+        + fx_painel("Cruzamento com a documentação", "grade",
+                    fx_linha("Aguardando aprovação", br_num(len(tags_fila)))
+                    + fx_linha("Medidas e prontas",
+                             br_num(len(medidas & set(resumo.loc[resumo.AVANCO_DOCUMENTAL >= 1.0, "TAG"]))))
+                    + fx_linha("Medidas sem documentação pronta",
+                               br_num(len(medidas) - len(medidas & set(
+                                   resumo.loc[resumo.AVANCO_DOCUMENTAL >= 1.0, "TAG"]))))
+                    + fx_linha("Prontas e ainda não medidas", br_num(len(prontas)))
+                    + fx_linha("Montadas sem medição", br_num(len(montadas - medidas))))
+        + "</div></div></div>"
+        + fichas_completas(pagina["TAG"].tolist(), resumo, esperados, tags, sigem, cache_key)
+    )
 
 
 def vazio(v: object) -> bool:
@@ -3490,7 +3653,7 @@ def main():
         st.stop()
 
     st.session_state["gplan_atualizado_em"] = data_atualizacao(fonte)
-    tags, cabos, tubing, sigem, resumo, esperados = load_data(cache_key)
+    tags, cabos, tubing, sigem, resumo, esperados, gitec = load_data(cache_key)
 
     with st.sidebar:
         render_html(
@@ -3511,14 +3674,19 @@ def main():
 
     escolhas = sidebar_filtros(tags, resumo, esperados)
     tags, resumo, esperados = aplicar_filtros(escolhas, tags, resumo, esperados)
+    # a medicao segue as tags: filtrou a fase, a aba Gitec mostra so o que foi
+    # medido nela
+    gitec_f = gitec[gitec["TAG"].isin(set(tags["TAG"]))] if not gitec.empty else gitec
 
     dashboard_page = st.Page(lambda: _sob_carga("Carregando o painel", lambda: render_dashboard(resumo, esperados, tags, sigem, cache_key)), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
     relatorios_page = st.Page(lambda: _sob_carga("Carregando os relatórios", lambda: render_relatorios(esperados, resumo, tags, sigem, cache_key)), title="Relatórios", icon=":material/description:", url_path="relatorios")
     progresso_page = st.Page(lambda: _sob_carga("Abrindo o Progresso", lambda: render_progresso(resumo, esperados, tags, sigem, cache_key)), title="Progresso", icon=":material/insights:", url_path="progresso")
     pesquisa_page = st.Page(lambda: _sob_carga("Carregando as tags", lambda: render_pesquisa_tag(resumo, esperados, tags, sigem, cache_key)), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
     sigem_page = st.Page(lambda: _sob_carga("Carregando a base SIGEM", lambda: render_sigem(sigem, esperados, any(escolhas.values()))), title="Base SIGEM", icon=":material/database:", url_path="sigem")
+    gitec_page = st.Page(lambda: _sob_carga("Carregando a medição de campo", lambda: render_gitec(gitec_f, resumo, tags, esperados, sigem, cache_key)), title="Gitec", icon=":material/engineering:", url_path="gitec")
 
-    nav = st.navigation([dashboard_page, progresso_page, relatorios_page, pesquisa_page, sigem_page], position="sidebar")
+    nav = st.navigation([dashboard_page, progresso_page, relatorios_page, pesquisa_page,
+                         sigem_page, gitec_page], position="sidebar")
     nav.run()
 
 
