@@ -275,6 +275,12 @@ STATUS_APROVADOS = {"SEM COMENTÁRIOS", "COM COMENTÁRIOS", "PARA CONSTRUÇÃO"}
 # por dentro -- mudei a regra de avanco e a arvore continuou servindo o numero
 # velho. Subir esse numero ao mexer em como o avanco e calculado.
 REGRA_VERSAO = 9
+# O cache do Streamlit hasheia o corpo da funcao cacheada, nao o das funcoes que
+# ela chama. As fichas sao montadas dentro de funcoes cacheadas, entao mudar o
+# desenho delas nao invalida nada: a aba Progresso continuava servindo o HTML
+# antigo, e a economia do sprite simplesmente nao aparecia. Subir este numero e
+# o que diz ao cache que o desenho mudou.
+VISUAL_VERSAO = 3
 
 
 def aprovado(serie: pd.Series) -> pd.Series:
@@ -754,6 +760,194 @@ def inject_css():
         section[data-testid="stSidebar"] .stButton button { width:100%; font-size:11px !important;
           padding:4px 10px !important; border-radius:8px !important; }
 
+
+        /* =========================================================
+           Fichas: tag, relatorio e nivel. As tres usam os mesmos
+           blocos -- trilha, tiles, KPIs, paineis -- para que quem
+           aprendeu a ler uma leia as outras sem reaprender nada.
+           ========================================================= */
+        /* Icone: <span> vazio pintado por mascara. O desenho vem de fx_css_icones. */
+        .fxi { display:inline-block; width:1em; height:1em; flex:none;
+               background-color:currentColor;
+               -webkit-mask:var(--fxi) center/contain no-repeat;
+               mask:var(--fxi) center/contain no-repeat; }
+        __ICONES__
+        .fx-tile .ic .fxi, .fx-kpi .ic .fxi, .fx-pn-t .ic .fxi,
+        .fx-acao .ic .fxi, .fx-com .cab .ic .fxi, .fx-cab .marca .fxi
+          { width:100%; height:100%; }
+        .fx-folha { width:12px; height:12px; vertical-align:-1px; margin-right:7px;
+                    color:#7f93b5; }
+
+        /* Donut sem SVG: anel de conic-gradient com furo de mascara. */
+        .fx-rosca .anel { position:absolute; inset:0; border-radius:50%;
+          background:conic-gradient(var(--cor,#2dd4bf) calc(var(--p,0) * 1%),
+                                    rgba(255,255,255,.07) 0);
+          /* as paradas de cor de um gradiente radial sao relativas a linha do
+             gradiente, nao a caixa: com calc(50% - 13px) o furo saia com 15px
+             em vez de 43 e o donut virava uma pizza cheia. Em fracao do raio
+             o furo fica certo em qualquer tamanho. */
+          -webkit-mask:radial-gradient(farthest-side, #0000 75%, #000 76%);
+          mask:radial-gradient(farthest-side, #0000 75%, #000 76%); }
+        /* Cores dos blocos como classe -- ver FX_COR. */
+        .fxc-azul  { color:#5b8def; } .fx-tile .ic.fxc-azul  { background:rgba(91,141,239,.11); }
+        .fxc-teal  { color:#2dd4bf; } .fx-tile .ic.fxc-teal  { background:rgba(45,212,191,.11); }
+        .fxc-roxo  { color:#9d6bff; } .fx-tile .ic.fxc-roxo  { background:rgba(157,107,255,.11); }
+        .fxc-ambar { color:#fbbf24; } .fx-tile .ic.fxc-ambar { background:rgba(251,191,36,.11); }
+        .fxc-rubi  { color:#f87171; } .fx-tile .ic.fxc-rubi  { background:rgba(248,113,113,.11); }
+        .fxc-mudo  { color:#7c8aa8; } .fx-tile .ic.fxc-mudo  { background:rgba(124,138,168,.13); }
+        .fxc-verde { color:#34d399; } .fx-tile .ic.fxc-verde { background:rgba(52,211,153,.11); }
+        .fxc-cinza { color:#3a4a68; }
+        .fx-trilho.fxc-azul i  { background:#5b8def; }
+        .fx-trilho.fxc-teal i  { background:#2dd4bf; }
+        .fx-trilho.fxc-roxo i  { background:#9d6bff; }
+        .fx-trilho.fxc-ambar i { background:#fbbf24; }
+        .fx-trilho.fxc-rubi i  { background:#f87171; }
+        .fx-trilho.fxc-mudo i  { background:#7c8aa8; }
+        .fx-trilho.fxc-verde i { background:#34d399; }
+        .fx-lg i.fxc-azul  { background:#5b8def; }
+        .fx-lg i.fxc-teal  { background:#2dd4bf; }
+        .fx-lg i.fxc-roxo  { background:#9d6bff; }
+        .fx-lg i.fxc-ambar { background:#fbbf24; }
+        .fx-lg i.fxc-rubi  { background:#f87171; }
+        .fx-lg i.fxc-mudo  { background:#7c8aa8; }
+        .fx-lg i.fxc-verde { background:#34d399; }
+        .fx-lg i.fxc-cinza { background:#3a4a68; }
+        .fx { display:flex; flex-direction:column; gap:14px; }
+        .fx svg { width:100%; height:100%; }
+
+        /* trilha: a cadeia de onde a coisa pendura */
+        .fx-trilha { display:flex; align-items:center; gap:7px; flex-wrap:wrap;
+                     font-size:11.5px; color:var(--text-3); }
+        .fx-trilha a { color:var(--text-2) !important; text-decoration:none !important;
+                       border-bottom:1px solid transparent; }
+        .fx-trilha a:hover { color:var(--text-1) !important; border-bottom-color:var(--accent-blue); }
+        .fx-trilha .sep { color:#38455f; }
+        .fx-trilha .aqui { color:var(--text-1); font-weight:650; }
+
+        /* tiles do topo */
+        .fx-tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+                    gap:10px; }
+        .fx-tile { background:var(--dark-card-2); border:1px solid var(--border-color);
+                   border-radius:12px; padding:11px 12px; display:flex; align-items:center;
+                   gap:10px; min-width:0; text-decoration:none !important; }
+        a.fx-tile:hover { border-color:rgba(91,141,239,.5); }
+        .fx-tile .ic { width:31px; height:31px; flex:none; border-radius:9px; padding:7px;
+                       display:grid; place-items:center; }
+        .fx-tile .cp { min-width:0; display:flex; flex-direction:column; gap:2px; }
+        .fx-tile .rot { font-size:9.5px; letter-spacing:.7px; text-transform:uppercase;
+                        color:var(--text-3); font-weight:700; }
+        .fx-tile .val { font-size:13.5px; font-weight:700; color:var(--text-1); line-height:1.25;
+                        overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2;
+                        -webkit-box-orient:vertical; overflow:hidden; }
+        .fx-tile .sub { font-size:10.5px; color:var(--text-3); }
+
+        /* duas colunas */
+        .fx-corpo { display:grid; grid-template-columns:1fr 288px; gap:13px; align-items:start; }
+        .fx-col { display:flex; flex-direction:column; gap:13px; min-width:0; }
+
+        /* paineis */
+        .fx-pn { background:var(--dark-card-2); border:1px solid var(--border-color);
+                 border-radius:13px; overflow:hidden; }
+        .fx-pn-t { display:flex; align-items:center; gap:8px; font-size:12.5px; font-weight:700;
+                   color:var(--text-1); padding:12px 14px 10px; border-bottom:1px solid var(--border-color); }
+        .fx-pn-t .ic { width:15px; height:15px; flex:none; color:var(--text-3); }
+        .fx-pn-t .conta { margin-left:auto; font-size:10.5px; font-weight:500; color:var(--text-3); }
+        .fx-pn-c { padding:13px 14px; }
+        .fx-pn-c.zero { padding:0; }
+        .fx-pn-c.centro { display:flex; flex-direction:column; align-items:center; gap:11px; }
+
+        /* KPIs */
+        .fx-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; }
+        .fx-kpi { background:var(--dark-card); border:1px solid var(--border-color);
+                  border-radius:11px; padding:12px; display:flex; flex-direction:column; gap:5px; }
+        .fx-kpi .top { display:flex; align-items:flex-start; justify-content:space-between; gap:7px; }
+        .fx-kpi .rot { font-size:9.5px; letter-spacing:.7px; text-transform:uppercase;
+                       color:var(--text-3); font-weight:700; }
+        .fx-kpi .ic { width:16px; height:16px; flex:none; }
+        .fx-kpi .val { font-size:25px; font-weight:800; letter-spacing:-.9px; line-height:1;
+                       color:var(--text-1); }
+        .fx-kpi .sub { font-size:10px; color:var(--text-3); min-height:24px; }
+        .fx-trilho { height:3px; border-radius:99px; background:rgba(255,255,255,.07); overflow:hidden; }
+        .fx-trilho i { display:block; height:100%; border-radius:99px; }
+
+        /* dados em par rotulo/valor */
+        .fx-dados { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+                    gap:9px; margin-top:11px; }
+        .fx-dado { background:var(--dark-card); border:1px solid var(--border-color);
+                   border-radius:10px; padding:9px 11px; min-width:0; }
+        .fx-dado .rot { font-size:9.5px; letter-spacing:.7px; text-transform:uppercase;
+                        color:var(--text-3); font-weight:700; }
+        .fx-dado .val { font-size:14px; font-weight:700; color:var(--text-1); margin-top:4px;
+                        overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+        /* rosca */
+        .fx-rosca { position:relative; width:112px; aspect-ratio:1; }
+        .fx-rosca .centro { position:absolute; inset:0; display:grid; place-content:center;
+                            text-align:center; }
+        .fx-rosca .centro b { font-size:20px; font-weight:800; letter-spacing:-.7px;
+                              display:block; line-height:1; color:var(--text-1); }
+        .fx-rosca .centro span { font-size:9.5px; color:var(--text-3); }
+        .fx-leg { display:flex; flex-direction:column; gap:6px; width:100%; }
+        .fx-lg { display:grid; grid-template-columns:9px 1fr auto auto; align-items:center;
+                 gap:8px; font-size:11.5px; text-decoration:none !important; }
+        .fx-lg i { width:8px; height:8px; border-radius:2px; }
+        .fx-lg .nm { color:var(--text-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .fx-lg b { font-weight:700; color:var(--text-1); }
+        .fx-lg em { font-style:normal; font-size:10px; color:var(--text-3); min-width:34px; text-align:right; }
+        .fx-lg.total { border-top:1px solid var(--border-color); padding-top:6px; }
+        .fx-nota { font-size:10.5px; color:var(--text-3); text-align:center; line-height:1.5; }
+
+        /* linhas de info */
+        .fx-linha { display:flex; align-items:center; justify-content:space-between; gap:10px;
+                    font-size:12px; padding:7px 0; border-bottom:1px solid rgba(255,255,255,.045); }
+        .fx-linha:last-child { border-bottom:0; }
+        .fx-linha > span:first-child { color:var(--text-2); }
+        .fx-linha b { font-weight:700; font-size:12.5px; color:var(--text-1); }
+        .fx-linha a { text-decoration:none !important; }
+
+        /* acoes */
+        .fx-acoes { display:flex; flex-direction:column; gap:7px; }
+        .fx-acao { display:flex; align-items:center; gap:9px; font-size:12px;
+                   color:var(--text-1) !important; text-decoration:none !important;
+                   background:var(--dark-card); border:1px solid var(--border-color);
+                   border-radius:9px; padding:9px 11px; }
+        .fx-acao .ic { width:15px; height:15px; flex:none; color:var(--text-3); }
+        .fx-acao:hover { border-color:rgba(91,141,239,.5); }
+
+
+        /* revisoes do relatorio */
+        .fx-rev-atual td { background:rgba(251,191,36,.05); }
+        .fx-atual { font-size:8.5px; letter-spacing:.6px; text-transform:uppercase;
+                    color:#fbbf24; background:rgba(251,191,36,.14);
+                    border:1px solid rgba(251,191,36,.3); border-radius:5px;
+                    padding:1px 5px; margin-left:6px; font-weight:700; vertical-align:1px; }
+        .fx-com { border-radius:10px; padding:10px 12px; border:1px solid; margin:0 0 4px; }
+        .fx-com.rec { background:rgba(248,113,113,.075); border-color:rgba(248,113,113,.3); }
+        .fx-com.obs { background:rgba(91,141,239,.06); border-color:rgba(91,141,239,.26); }
+        .fx-com .cab { display:flex; align-items:center; gap:7px; font-size:10px; letter-spacing:.6px;
+                       text-transform:uppercase; font-weight:700; margin-bottom:6px; }
+        .fx-com.rec .cab { color:#ff8f9c; }
+        .fx-com.obs .cab { color:#8fb4ff; }
+        .fx-com .cab .ic { width:13px; height:13px; flex:none; }
+        .fx-com p { white-space:pre-wrap; word-break:break-word; font-size:11.5px;
+                    line-height:1.55; margin:0; }
+        .fx-com.rec p { color:#ffc4cb; }
+        .fx-com.obs p { color:#c3d6ff; }
+        .gtbl td.fx-com-cel { padding:0 14px 10px !important; }
+
+        /* cabecalho da ficha fora do modal (aba Pesquisa tag) */
+        .fx-cab { display:flex; align-items:center; gap:12px; }
+        .fx-cab .marca { width:40px; height:40px; flex:none; border-radius:12px; padding:10px;
+                         display:grid; place-items:center; background:rgba(91,141,239,.15);
+                         color:var(--accent-blue); }
+        .fx-cab h2 { font-size:21px; font-weight:800; letter-spacing:-.5px; margin:0;
+                     color:var(--text-1); line-height:1.15; }
+        .fx-cab p { font-size:12.5px; color:var(--text-2); margin:3px 0 0; }
+
+        @media (max-width: 900px) {
+          .fx-corpo { grid-template-columns:1fr; }
+        }
+
         .gplan-header { display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px; }
         .gplan-header h1 { font-size: 24px; font-weight: 700; color: var(--text-1); margin: 0; letter-spacing: -0.4px; }
         .gplan-updated {
@@ -1228,7 +1422,7 @@ def inject_css():
 
         div[data-testid="stMetric"] { background: var(--dark-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px 16px; }
         </style>
-        """
+        """.replace("__ICONES__", fx_css_icones())
     )
 
 
@@ -1356,9 +1550,15 @@ def com_filtros(href: str) -> str:
     volta -- e sem nada na tela dizendo que o filtro caiu. De quebra, o
     endereco passa a poder ser copiado e colado com o filtro junto.
     """
-    partes = [f"{URL_DO_FILTRO.get(chave, chave)}={quote(valor)}"
+    # Nao repete o que o proprio link ja traz: a trilha da ficha manda
+    # /progresso?fase=X, e colar o fase= atual em cima criaria dois valores
+    # para a mesma chave -- o Streamlit fica com um deles e o outro some sem
+    # aviso, o que daria um filtro diferente do que foi clicado.
+    ja_tem = href.split("?", 1)[1] if "?" in href else ""
+    partes = [f"{nome}={quote(valor)}"
               for chave, _rot, padrao, _f, _c in FILTROS
-              if (valor := st.session_state.get(f"gf_{chave}", padrao)) and valor != padrao]
+              if (nome := URL_DO_FILTRO.get(chave, chave)) and f"{nome}=" not in ja_tem
+              and (valor := st.session_state.get(f"gf_{chave}", padrao)) and valor != padrao]
     if not partes:
         return href
     return href + ("&" if "?" in href else "?") + "&".join(partes)
@@ -1600,7 +1800,7 @@ def du_status(esperados: pd.DataFrame) -> str:
         cor = STATUS_COLOR_MAP.get(rotulo, DEFAULT_STATUS_COLORS[i % len(DEFAULT_STATUS_COLORS)])
         legenda += (f'<a class="du-lg" href="{com_filtros("/relatorios?status=" + quote(rotulo))}" target="_self" '
                     f'title="Ver {esc(rotulo)} em Relatórios">'
-                    f'<i style="background:{cor};"></i><span class="nm">{esc(rotulo)}</span>'
+                    f'<i class="{fx_classe_cor(cor)}"></i><span class="nm">{esc(rotulo)}</span>'
                     f'<span class="n">{br_num(valor)}</span>'
                     f'<span class="p">{br_pct(valor / total * 100)}</span></a>')
     return ('<div class="du-pn"><div class="du-t">Status SIGEM</div><div class="du-miolo"><div class="du-sigem">'
@@ -1855,6 +2055,140 @@ def POSTADO(status: object) -> bool:
     return str(status).strip().upper() not in ("NAO POSTADO", "NÃO POSTADO", "", "NAN")
 
 
+# Os desenhos dos icones, so o miolo do <path>. Um dicionario e nao SVGs
+# prontos porque o mesmo icone aparece em tamanho e cor diferentes.
+FX_ICO = {
+    "folha": '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
+    "caixa": '<path d="M4 4h16v16H4z"/><path d="M4 9h16"/>',
+    "onda": '<path d="M2 12h3l3-8 4 16 3-8h7"/>',
+    "chip": '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>',
+    "cabo": '<path d="M7 3v6a5 5 0 0 0 10 0V3"/><path d="M12 14v7"/>',
+    "gota": '<path d="M12 3s6 6.4 6 10a6 6 0 0 1-12 0c0-3.6 6-10 6-10z"/>',
+    "ok": '<path d="M20 6L9 17l-5-5"/>',
+    "relogio": '<circle cx="12" cy="12" r="9"/><path d="M12 7v6l4 2"/>',
+    "nuvem": '<path d="M17 18a4 4 0 0 0 .5-8 6 6 0 0 0-11.6 1.5A3.5 3.5 0 0 0 6.5 18z"/>',
+    "regua": '<path d="M3 8h18v8H3z"/><path d="M7 8v3M11 8v3M15 8v3M19 8v3"/>',
+    "tag": '<path d="M3 12l9-9 9 9-9 9z"/><circle cx="12" cy="12" r="2"/>',
+    "livro": '<path d="M4 4h7v16H4z"/><path d="M13 4h7v16h-7z"/>',
+    "grade": '<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>',
+    "seta": '<path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/>',
+    "link": '<path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>',
+    "alerta": '<path d="M12 3l9 16H3z"/><path d="M12 9v4M12 17h.01"/>',
+    "pessoas": '<circle cx="9" cy="8" r="3"/><path d="M2 20a7 7 0 0 1 14 0"/><path d="M17 8a3 3 0 0 1 0 6"/>',
+    "moeda": '<circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5h4a1.8 1.8 0 0 1 0 3.6h-3a1.8 1.8 0 0 0 0 3.6h4"/>',
+}
+
+
+# As cores dos blocos viram classe. O mesmo style inline repetido em dezenas de
+# milhares de tiles custava mais que a folha de estilo inteira.
+FX_COR = {"#5b8def": "azul", "#2dd4bf": "teal", "#9d6bff": "roxo", "#fbbf24": "ambar",
+          "#f87171": "rubi", "#7c8aa8": "mudo", "#34d399": "verde", "#3a4a68": "cinza"}
+
+
+def fx_css_icones() -> str:
+    # Os icones como mascara CSS, um por classe. O desenho fica aqui, uma vez,
+    # e no HTML sobra um <span> vazio. Alem de cortar uns 10 MB na aba
+    # Progresso, e o que faz o icone sobreviver ao st.html -- que descarta
+    # <svg> e e justamente o que aquela aba usa para conseguir abrir.
+    regras = []
+    for nome, desenho in FX_ICO.items():
+        svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
+               'stroke="black" stroke-width="1.9" stroke-linecap="round" '
+               f'stroke-linejoin="round">{desenho}</svg>')
+        # aspas simples dentro do data: URI, para nao ter de escapar as duplas
+        uri = quote(svg.replace('"', "'"), safe="/:='<>() ")
+        regras.append(f'.fxi-{nome}{{--fxi:url("data:image/svg+xml,{uri}");}}')
+    return "\n        ".join(regras)
+
+
+def fx_svg(nome: str, classe: str = "") -> str:
+    # Nome antigo de proposito: os pontos de uso continuam pedindo "um icone".
+    extra = f" {classe}" if classe else ""
+    return f'<span class="fxi fxi-{nome}{extra}"></span>'
+
+
+def fx_classe_cor(cor: str) -> str:
+    return "fxc-" + FX_COR.get(cor, "azul")
+
+
+def fx_trilha(itens: list) -> str:
+    """A cadeia de onde a coisa pendura, do topo ate ela.
+
+    Cada item e (rotulo, href). Fase e SOP viram link que filtra o app inteiro
+    naquele nivel; SSOP e malha ficam como texto porque nao ha filtro global
+    para eles -- link que nao leva a lugar nenhum e pior que texto.
+    """
+    itens = [(r, h) for r, h in itens if r and not str(r).rstrip().endswith("—")]
+    partes = []
+    for i, (rotulo, href) in enumerate(itens):
+        if i:
+            partes.append('<span class="sep">&rsaquo;</span>')
+        if href:
+            partes.append(f'<a href="{href}" target="_self">{esc(rotulo)}</a>')
+        elif i == len(itens) - 1:
+            partes.append(f'<span class="aqui">{esc(rotulo)}</span>')
+        else:
+            partes.append(f"<span>{esc(rotulo)}</span>")
+    return f'<div class="fx-trilha">{"".join(partes)}</div>'
+
+
+def fx_tile(rotulo: str, valor: object, icone: str, cor: str, sub: str = "",
+            href: str = "") -> str:
+    corpo = (f'<span class="ic {fx_classe_cor(cor)}">{fx_svg(icone)}</span>'
+             f'<span class="cp"><span class="rot">{esc(rotulo)}</span>'
+             f'<span class="val">{esc(valor)}</span>'
+             + (f'<span class="sub">{esc(sub)}</span>' if sub else "") + "</span>")
+    if href:
+        return f'<a class="fx-tile" href="{href}" target="_self">{corpo}</a>'
+    return f'<div class="fx-tile">{corpo}</div>'
+
+
+def fx_kpi(rotulo: str, valor: object, sub: str, pct: float, cor: str, icone: str) -> str:
+    largura = max(0.0, min(pct, 100.0))
+    return (f'<div class="fx-kpi"><div class="top"><span class="rot">{esc(rotulo)}</span>'
+            f'<span class="ic {fx_classe_cor(cor)}">{fx_svg(icone)}</span></div>'
+            f'<div class="val">{esc(valor)}</div><div class="sub">{esc(sub)}</div>'
+            f'<div class="fx-trilho {fx_classe_cor(cor)}"><i style="width:{largura:.1f}%;"></i></div></div>')
+
+
+def fx_dado(rotulo: str, valor: object) -> str:
+    return (f'<div class="fx-dado"><div class="rot">{esc(rotulo)}</div>'
+            f'<div class="val" title="{esc(valor)}">{esc(valor)}</div></div>')
+
+
+def fx_painel(titulo: str, icone: str, corpo: str, conta: str = "",
+              classe_corpo: str = "") -> str:
+    extra = f'<span class="conta">{esc(conta)}</span>' if conta else ""
+    return (f'<div class="fx-pn"><div class="fx-pn-t"><span class="ic">{fx_svg(icone)}</span>'
+            f"{esc(titulo)}{extra}</div>"
+            f'<div class="fx-pn-c {classe_corpo}">{corpo}</div></div>')
+
+
+def fx_rosca(feito: int, total: int, cor: str = "#2dd4bf") -> str:
+    # Donut em conic-gradient com um furo de mascara no meio: mesmo desenho do
+    # SVG, sem uma tag que o st.html va descartar.
+    pct = (feito / total * 100) if total else 0.0
+    return (f'<div class="fx-rosca" style="--p:{pct:.1f};--cor:{cor};">'
+            '<div class="anel"></div>'
+            f'<div class="centro"><b>{br_pct(pct)}</b><span>aprovado</span></div></div>')
+
+
+def fx_lg(rotulo: str, valor: object, pct: str, cor: str, total: bool = False) -> str:
+    return (f'<div class="fx-lg{" total" if total else ""}">'
+            f'<i style="background:{cor};"></i><span class="nm">{esc(rotulo)}</span>'
+            f'<b>{esc(valor)}</b><em>{esc(pct)}</em></div>')
+
+
+def fx_linha(rotulo: str, valor: str) -> str:
+    return f'<div class="fx-linha"><span>{esc(rotulo)}</span><b>{valor}</b></div>'
+
+
+def fx_acao(rotulo: str, icone: str, href: str, nova_aba: bool = False) -> str:
+    alvo = 'target="_blank" rel="noopener"' if nova_aba else 'target="_self"'
+    return (f'<a class="fx-acao" href="{href}" {alvo}>'
+            f'<span class="ic">{fx_svg(icone)}</span><span>{esc(rotulo)}</span></a>')
+
+
 def doc_ancora(doc: object) -> str:
     """Id do modal de um relatorio."""
     return "rel-" + "".join(c if c.isalnum() else "-" for c in str(doc))
@@ -1904,7 +2238,12 @@ def _revisoes_por_doc(cache_key: str, _sigem: pd.DataFrame) -> dict:
 
 
 def ficha_relatorio_html(doc: str, linhas_esperadas: pd.DataFrame, historico: list) -> str:
-    """Ficha de um relatorio: o que se espera dele e como ele andou no SIGEM."""
+    """Ficha de um relatorio: o que se espera dele e como ele andou no SIGEM.
+
+    O miolo e o historico: cada revisao com o parecer da inspecao logo abaixo,
+    em vermelho quando foi recusa. E dai que sai o "parado ha N dias" -- o
+    numero que diz se o documento esta andando ou encalhado.
+    """
     primeira = linhas_esperadas.iloc[0]
     tags_doc = sorted({str(t) for t in linhas_esperadas["TAG"]})
     atual = historico[0] if historico else None
@@ -1912,62 +2251,75 @@ def ficha_relatorio_html(doc: str, linhas_esperadas: pd.DataFrame, historico: li
     aprovada = status_atual.upper() in STATUS_APROVADOS
     tom = "ok" if aprovada else ("crit" if status_atual.upper() in
                                  {"RECUSADO", "CANCELADO"} else "andamento")
+    hoje = pd.Timestamp.now(tz=BR_TZ).tz_localize(None).normalize()
+    n_apr = sum(1 for h in historico if str(h[1]).strip().upper() in STATUS_APROVADOS)
 
-    campos = [
-        ("Relatório", str(primeira["RELATORIO"])),
-        ("Grupo", str(primeira["GRUPO"]).title()),
-        ("Referência", str(primeira["REFERENCIA"])),
-        ("Instrumentos", br_num(len(tags_doc)) if len(tags_doc) > 1 else tags_doc[0]),
-        ("Revisões", br_num(len(historico)) if historico else "—"),
-        ("Situação", status_atual),
-    ]
-    if atual and atual[2] is not None:
-        dias = (pd.Timestamp.now(tz=BR_TZ).tz_localize(None).normalize() - atual[2].normalize()).days
-        campos.append(("Última postagem", f"{atual[2]:%d/%m/%Y}"))
-        # so vira contagem de parado quando a situacao ainda cobra acao
-        if not aprovada:
-            campos.append((f"Parado há", f"{br_num(dias)} dia{'s' if dias != 1 else ''}"))
+    # -------------------------------------------------------------- trilha
+    trilha = []
+    if len(tags_doc) == 1:
+        trilha.append((f"Tag {tags_doc[0]}", f"#{ficha_anchor(tags_doc[0])}"))
+    else:
+        trilha.append((f"{br_num(len(tags_doc))} instrumentos", ""))
+    trilha.append((f'{primeira["RELATORIO"]} · {primeira["REFERENCIA"]}', ""))
 
-    cards = "".join(
-        f"<div><span>{esc(l)}</span><span>{esc(v)}</span></div>" for l, v in campos
+    # --------------------------------------------------------------- tiles
+    tiles = (
+        fx_tile("Relatório", str(primeira["RELATORIO"]), "folha", "#5b8def",
+                str(primeira["GRUPO"]).title())
+        + fx_tile("Referência", str(primeira["REFERENCIA"]), "tag", "#9d6bff")
+        + fx_tile("Revisão atual", str(atual[0]) if atual else "—", "chip", "#fbbf24",
+                  f"{br_num(len(historico))} emitida{'s' if len(historico) != 1 else ''}"
+                  if historico else "nunca postado")
+        + fx_tile("Situação", sentence_case(status_atual), "alerta",
+                  "#34d399" if aprovada else "#f87171")
     )
+    if atual and atual[2] is not None and not aprovada:
+        dias = (hoje - atual[2].normalize()).days
+        tiles += fx_tile("Parado há", f"{br_num(dias)} dia{'s' if dias != 1 else ''}",
+                         "relogio", "#f87171", f"desde {atual[2]:%d/%m/%Y}")
+    elif atual and atual[2] is not None:
+        tiles += fx_tile("Liberado em", f"{atual[2]:%d/%m/%Y}", "ok", "#34d399")
 
+    # ------------------------------------------------------------ revisoes
     if historico:
-        tem_com = any(h[3] is not None and not vazio(h[3]) for h in historico)
-        tem_url = any(h[4] is not None and not vazio(h[4]) for h in historico)
         linhas = []
-        for rev, status, data, com, url in historico:
-            cel_url = ""
-            if tem_url:
-                # abre em aba nova: o SIGEM e outro sistema, e perder o Gplan
-                # aqui e justamente o que se quis evitar
-                # gtbl-num porque o cabecalho "#SIGEM" e centralizado: sem a
-                # classe a celula fica a esquerda e a coluna sai torta
-                cel_url = (f'<td class="gtbl-num"><a class="rel-sigem" href="{esc(url)}" '
-                           f'target="_blank" rel="noopener">Abrir no SIGEM</a></td>'
-                           if url is not None and not vazio(url)
-                           else '<td class="gtbl-num gtbl-muted">—</td>')
+        # da mais antiga para a mais nova: a ficha conta uma historia, e
+        # historia se le do comeco
+        for rev, status, data, com, url in reversed(historico):
             txt = str(status).strip()
             t = ("ok" if txt.upper() in STATUS_APROVADOS else
                  "crit" if txt.upper() in {"RECUSADO", "CANCELADO"} else "andamento")
-            cel_com = ""
-            if tem_com:
-                # o motivo da recusa em vermelho: e o que precisa ser tratado
-                cel_com = (f'<td class="rel-com">{esc(com)}</td>' if com is not None
-                           and not vazio(com) else '<td class="gtbl-muted">—</td>')
+            eh_atual = (rev, status, data, com, url) == historico[0]
+            marca = '<span class="fx-atual">atual</span>' if eh_atual else ""
             cel_data = (f'<td class="gtbl-num">{data:%d/%m/%Y}</td>' if data is not None
                         else '<td class="gtbl-num gtbl-muted">—</td>')
+            cel_dias = ('<td class="gtbl-num gtbl-muted">—</td>' if data is None else
+                        f'<td class="gtbl-num">{br_num((hoje - data.normalize()).days)} dias</td>')
+            cel_url = (f'<td class="gtbl-num"><a class="rel-sigem" href="{esc(url)}" '
+                       f'target="_blank" rel="noopener">SIGEM</a></td>'
+                       if url is not None and not vazio(url)
+                       else '<td class="gtbl-num gtbl-muted">—</td>')
             linhas.append(
-                f'<tr><td class="gtbl-strong">{esc(rev)}</td>'
-                f'<td><span class="gtbl-badge {t}">{esc(txt)}</span></td>'
-                f"{cel_data}{cel_url}{cel_com}</tr>"
-            )
-        cab = (["Revisão", "Status", "#Data"] + (["#SIGEM"] if tem_url else [])
-               + (["Comentário da fiscalização"] if tem_com else []))
-        corpo = html_table(cab, "".join(linhas))
+                f'<tr{" class=fx-rev-atual" if eh_atual else ""}>'
+                f'<td class="gtbl-strong">{esc(rev)}{marca}</td>'
+                f'<td><span class="gtbl-badge {t}">{esc(sentence_case(txt))}</span></td>'
+                f"{cel_data}{cel_dias}{cel_url}</tr>")
+            if com is not None and not vazio(com):
+                classe = "rec" if t == "crit" else "obs"
+                linhas.append(
+                    f'<tr><td class="fx-com-cel" colspan="5">'
+                    f'<div class="fx-com {classe}"><div class="cab">'
+                    f'<span class="ic">{fx_svg("alerta")}</span>'
+                    f"Parecer da inspeção · revisão {esc(rev)}</div>"
+                    f"<p>{esc(com).strip()}</p></div></td></tr>")
+        corpo = html_table(["Revisão", "Status", "#Data", "#Há", "#Link"], "".join(linhas))
+        conta = (f"{br_num(len(historico))} emissões · "
+                 + (f"{br_num(n_apr)} liberada{'s' if n_apr != 1 else ''}" if n_apr
+                    else "nenhuma liberada"))
     else:
         corpo = ('<div class="gtbl-empty">Ainda não postado no SIGEM. '
                  "Nenhuma revisão registrada.</div>")
+        conta = "sem histórico"
 
     # Fechar volta para a ficha da TAG de onde se veio, e nao para a arvore:
     # quem abre um relatorio quase sempre quer conferir os outros da mesma TAG
@@ -1982,11 +2334,13 @@ def ficha_relatorio_html(doc: str, linhas_esperadas: pd.DataFrame, historico: li
         '<div class="fmodal-box"><div class="fmodal-head"><div>'
         f'<div class="fn-tipo">Relatório · {esc(primeira["RELATORIO"])}</div>'
         f'<div class="fmodal-title rel-titulo">{esc(doc)}</div></div>'
-        f'<span class="gtbl-badge {tom} rel-sit">{esc(status_atual)}</span>'
+        f'<span class="gtbl-badge {tom} rel-sit">{esc(sentence_case(status_atual))}</span>'
         f'<a class="fmodal-x" href="{volta}" aria-label="{rotulo_volta}" '
         f'title="{rotulo_volta}">&times;</a></div>'
-        f'<div class="fmodal-body"><div class="detail-grid">{cards}</div>'
-        f'<div class="ficha-sub">Histórico de revisões</div>{corpo}</div></div></div>'
+        f'<div class="fmodal-body"><div class="fx">{fx_trilha(trilha)}'
+        f'<div class="fx-tiles">{tiles}</div>'
+        + fx_painel("Todas as revisões", "relogio", corpo, conta=conta, classe_corpo="zero")
+        + "</div></div></div></div>"
     )
 
 
@@ -2003,79 +2357,164 @@ def fichas_relatorios_html(docs, esperados: pd.DataFrame, historico: dict) -> st
 
 def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
                    tags: pd.DataFrame, com_cabecalho: bool = True) -> str | None:
-    """Ficha completa da tag como um bloco HTML unico, para servir tanto a aba
-    Pesquisa tag quanto o modal aberto pelo Dashboard/Relatorios."""
+    """Ficha completa da tag, como um bloco HTML unico.
+
+    Serve tanto a aba Pesquisa tag quanto o modal aberto pelo Dashboard, pelos
+    Relatorios e pela arvore. Tudo aqui se encadeia: a trilha diz de onde a tag
+    pendura e filtra o app naquele nivel, a tabela leva a ficha de cada
+    relatorio, e a movimentacao aponta o documento que esta segurando o avanco.
+    """
     resumo_row = resumo[resumo["TAG"] == tag_id]
     if resumo_row.empty:
         return None
 
     r = resumo_row.iloc[0]
     tags_row = tags[tags["TAG"] == tag_id]
-    comunicacao = tags_row.iloc[0]["COMUNICACAO"] if not tags_row.empty else "—"
-
-    qtd_cabos = int(r["QTD_CABOS"])
-    cabo_txt = f"Sim ({qtd_cabos} cabo{'s' if qtd_cabos != 1 else ''})" if qtd_cabos > 0 else "Não"
-
-    # dados que vivem so na base de TAGs (hierarquia, criterio e preco)
     t = tags_row.iloc[0] if not tags_row.empty else {}
 
     def da_base(campo, default="—"):
         v = t.get(campo, default) if hasattr(t, "get") else default
         return default if v is None or vazio(v) else v
 
-    preco = pd.to_numeric(pd.Series([t.get("PRECO_UNITARIO")]), errors="coerce").fillna(0).iloc[0] if hasattr(t, "get") else 0
+    preco = (pd.to_numeric(pd.Series([t.get("PRECO_UNITARIO")]), errors="coerce")
+             .fillna(0).iloc[0]) if hasattr(t, "get") else 0
+    qtd_cabos = int(r["QTD_CABOS"])
+    qtd_tubing = int(r["QTD_TUBING"]) if not vazio(r.get("QTD_TUBING")) else 0
 
-    detalhes = [
-        ("Tipo", str(r["GRUPO_REGRA"]).title()),
-        ("Item PPU", r["ITEM_PPU"]),
-        ("Comunicação", comunicacao),
-        ("Tem cabo", cabo_txt),
-        ("Tem tubing", "Sim" if str(r["TEM_TUBING"]).upper() == "SIM" else "Não"),
-        ("Relatórios esperados", int(r["RELATORIOS_ESPERADOS"])),
-        ("Postados no SIGEM", int(r["RELATORIOS_POSTADOS"])),
-        ("Aprovados", int(r["RELATORIOS_APROVADOS"])),
-        ("Pendentes", int(r["RELATORIOS_PENDENTES"])),
-        ("Avanço", br_pct(r['AVANCO_DOCUMENTAL'] * 100)),
-        ("SOP", da_base("SOP")),
-        ("SSOP", da_base("SSOP")),
-        ("Segmento", da_base("SEGMENTO")),
-        ("Malha", da_base("MALHA")),
-        ("Critério de medição", da_base("CRITERIO_MEDICAO")),
-        ("Preço unitário", br_moeda(float(preco))),
-    ]
-    # sem classe por celula: .detail-grid estiliza pela posicao
-    cards = "".join(
-        f"<div><span>{esc(lbl)}</span><span>{esc(val)}</span></div>"
-        for lbl, val in detalhes
+    esp = int(r["RELATORIOS_ESPERADOS"])
+    apr = int(r["RELATORIOS_APROVADOS"])
+    pos = int(r["RELATORIOS_POSTADOS"])
+    pen = int(r["RELATORIOS_PENDENTES"])
+    meus = esperados[esperados["TAG"] == tag_id]
+    st_norm = meus["STATUS_SIGEM"].astype(str).str.strip().str.upper()
+    recusados = int(st_norm.eq("RECUSADO").sum())
+
+    # ------------------------------------------------------------- trilha
+    fase, sop = da_base("FASE"), da_base("SOP")
+    trilha = [("Fase " + str(fase), com_filtros("/progresso?fase=" + quote(str(fase)))
+               if fase != "—" else "")]
+    if sop != "—":
+        trilha.append(("SOP " + str(sop),
+                       com_filtros("/progresso?sop=" + quote(str(sop)))))
+    for rotulo, campo in (("SSOP", "SSOP"), ("Malha", "MALHA")):
+        v = da_base(campo)
+        if v != "—":
+            trilha.append((f"{rotulo} {v}", ""))
+    trilha.append((str(tag_id), ""))
+
+    # -------------------------------------------------------------- tiles
+    tiles = (
+        fx_tile("Tipo", str(r["GRUPO_REGRA"]).title(), "caixa", "#5b8def")
+        + fx_tile("Comunicação", da_base("COMUNICACAO"), "onda", "#2dd4bf")
+        + fx_tile("Item PPU", r["ITEM_PPU"], "chip", "#9d6bff")
+        + fx_tile("Cabo", "Sim" if qtd_cabos else "Não", "cabo", "#5b8def",
+                  f"{qtd_cabos} cabo{'s' if qtd_cabos != 1 else ''}" if qtd_cabos else "sem cabo")
+        + fx_tile("Tubing", "Sim" if qtd_tubing else "Não", "gota", "#7c8aa8",
+                  f"{qtd_tubing} linhas" if qtd_tubing else "sem tubing")
+        + fx_tile("Status documental", sentence_case(r["STATUS_DOCUMENTAL"]), "alerta",
+                  "#34d399" if str(r["STATUS_DOCUMENTAL"]).upper().startswith("LIB") else "#f87171")
     )
 
-    meus = esperados[esperados["TAG"] == tag_id]
+    # --------------------------------------------------------------- KPIs
+    kpis = (
+        fx_kpi("Aprovados", br_num(apr), f"{br_pct(apr / esp * 100)} dos esperados",
+               apr / esp * 100, "#2dd4bf", "ok")
+        + fx_kpi("Postados no SIGEM", br_num(pos), "nem todo postado é aprovado",
+                 pos / esp * 100, "#fbbf24", "nuvem")
+        + fx_kpi("Pendentes", br_num(pen), f"{br_pct(pen / esp * 100)} dos esperados",
+                 pen / esp * 100, "#f87171", "relogio")
+        + fx_kpi("Recusados", br_num(recusados), "voltaram da inspeção",
+                 recusados / esp * 100, "#9d6bff", "alerta")
+    )
+    dados = (
+        fx_dado("Critério de medição", da_base("CRITERIO_MEDICAO"))
+        + fx_dado("Preço unitário", br_moeda(float(preco)))
+        + fx_dado("SOP", sop)
+        + fx_dado("SSOP", da_base("SSOP"))
+        + fx_dado("Segmento", da_base("SEGMENTO"))
+        + fx_dado("Malha", da_base("MALHA"))
+    )
+
+    # ---------------------------------------------------- tabela dos relatorios
     linhas = []
     for rel, ref, doc, stat, rev in zip(
             meus["RELATORIO"].values, meus["REFERENCIA"].values,
             meus["DOCUMENTO_ESPERADO"].values, meus["STATUS_SIGEM"].values,
             meus["REVISAO_SIGEM"].values):
         linhas.append(
-            f'<tr><td class="gtbl-strong">{esc(rel)}</td><td>{esc(ref)}</td>'
-            f"<td>{esc(doc)}</td><td>{status_badge(stat)}</td>"
+            f'<tr><td class="gtbl-strong">{fx_svg("folha", "fx-folha")}{esc(rel)}</td>'
+            f"<td>{esc(ref)}</td><td>{esc(doc)}</td><td>{status_badge(stat)}</td>"
             f"<td>{esc(format_missing(rev))}</td>"
-            f'<td class="gtbl-num">{botao_detalhes(doc, POSTADO(stat))}</td></tr>' 
+            f'<td class="gtbl-num">{botao_detalhes(doc, POSTADO(stat))}</td></tr>'
         )
     tabela = html_table(
         ["Relatório", "Referência", "Documento esperado", "Status SIGEM", "#Revisão",
-         "#Detalhes"],
-        "".join(linhas), classe="gtbl gtbl-rel",
-    )
+         "#Detalhes"], "".join(linhas), classe="gtbl gtbl-rel")
+
+    # ------------------------------------------------- coluna da direita
+    legenda = (fx_lg("Aprovados", br_num(apr), br_pct(apr / esp * 100), "#2dd4bf")
+               + fx_lg("Pendentes", br_num(pen), br_pct(pen / esp * 100), "#f87171")
+               + fx_lg("Esperados", br_num(esp), "", "#3a4a68", total=True))
+    nota = (f'<p class="fx-nota">Postado não é aprovado: {br_num(pos)} estão no SIGEM, '
+            f"{br_num(pos - apr)} deles ainda sem liberação.</p>") if pos > apr else ""
+    avanco = fx_painel("Avanço documental", "seta",
+                       fx_rosca(apr, esp) + f'<div class="fx-leg">{legenda}</div>' + nota,
+                       classe_corpo="centro")
+
+    campo = [(rot, da_base(col)) for rot, col in
+             (("Localização", "STATUS_LOCALIZACAO"), ("Calibração", "STATUS_CALIBRACAO"),
+              ("Montagem", "STATUS_MONTAGEM"), ("Status final", "STATUS_FINAL"))]
+    campo_html = "".join(fx_linha(rot, status_pill(v)) for rot, v in campo
+                         if v != "—")
+    bloco_campo = (fx_painel("Situação em campo", "pessoas", campo_html)
+                   if campo_html else "")
+
+    # o que esta segurando o avanco: o documento parado ha mais tempo leva
+    # direto para a ficha dele, com o parecer da inspecao
+    postados = meus[meus["STATUS_SIGEM"].map(POSTADO)]
+    mov = ""
+    if not postados.empty:
+        dts = pd.to_datetime(postados["DATA_SIGEM"], dayfirst=True, errors="coerce")
+        if dts.notna().any():
+            hoje = pd.Timestamp.now(tz=BR_TZ).tz_localize(None).normalize()
+            mov += fx_linha("Última no SIGEM", f"{dts.max():%d/%m/%Y}")
+            travados = postados[~postados["STATUS_SIGEM"].map(
+                lambda x: str(x).strip().upper() in STATUS_APROVADOS)]
+            if not travados.empty:
+                d2 = pd.to_datetime(travados["DATA_SIGEM"], dayfirst=True, errors="coerce")
+                if d2.notna().any():
+                    i = d2.idxmin()
+                    dias = (hoje - d2.loc[i].normalize()).days
+                    mov += fx_linha(
+                        "Parado há mais tempo",
+                        f'<a class="gtbl-link" href="#{doc_ancora(travados.loc[i, "DOCUMENTO_ESPERADO"])}">'
+                        f'{esc(travados.loc[i, "RELATORIO"])} · {br_num(dias)} dia'
+                        f'{"s" if dias != 1 else ""}</a>')
+    if mov:
+        mov = fx_painel("Movimentação", "relogio", mov)
+
+    acoes = fx_painel("Ações", "link", '<div class="fx-acoes">'
+                      + fx_acao("Ver em Relatórios", "folha",
+                                com_filtros("/relatorios?busca=" + quote(str(tag_id))))
+                      + fx_acao("Ver na árvore", "grade",
+                                com_filtros("/progresso?fase=" + quote(str(fase)))
+                                if fase != "—" else com_filtros("/progresso"))
+                      + "</div>")
 
     cabecalho = (
-        f'<div class="ficha-head"><div class="ficha-tag">{esc(r["TAG"])}</div>'
-        f'<div class="ficha-desc">{esc(r["DESCRICAO"])}</div></div>'
+        f'<div class="fx-cab"><span class="marca">{fx_svg("tag")}</span>'
+        f'<div><h2>{esc(r["TAG"])}</h2><p>{esc(r["DESCRICAO"])}</p></div></div>'
         if com_cabecalho else ""
     )
     return (
-        f'<div class="ficha">{cabecalho}'
-        f'<div class="detail-grid">{cards}</div>'
-        f'<div class="ficha-sub">Relatórios da tag</div>{tabela}</div>'
+        f'<div class="fx">{cabecalho}{fx_trilha(trilha)}'
+        f'<div class="fx-tiles">{tiles}</div>'
+        '<div class="fx-corpo"><div class="fx-col">'
+        + fx_painel("Resumo documental", "grade",
+                    f'<div class="fx-kpis">{kpis}</div><div class="fx-dados">{dados}</div>')
+        + fx_painel("Relatórios da tag", "folha", tabela,
+                    conta=f"{br_num(esp)} previstos", classe_corpo="zero")
+        + f'</div><div class="fx-col">{avanco}{bloco_campo}{mov}{acoes}</div></div></div>'
     )
 
 
@@ -2108,7 +2547,7 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
 
         meus = esperados[esperados["TAG"] == tag_id]
         postados = meus[meus["STATUS_SIGEM"].map(POSTADO)]["DOCUMENTO_ESPERADO"].tolist()
-        render_html('<div class="gplan-panel">'
+        render_html(f'<div class="gplan-panel" id="{ficha_anchor(tag_id)}">'
                     + tag_ficha_html(tag_id, resumo, esperados, tags)
                     + "</div>"
                     + fichas_relatorios_html(postados, esperados,
@@ -2557,77 +2996,119 @@ def _distintos(serie: pd.Series, limite: int = 3) -> str:
     return f"{', '.join(vals[:limite])} +{br_num(len(vals) - limite)}"
 
 
+# A escada da hierarquia. Cada ficha mostra o degrau imediatamente abaixo e
+# nunca pula: o SOP lista SSOPs, o SSOP lista malhas, e so a malha chega nas
+# TAGs. Pular um degrau quebra a sequencia que o usuario segue na arvore, e
+# ainda repete a mesma lista de TAGs em tres niveis -- eram 15.294 linhas
+# somadas contra 7.138.
+FX_ABAIXO = {"FASE": "SOP", "SOP": "SSOP", "SSOP": "MALHA"}
+FX_ACIMA = {"SOP": ["FASE"], "SSOP": ["FASE", "SOP"], "MALHA": ["FASE", "SOP", "SSOP"]}
+FX_ROTULO_NIVEL = {"FASE": "Fase", "SOP": "SOP", "SSOP": "SSOP", "MALHA": "Malha"}
+
+
 def _modal_nivel(tipo: str, nome: object, sub: pd.DataFrame, rotulo_tipo: str) -> str:
-    """Ficha do SOP/SSOP/malha: tudo que esta cadastrado e relacionado a ele,
-    mais a lista do nivel imediatamente abaixo."""
+    """Ficha da fase/SOP/SSOP/malha: o que esta cadastrado nele e o degrau
+    seguinte da hierarquia."""
     valor_ancora = "(sem)" if vazio(nome) else str(nome)
+    titulo = f"Sem {rotulo_tipo.lower()}" if vazio(nome) else str(nome)
     esp = int(sub["RELATORIOS_ESPERADOS"].sum())
-    emi = int(sub["RELATORIOS_APROVADOS"].sum())
-    pct = (emi / esp * 100) if esp else 0
+    apr = int(sub["RELATORIOS_APROVADOS"].sum())
+    pos = int(sub["RELATORIOS_POSTADOS"].sum()) if "RELATORIOS_POSTADOS" in sub.columns else 0
+    pen = esp - apr
+    pct = (apr / esp * 100) if esp else 0
     tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
+    completas = int(sub["COMPLETA"].sum())
+
+    # ------------------------------------------- trilha: a cadeia ate aqui
+    trilha = []
+    for pai in FX_ACIMA.get(tipo, []):
+        v = _distintos(sub[pai], 1)
+        href = ""
+        if pai in ("FASE", "SOP") and v and v not in ("—", "-"):
+            chave = "fase" if pai == "FASE" else "sop"
+            href = com_filtros(f"/progresso?{chave}={quote(v)}")
+        trilha.append((f"{FX_ROTULO_NIVEL[pai]} {v}", href))
+    trilha.append((f"{FX_ROTULO_NIVEL[tipo]} {titulo}", ""))
+
+    # --------------------------------------------------------------- tiles
     n_mal = sub[~sub.MALHA.apply(vazio)].MALHA.nunique()
-
-    campos = []
-    # a cadeia acima: de onde este nivel pendura
-    if tipo != "FASE":
-        campos.append(("Fase", _distintos(sub.FASE, 2)))
-    if tipo in ("SSOP", "MALHA"):
-        campos.append(("SOP", _distintos(sub.SOP, 2)))
-    if tipo == "MALHA":
-        campos.append(("SSOP", _distintos(sub.SSOP, 2)))
-    # a cadeia abaixo
-    if tipo == "FASE":
-        campos.append(("SOPs", br_num(sub.SOP.nunique())))
-    if tipo in ("FASE", "SOP"):
-        campos.append(("SSOPs", br_num(sub.SSOP.nunique())))
-    if tipo in ("FASE", "SOP", "SSOP"):
-        campos.append(("Malhas", br_num(n_mal) if n_mal else "—"))
-    campos += [
-        ("Instrumentos", br_num(len(sub))),
-        ("Completos", f"{br_num(int(sub['COMPLETA'].sum()))} de {br_num(len(sub))}"),
-        ("Relatórios", f"{br_num(emi)} de {br_num(esp)}"),
-        ("Pendentes", br_num(esp - emi)),
-        ("Prioridade", prioridade_do_grupo(sub["SUBGRUPO_PRIORIDADE"])),
-        ("Segmento" if tipo == "MALHA" else "Segmentos",
-         _distintos(sub.SEGMENTO) if tipo == "MALHA"
-         else br_num(sub[~sub.SEGMENTO.apply(vazio)].SEGMENTO.nunique())),
-        ("Tipos de instrumento", _distintos(sub.GRUPO_REGRA.str.title())
-         if "GRUPO_REGRA" in sub.columns else "—"),
-        ("Critério de medição", _distintos(sub.CRITERIO_MEDICAO, 2)
-         if "CRITERIO_MEDICAO" in sub.columns else "—"),
-        ("Valor total", br_moeda(sub["PRECO_UNITARIO"].sum())),
-        ("Valor avançado", br_moeda(sub["VALOR_AVANCADO"].sum())),
-    ]
-
-    cards = "".join(
-        f'<div class="fn-item"><div class="fn-lbl">{esc(l)}</div>'
-        f'<div class="fn-val">{esc(v)}</div></div>' for l, v in campos
+    tiles = fx_tile("Instrumentos", br_num(len(sub)), "tag", "#2dd4bf",
+                    f"{br_num(completas)} completos")
+    filho = FX_ABAIXO.get(tipo)
+    if filho:
+        quantos = n_mal if filho == "MALHA" else sub[filho].nunique()
+        tiles += fx_tile({"SOP": "SOPs", "SSOP": "SSOPs", "MALHA": "Malhas"}[filho],
+                         br_num(quantos), "livro", "#5b8def", "degrau seguinte")
+    tiles += (
+        fx_tile("Prioridade", prioridade_do_grupo(sub["SUBGRUPO_PRIORIDADE"]),
+                "alerta", "#fbbf24")
+        + fx_tile("Valor total", br_moeda(sub["PRECO_UNITARIO"].sum()), "moeda", "#9d6bff")
+        + fx_tile("Valor avançado", br_moeda(sub["VALOR_AVANCADO"].sum()), "ok", "#34d399",
+                  "só tag 100% documental")
     )
-    titulo = f"Sem {rotulo_tipo.lower()}" if vazio(nome) else esc(nome)
-    # a ficha mostra o nivel imediatamente abaixo, nao as TAGs: o SOP lista os
-    # SSOPs dele, o SSOP as malhas, e so a malha chega nas TAGs. Fora ser o
-    # recorte certo, isso derruba 53% das linhas -- antes os tres niveis
-    # repetiam a mesma lista de TAGs, 15.294 linhas somadas contra 7.138.
+
+    # --------------------------------------------------------------- KPIs
+    kpis = (
+        fx_kpi("Aprovados", br_num(apr), f"{br_pct(pct)} dos esperados", pct, "#2dd4bf", "ok")
+        + fx_kpi("Postados no SIGEM", br_num(pos), "nem todo postado é aprovado",
+                 (pos / esp * 100) if esp else 0, "#fbbf24", "nuvem")
+        + fx_kpi("Pendentes", br_num(pen), f"{br_pct((pen / esp * 100) if esp else 0)} dos esperados",
+                 (pen / esp * 100) if esp else 0, "#f87171", "relogio")
+        + fx_kpi("Instrumentos completos", br_num(completas),
+                 f"de {br_num(len(sub))} no nível",
+                 (completas / len(sub) * 100) if len(sub) else 0, "#5b8def", "tag")
+    )
+    dados = (
+        fx_dado("Segmento" if tipo == "MALHA" else "Segmentos",
+                _distintos(sub.SEGMENTO) if tipo == "MALHA"
+                else br_num(sub[~sub.SEGMENTO.apply(vazio)].SEGMENTO.nunique()))
+        + fx_dado("Tipos de instrumento", _distintos(sub.GRUPO_REGRA.str.title())
+                  if "GRUPO_REGRA" in sub.columns else "—")
+        + fx_dado("Critério de medição", _distintos(sub.CRITERIO_MEDICAO, 2)
+                  if "CRITERIO_MEDICAO" in sub.columns else "—")
+    )
+
+    # ----------------------------------- o degrau seguinte, sem pular nenhum
     if tipo == "MALHA":
         rotulo_sub, corpo = "Instrumentos", _tabela_tags(sub, com_modal=True)
+        conta = f"{br_num(len(sub))} tags"
     else:
-        filho = {"FASE": "SOP", "SOP": "SSOP", "SSOP": "MALHA"}[tipo]
         neto = {"FASE": "SSOP", "SOP": "MALHA"}.get(tipo)
-        rotulo_sub = {"FASE": "SOPs", "SOP": "SSOPs", "SSOP": "Malhas"}[tipo]
+        rotulo_sub = {"SOP": "SOPs", "SSOP": "SSOPs", "MALHA": "Malhas"}[filho]
         corpo = _tabela_niveis(sub, filho, neto)
+        quantos = n_mal if filho == "MALHA" else sub[filho].nunique()
+        conta = f"{br_num(quantos)} no nível abaixo"
+
+    direita = fx_painel(
+        f"Avanço do {FX_ROTULO_NIVEL[tipo].lower()}", "seta",
+        fx_rosca(apr, esp)
+        + '<div class="fx-leg">'
+        + fx_lg("Aprovados", br_num(apr), br_pct(pct), "#2dd4bf")
+        + fx_lg("Pendentes", br_num(pen), br_pct((pen / esp * 100) if esp else 0), "#f87171")
+        + fx_lg("Esperados", br_num(esp), "", "#3a4a68", total=True)
+        + "</div>"
+        + f'<p class="fx-nota">{br_num(completas)} de {br_num(len(sub))} instrumentos '
+          f"fecharam 100% documental.</p>",
+        classe_corpo="centro")
 
     return (
         f'<div class="fmodal" id="{_ancora(tipo, valor_ancora)}">'
         '<a class="fmodal-bg" href="#" aria-label="Fechar"></a>'
         '<div class="fmodal-box"><div class="fmodal-head">'
         f'<div><div class="fn-tipo">{esc(rotulo_tipo)}</div>'
-        f'<div class="fmodal-title">{titulo}</div></div>'
+        f'<div class="fmodal-title">{esc(titulo)}</div></div>'
         '<div class="fn-avanco">'
-        f'<div class="fn-track"><div class="fn-fill {tom}" style="width:{max(pct,1.5):.1f}%;"></div></div>'
+        f'<div class="fn-track"><div class="fn-fill {tom}" style="width:{max(pct, 1.5):.1f}%;"></div></div>'
         f'<div class="fn-pct">{br_pct(pct)}</div></div>'
         '<a class="fmodal-x" href="#" aria-label="Fechar">&times;</a></div>'
-        f'<div class="fmodal-body"><div class="fn-grid">{cards}</div>'
-        f'<div class="ficha-sub">{rotulo_sub}</div>{corpo}</div></div></div>'
+        f'<div class="fmodal-body"><div class="fx">{fx_trilha(trilha)}'
+        f'<div class="fx-tiles">{tiles}</div>'
+        '<div class="fx-corpo"><div class="fx-col">'
+        + fx_painel("Resumo documental", "grade",
+                    f'<div class="fx-kpis">{kpis}</div><div class="fx-dados">{dados}</div>')
+        + fx_painel(rotulo_sub, "livro" if tipo != "MALHA" else "tag", corpo,
+                    conta=conta, classe_corpo="zero")
+        + f'</div><div class="fx-col">{direita}</div></div></div></div></div></div>'
     )
 
 
@@ -2961,7 +3442,7 @@ def main():
     # leva a versao da regra colada no fim, e quem le a data precisa do valor
     # cru. Passar a chave para data_atualizacao deixava o cabecalho em "—".
     fonte = get_source_cache_key()
-    cache_key = f"{fonte}|r{REGRA_VERSAO}"
+    cache_key = f"{fonte}|r{REGRA_VERSAO}|v{VISUAL_VERSAO}"
     if cache_key == "missing":
         st.error(
             "Não encontrei a planilha no Supabase Storage nem localmente. "
