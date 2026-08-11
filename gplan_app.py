@@ -773,6 +773,18 @@ def inject_css():
            blocos -- trilha, tiles, KPIs, paineis -- para que quem
            aprendeu a ler uma leia as outras sem reaprender nada.
            ========================================================= */
+        /* célula que corta no fim em vez de empurrar a tabela para fora */
+        .gtbl td.gt-corta { max-width: 260px; overflow: hidden; text-overflow: ellipsis;
+          white-space: nowrap; }
+        /* Lista longa rola por dentro do painel em vez de paginar: o cabecalho
+           fica grudado no topo para nao se perder a coluna no meio da rolagem. */
+        .fx-rolagem { max-height: min(52vh, 620px); overflow-y: auto; }
+        .fx-rolagem table.gtbl thead th { position: sticky; top: 0; z-index: 2;
+          background: #131b2d; }
+        .fx-rolagem::-webkit-scrollbar { width: 8px; }
+        .fx-rolagem::-webkit-scrollbar-thumb { background: rgba(255,255,255,.13);
+          border-radius: 99px; }
+        .fx-rolagem::-webkit-scrollbar-track { background: transparent; }
         /* Icone: <span> vazio pintado por mascara. O desenho vem de fx_css_icones. */
         .fxi { display:inline-block; width:1em; height:1em; flex:none;
                background-color:currentColor;
@@ -2706,6 +2718,18 @@ def render_sigem(sigem: pd.DataFrame, esperados: pd.DataFrame | None = None,
 SEM_VALOR = {"-", "", "NAN", "NONE"}
 
 
+def servico_do_agrupamento(valor: object) -> str:
+    """Só o serviço do agrupamento da GITEC.
+
+    Vem como "B_4.3.8.1.2_Instalação de analisadores incluindo materiais...".
+    O código já tem coluna própria ao lado, e repetir aqui empurrava a tabela
+    5px além do painel -- o bastante para cortar a última coluna.
+    """
+    texto = str(valor or "")
+    partes = texto.split("_", 2)
+    return partes[2] if len(partes) > 2 else texto
+
+
 def render_gitec(gitec: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame,
                  esperados: pd.DataFrame, sigem: pd.DataFrame, cache_key: str = ""):
     """A medição de campo: o que a GITEC já mediu dos instrumentos da base.
@@ -2750,7 +2774,6 @@ def render_gitec(gitec: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame,
                 f"{br_pct(len(tags_medidas) / len(tags) * 100)} da base")
         + fx_tile("Aguardando aprovação", br_num(len(tags_fila)), "relogio", "#fbbf24")
         + fx_tile("Montadas sem medição", br_num(len(montadas - medidas)), "alerta", "#f87171")
-        + fx_tile("Itens de PPU medidos", br_num(g["ITEM_PPU_GITEC"].nunique()), "chip", "#9d6bff")
         + fx_tile("Última medição", f"{g['_dt'].max():%d/%m/%Y}" if g["_dt"].notna().any()
                   else "—", "relogio", "#5b8def")
         + fx_tile("Medição do contrato", br_pct(medido_apr / total_obra * 100)
@@ -2769,22 +2792,42 @@ def render_gitec(gitec: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame,
         + fx_kpi("Valor da obra", br_moeda(total_obra), "", 100, "#9d6bff", "moeda")
     )
 
-    # por item de PPU: é a chave que liga os dois contratos
+    # por item de PPU: é a chave que liga os dois contratos. Medido e
+    # aguardando andam em colunas separadas porque um item é medido muitas
+    # vezes, em tags diferentes e em datas diferentes.
+    g["_apr"] = aprovado_m
     por_item = g.groupby("ITEM_PPU_GITEC").agg(
-        tags_=("TAG", "nunique"), valor=("VALOR", "sum")).reset_index()
+        tags_=("TAG", "nunique"),
+        medidos=("_apr", "sum"),
+        eventos=("TAG", "size"),
+        valor=("VALOR", "sum"),
+        valor_apr=("VALOR", lambda v: float(v[g.loc[v.index, "_apr"]].sum())),
+        ultima=("_dt", "max"),
+    ).reset_index()
+    por_item["aguardando"] = por_item["eventos"] - por_item["medidos"]
     nome_item = (tags.dropna(subset=["ITEM_PPU"])
                  .groupby(tags["ITEM_PPU"].astype(str).str.strip())["TIPO_ORIGEM"]
                  .agg(lambda x: sentence_case(x.mode().iloc[0]) if len(x.mode()) else "—")
                  .to_dict())
-    linhas_item = "".join(
-        f'<tr><td class="gtbl-strong">{esc(r["ITEM_PPU_GITEC"])}</td>'
-        f'<td class="gtbl-muted">{esc(nome_item.get(str(r["ITEM_PPU_GITEC"]).strip(), "—"))}</td>'
-        f'<td class="gtbl-num">{br_num(int(r["tags_"]))}</td>'
-        f'<td class="gtbl-num gtbl-strong">{br_moeda(r["valor"])}</td></tr>'
-        for _, r in por_item.sort_values("valor", ascending=False).iterrows())
+    linhas_item = ""
+    for _, r in por_item.sort_values("valor_apr", ascending=False).iterrows():
+        aguard = int(r["aguardando"])
+        medidos = int(r["medidos"])
+        tom = "ok" if not aguard else ("warn" if medidos else "crit")
+        rotulo = (f"{br_num(medidos)} medido{'s' if medidos != 1 else ''}"
+                  + (f" · {br_num(aguard)} aguardando" if aguard else ""))
+        data = f"{r['ultima']:%d/%m/%Y}" if pd.notna(r["ultima"]) else "—"
+        linhas_item += (
+            f'<tr><td class="gtbl-strong">{esc(r["ITEM_PPU_GITEC"])}</td>'
+            f'<td class="gtbl-muted">{esc(nome_item.get(str(r["ITEM_PPU_GITEC"]).strip(), "—"))}</td>'
+            f'<td class="gtbl-num">{br_num(int(r["tags_"]))}</td>'
+            f'<td><span class="gtbl-badge {tom}">{rotulo}</span></td>'
+            f'<td class="gtbl-num">{data}</td>'
+            f'<td class="gtbl-num gtbl-strong">{br_moeda(r["valor_apr"])}</td></tr>')
     painel_item = fx_painel(
         "Medição por item de PPU", "chip",
-        html_table(["Item", "Tipo", "#Instrumentos", "#Valor"], linhas_item),
+        html_table(["Item", "Tipo", "#Instrumentos", "Status", "#Última medição",
+                    "#Valor medido"], linhas_item),
         conta=f"{len(por_item)} itens", classe_corpo="zero")
 
     # movimentação: quanto foi medido em cada mês
@@ -2806,8 +2849,11 @@ def render_gitec(gitec: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame,
 
     # a tabela das medições, com o cruzamento documental de cada tag
     avanco = dict(zip(resumo["TAG"], resumo["AVANCO_DOCUMENTAL"]))
+    # Sem paginacao: 119 eventos cabem inteiros e a rolagem propria do painel
+    # resolve. Paginar aqui custava uma ida ao servidor -- e os controles ainda
+    # apareciam la em cima, longe da tabela que eles paginavam.
     g = g.sort_values("_dt", ascending=False)
-    pagina = paginate(g, "gitec", "")
+    pagina = g
     linhas = ""
     for _, r in pagina.iterrows():
         pct = float(avanco.get(r["TAG"], 0)) * 100
@@ -2817,7 +2863,8 @@ def render_gitec(gitec: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame,
         linhas += (
             f'<tr><td>{tag_link(r["TAG"])}</td>'
             f'<td class="gtbl-muted">{esc(r["ITEM_PPU_GITEC"])}</td>'
-            f'<td class="gtbl-muted">{esc(str(r["AGRUPAMENTO"])[:52])}</td>'
+            f'<td class="gtbl-muted gt-corta" title="{esc(r["AGRUPAMENTO"])}">'
+            f'{esc(servico_do_agrupamento(r["AGRUPAMENTO"]))}</td>'
             f'<td><span class="gtbl-badge {"ok" if ap else "andamento"}">'
             f'{esc(sentence_case(r["STATUS"]))}</span></td>'
             f'<td class="gtbl-num">{data}</td>'
@@ -2825,8 +2872,10 @@ def render_gitec(gitec: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame,
             f'<td class="gtbl-num"><span class="gtbl-badge {tom}">{br_pct(pct)}</span></td></tr>')
     tabela = fx_painel(
         "Medições", "folha",
-        html_table(["Tag", "Item", "Agrupamento", "Status", "#Data", "#Valor",
-                    "#Avanço documental"], linhas),
+        '<div class="fx-rolagem">'
+        + html_table(["Tag", "Item", "Agrupamento", "Status", "#Data", "#Valor",
+                      "#Avanço documental"], linhas)
+        + "</div>",
         conta=f"{br_num(len(g))} eventos", classe_corpo="zero")
 
     render_html(
