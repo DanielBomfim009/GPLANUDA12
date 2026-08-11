@@ -287,7 +287,7 @@ REGRA_VERSAO = 9
 # desenho delas nao invalida nada: a aba Progresso continuava servindo o HTML
 # antigo, e a economia do sprite simplesmente nao aparecia. Subir este numero e
 # o que diz ao cache que o desenho mudou.
-VISUAL_VERSAO = 3
+VISUAL_VERSAO = 4
 
 
 def aprovado(serie: pd.Series) -> pd.Series:
@@ -1645,7 +1645,7 @@ def tag_link(value: object) -> str:
 
 
 def fichas_modais_html(tags_ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
-                       tags: pd.DataFrame) -> str:
+                       tags: pd.DataFrame, espera_por_doc: dict | None = None) -> str:
     """Modais das tags visiveis na pagina, abertos/fechados via CSS :target."""
     ids = list(dict.fromkeys(tags_ids))  # unicas, preservando a ordem
     # Indexar uma vez. Antes cada ficha varria resumo, esperados e tags
@@ -1662,7 +1662,8 @@ def fichas_modais_html(tags_ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
         if tag_id not in g_resumo:
             continue
         corpo = tag_ficha_html(tag_id, g_resumo[tag_id], g_esp.get(tag_id, vazio_esp),
-                               g_tags.get(tag_id, vazio_tags), com_cabecalho=False)
+                               g_tags.get(tag_id, vazio_tags), com_cabecalho=False,
+                               espera_por_doc=espera_por_doc)
         if corpo is None:
             continue
         blocos += f"""
@@ -1735,8 +1736,10 @@ def fichas_completas(ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
     alvo = set(ids)
     meus = esperados[esperados["TAG"].isin(alvo)]
     docs = meus[meus["STATUS_SIGEM"].map(POSTADO)]["DOCUMENTO_ESPERADO"].tolist()
-    return (fichas_modais_html(ids, resumo, esperados, tags)
-            + fichas_relatorios_html(docs, esperados, _revisoes_por_doc(cache_key, sigem)))
+    historico = _revisoes_por_doc(cache_key, sigem)
+    espera = espera_por_documento(historico)
+    return (fichas_modais_html(ids, resumo, esperados, tags, espera)
+            + fichas_relatorios_html(docs, esperados, historico))
 
 
 def du_tile(cor: str, icone: str) -> str:
@@ -2275,14 +2278,45 @@ def _revisoes_por_doc(cache_key: str, _sigem: pd.DataFrame) -> dict:
     # ATALHO e o link direto do SIGEM para aquela revisao; base antiga nao tem
     s["_url"] = s["ATALHO"] if "ATALHO" in s.columns else None
     s["_dt"] = pd.to_datetime(s["DATA"], dayfirst=True, errors="coerce")
+    # DATA_PARECER e o "Modificado em" da Sheet2: para um recusado, o dia em
+    # que a fiscalizacao disse por que recusou. E dali que o relogio de parado
+    # deve correr -- da postagem ele conta tambem o tempo que o documento
+    # passou na fila esperando ser analisado, que nao e espera por providencia.
+    s["_parecer"] = (pd.to_datetime(s["DATA_PARECER"], dayfirst=True, errors="coerce")
+                     if "DATA_PARECER" in s.columns else pd.NaT)
     s = s.sort_values("_dt", ascending=False)
     hist: dict[str, list] = {}
-    for doc, rev, status, data, com, url in zip(
+    for doc, rev, status, data, com, url, parecer in zip(
             s["DOCUMENTO"].values, s["REVISAO"].values, s["STATUS"].values,
-            s["_dt"].values, s["_com"].values, s["_url"].values):
+            s["_dt"].values, s["_com"].values, s["_url"].values, s["_parecer"].values):
         hist.setdefault(str(doc), []).append(
-            (rev, status, pd.Timestamp(data) if pd.notna(data) else None, com, url))
+            (rev, status, pd.Timestamp(data) if pd.notna(data) else None, com, url,
+             pd.Timestamp(parecer) if pd.notna(parecer) else None))
     return hist
+
+
+def data_de_espera(data_postagem, data_parecer):
+    """A data a partir da qual o documento esta esperando providencia.
+
+    Vale o parecer quando existe. O "Modificado em" da Sheet2 e sempre igual ou
+    posterior a postagem, e para um recusado e o dia em que a fiscalizacao
+    disse por que recusou -- e dali que a bola esta com quem emitiu. Contar da
+    postagem somaria tambem os dias que o documento passou na fila esperando
+    analise, que nao sao espera por providencia: nos 5.111 recusados de hoje
+    isso inflava a conta em 34 dias, em media.
+    """
+    return data_parecer if data_parecer is not None else data_postagem
+
+
+def espera_por_documento(historico: dict) -> dict:
+    """Data em que cada documento passou a esperar providencia.
+
+    Sai da revisao mais nova de cada um. E a mesma conta em toda tela: duas
+    paginas mostrando dias diferentes para o mesmo documento e pior que
+    nenhuma das duas mostrar.
+    """
+    return {doc: data_de_espera(h[0][2], h[0][5])
+            for doc, h in historico.items() if h and len(h[0]) > 5}
 
 
 def ficha_relatorio_html(doc: str, linhas_esperadas: pd.DataFrame, historico: list) -> str:
@@ -2321,28 +2355,34 @@ def ficha_relatorio_html(doc: str, linhas_esperadas: pd.DataFrame, historico: li
         + fx_tile("Situação", sentence_case(status_atual), "alerta",
                   "#34d399" if aprovada else "#f87171")
     )
-    if atual and atual[2] is not None and not aprovada:
-        dias = (hoje - atual[2].normalize()).days
+    espera = data_de_espera(atual[2], atual[5]) if atual and len(atual) > 5 else (
+        atual[2] if atual else None)
+    if espera is not None and not aprovada:
+        dias = (hoje - espera.normalize()).days
+        desde = ("desde o parecer de " if atual[5] is not None else "desde ") + f"{espera:%d/%m/%Y}"
         tiles += fx_tile("Parado há", f"{br_num(dias)} dia{'s' if dias != 1 else ''}",
-                         "relogio", "#f87171", f"desde {atual[2]:%d/%m/%Y}")
-    elif atual and atual[2] is not None:
-        tiles += fx_tile("Liberado em", f"{atual[2]:%d/%m/%Y}", "ok", "#34d399")
+                         "relogio", "#f87171", desde)
+    elif espera is not None:
+        tiles += fx_tile("Liberado em", f"{espera:%d/%m/%Y}", "ok", "#34d399")
 
     # ------------------------------------------------------------ revisoes
     if historico:
         linhas = []
         # da mais antiga para a mais nova: a ficha conta uma historia, e
         # historia se le do comeco
-        for rev, status, data, com, url in reversed(historico):
+        for rev, status, data, com, url, parecer in reversed(historico):
             txt = str(status).strip()
             t = ("ok" if txt.upper() in STATUS_APROVADOS else
                  "crit" if txt.upper() in {"RECUSADO", "CANCELADO"} else "andamento")
-            eh_atual = (rev, status, data, com, url) == historico[0]
+            eh_atual = (rev, status, data, com, url, parecer) == historico[0]
             marca = '<span class="fx-atual">atual</span>' if eh_atual else ""
             cel_data = (f'<td class="gtbl-num">{data:%d/%m/%Y}</td>' if data is not None
                         else '<td class="gtbl-num gtbl-muted">—</td>')
-            cel_dias = ('<td class="gtbl-num gtbl-muted">—</td>' if data is None else
-                        f'<td class="gtbl-num">{br_num((hoje - data.normalize()).days)} dias</td>')
+            # o relogio corre do parecer, nao da postagem: e de la que a bola
+            # esta com quem emitiu o documento
+            marco = data_de_espera(data, parecer)
+            cel_dias = ('<td class="gtbl-num gtbl-muted">—</td>' if marco is None else
+                        f'<td class="gtbl-num">{br_num((hoje - marco.normalize()).days)} dias</td>')
             cel_url = (f'<td class="gtbl-num"><a class="rel-sigem" href="{esc(url)}" '
                        f'target="_blank" rel="noopener">SIGEM</a></td>'
                        if url is not None and not vazio(url)
@@ -2358,7 +2398,9 @@ def ficha_relatorio_html(doc: str, linhas_esperadas: pd.DataFrame, historico: li
                     f'<tr><td class="fx-com-cel" colspan="5">'
                     f'<div class="fx-com {classe}"><div class="cab">'
                     f'<span class="ic">{fx_svg("alerta")}</span>'
-                    f"Parecer da inspeção · revisão {esc(rev)}</div>"
+                    f"Parecer da inspeção · revisão {esc(rev)}"
+                    + (f" · {parecer:%d/%m/%Y}" if parecer is not None else "")
+                    + "</div>"
                     f"<p>{esc(com).strip()}</p></div></td></tr>")
         corpo = html_table(["Revisão", "Status", "#Data", "#Há", "#Link"], "".join(linhas))
         conta = (f"{br_num(len(historico))} emissões · "
@@ -2404,7 +2446,8 @@ def fichas_relatorios_html(docs, esperados: pd.DataFrame, historico: dict) -> st
 
 
 def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
-                   tags: pd.DataFrame, com_cabecalho: bool = True) -> str | None:
+                   tags: pd.DataFrame, com_cabecalho: bool = True,
+                   espera_por_doc: dict | None = None) -> str | None:
     """Ficha completa da tag, como um bloco HTML unico.
 
     Serve tanto a aba Pesquisa tag quanto o modal aberto pelo Dashboard, pelos
@@ -2544,10 +2587,19 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
             travados = postados[~postados["STATUS_SIGEM"].map(
                 lambda x: str(x).strip().upper() in STATUS_APROVADOS)]
             if not travados.empty:
-                d2 = pd.to_datetime(travados["DATA_SIGEM"], dayfirst=True, errors="coerce")
+                # a mesma conta da ficha do relatorio: do parecer, quando ha.
+                # Duas telas mostrando dias diferentes para o mesmo documento e
+                # pior que nao mostrar nenhuma.
+                espera = espera_por_doc or {}
+                postagem = pd.to_datetime(travados["DATA_SIGEM"], dayfirst=True,
+                                          errors="coerce")
+                d2 = pd.Series(
+                    [espera.get(str(doc), dt)
+                     for doc, dt in zip(travados["DOCUMENTO_ESPERADO"], postagem)],
+                    index=travados.index)
                 if d2.notna().any():
                     i = d2.idxmin()
-                    dias = (hoje - d2.loc[i].normalize()).days
+                    dias = (hoje - pd.Timestamp(d2.loc[i]).normalize()).days
                     mov += fx_linha(
                         "Parado há mais tempo",
                         f'<a class="gtbl-link" href="#{doc_ancora(travados.loc[i, "DOCUMENTO_ESPERADO"])}">'
@@ -2613,7 +2665,9 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
         meus = esperados[esperados["TAG"] == tag_id]
         postados = meus[meus["STATUS_SIGEM"].map(POSTADO)]["DOCUMENTO_ESPERADO"].tolist()
         render_html(f'<div class="gplan-panel" id="{ficha_anchor(tag_id)}">'
-                    + tag_ficha_html(tag_id, resumo, esperados, tags)
+                    + tag_ficha_html(tag_id, resumo, esperados, tags,
+                                     espera_por_doc=espera_por_documento(
+                                         _revisoes_por_doc(cache_key, sigem)))
                     + "</div>"
                     + fichas_relatorios_html(postados, esperados,
                                              _revisoes_por_doc(cache_key, sigem)))
@@ -3140,7 +3194,7 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     lugar.markdown(tela_carregando(f"Preparando as fichas das {n} TAGs", 80,
                                    coberta=False), unsafe_allow_html=True)
     fichas = fichas_tags_html(cache_key, f_seg, f_malha, pag,
-                              df_pag["TAG"].tolist(), resumo, esperados, tags)
+                              df_pag["TAG"].tolist(), resumo, esperados, tags, sigem)
 
     lugar.markdown(tela_carregando("Preparando as fichas dos relatórios", 92,
                                    coberta=False), unsafe_allow_html=True)
@@ -3187,10 +3241,12 @@ def fichas_relatorios_pagina(cache_key: str, f_seg: str, f_malha: str, pag: int,
 @st.cache_data(show_spinner=False, max_entries=3)
 def fichas_tags_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
                      _ids: list, _resumo: pd.DataFrame, _esperados: pd.DataFrame,
-                     _tags: pd.DataFrame) -> str:
+                     _tags: pd.DataFrame, _sigem: pd.DataFrame | None = None) -> str:
     """As fichas das 5.098 TAGs. Cada uma varre a 08_RELATORIOS_ESPERADOS, por
     isso o cache -- sem ele isso se repetia a cada clique."""
-    return fichas_modais_html(_ids, _resumo, _esperados, _tags)
+    espera = (espera_por_documento(_revisoes_por_doc(cache_key, _sigem))
+              if _sigem is not None else None)
+    return fichas_modais_html(_ids, _resumo, _esperados, _tags, espera)
 
 
 def _totais(df: pd.DataFrame) -> str:

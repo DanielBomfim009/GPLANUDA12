@@ -130,6 +130,29 @@ conferir("cancelada declarada como tal",
          int((resumo.loc[resumo.TAG.isin(canceladas), "STATUS_DOCUMENTAL"]
               .astype(str).str.upper() == "CANCELADA").sum()), len(canceladas))
 
+# ------------------------------------------------- o relogio dos parados
+# O "parado ha" conta desde o parecer da fiscalizacao, nao desde a postagem:
+# entre postar e ser recusado passam dias que sao espera por analise, nao por
+# providencia de quem emitiu. A Sheet2 traz esse "Modificado em".
+print(chr(10) + "RELÓGIO DOS PARADOS")
+sigem_full = pd.read_excel(PLANILHA, sheet_name="04_BASE_SIGEM")
+conferir("04_BASE_SIGEM traz a data do parecer", "DATA_PARECER" in sigem_full.columns, True)
+if "DATA_PARECER" in sigem_full.columns:
+    _post = pd.to_datetime(sigem_full.DATA, dayfirst=True, errors="coerce")
+    _par = pd.to_datetime(sigem_full.DATA_PARECER, dayfirst=True, errors="coerce")
+    _amb = _post.notna() & _par.notna()
+    conferir("parecer nunca é anterior à postagem",
+             int((_par[_amb] < _post[_amb].dt.normalize()).sum()), 0)
+    # 32 dos recusados nao tem linha na Sheet2, entao ficam sem data de
+    # parecer. Nao e defeito: o codigo cai de volta na data de postagem. O que
+    # nao pode e um recusado ficar sem data nenhuma e o relogio nao correr.
+    _rec = sigem_full[sigem_full.STATUS.astype(str).str.strip().str.upper() == "RECUSADO"]
+    _sem_par = int(pd.to_datetime(_rec.DATA_PARECER, dayfirst=True, errors="coerce").isna().sum())
+    _sem_data = int((pd.to_datetime(_rec.DATA_PARECER, dayfirst=True, errors="coerce").isna()
+                     & pd.to_datetime(_rec.DATA, dayfirst=True, errors="coerce").isna()).sum())
+    conferir("recusado sempre tem de onde contar", _sem_data, 0,
+             f"{_sem_par} sem parecer usam a data de postagem")
+
 # ---------------------------------------------------------------- a GITEC
 # A medição de campo só vale se for do mesmo escopo do controle documental. A
 # GITEC mistura compra, inspeção de recebimento e cabo sob a mesma coluna TAG,
