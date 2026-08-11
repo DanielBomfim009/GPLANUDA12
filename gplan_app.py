@@ -1944,7 +1944,11 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
 
 def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame,
                       sigem: pd.DataFrame, cache_key: str = ""):
-    render_header("Relatórios previstos")
+    # Com filtro ativo o cabecalho diz quanto sobrou: sem isso a aba mostra um
+    # numero menor e nada na tela explica por que.
+    render_header("Relatórios previstos",
+                  extra_pill=f"<strong>{br_num(len(esperados))}</strong> relatórios"
+                  if st.session_state.get("_flt_selo") else None)
 
     # Mantem ORIGEM_REGRA no dataframe (sem exibir): e ela que separa
     # "RIR instrumentos" de "RIR cabos" no filtro por tipo de relatorio.
@@ -2520,7 +2524,9 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
 
 def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame,
                         sigem: pd.DataFrame, cache_key: str = ""):
-    render_header("Pesquisa tag")
+    render_header("Pesquisa tag",
+                  extra_pill=f"<strong>{br_num(len(resumo))}</strong> tags"
+                  if st.session_state.get("_flt_selo") else None)
 
     if "gplan_selected_tag" not in st.session_state:
         st.session_state.gplan_selected_tag = None
@@ -2602,8 +2608,22 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
     )
 
 
-def render_sigem(sigem: pd.DataFrame):
-    render_header("Base SIGEM", extra_pill=f"<strong>{len(sigem):,}</strong> documentos".replace(",", "."))
+def render_sigem(sigem: pd.DataFrame, esperados: pd.DataFrame | None = None,
+                 filtrado: bool = False):
+    """A base crua do SIGEM, recortada pelo filtro da lateral quando ha um.
+
+    Com filtro ativo sobram os documentos das tags escolhidas. Isso deixa de
+    fora o que nao casa com tag nenhuma -- justamente o que se costuma vir
+    procurar aqui --, entao a contagem diz quantos ficaram de fora, em vez de
+    o numero simplesmente encolher sem explicacao.
+    """
+    total = len(sigem)
+    if filtrado and esperados is not None:
+        sigem = sigem[sigem["DOCUMENTO"].isin(set(esperados["DOCUMENTO_ESPERADO"]))]
+    pill = f"<strong>{br_num(len(sigem))}</strong> documentos"
+    if filtrado and len(sigem) != total:
+        pill += f" · {br_num(total - len(sigem))} fora do filtro"
+    render_header("Base SIGEM", extra_pill=pill)
 
     status_options = ["Todos"] + sorted(sigem["STATUS"].dropna().unique().tolist())
     col1, col2 = st.columns([1, 3])
@@ -3477,7 +3497,7 @@ def main():
     relatorios_page = st.Page(lambda: _sob_carga("Carregando os relatórios", lambda: render_relatorios(esperados, resumo, tags, sigem, cache_key)), title="Relatórios", icon=":material/description:", url_path="relatorios")
     progresso_page = st.Page(lambda: _sob_carga("Abrindo o Progresso", lambda: render_progresso(resumo, esperados, tags, sigem, cache_key)), title="Progresso", icon=":material/insights:", url_path="progresso")
     pesquisa_page = st.Page(lambda: _sob_carga("Carregando as tags", lambda: render_pesquisa_tag(resumo, esperados, tags, sigem, cache_key)), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
-    sigem_page = st.Page(lambda: _sob_carga("Carregando a base SIGEM", lambda: render_sigem(sigem)), title="Base SIGEM", icon=":material/database:", url_path="sigem")
+    sigem_page = st.Page(lambda: _sob_carga("Carregando a base SIGEM", lambda: render_sigem(sigem, esperados, any(escolhas.values()))), title="Base SIGEM", icon=":material/database:", url_path="sigem")
 
     nav = st.navigation([dashboard_page, progresso_page, relatorios_page, pesquisa_page, sigem_page], position="sidebar")
     nav.run()
