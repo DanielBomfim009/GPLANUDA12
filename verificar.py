@@ -109,6 +109,36 @@ conferir("avanço por TAG = aprovados / esperados",
 conferir("11_VALIDACOES sem inconsistência",
          str(validacoes.iloc[0]["TIPO_VALIDACAO"]), "SEM_INCONSISTENCIA")
 
+# ---------------------------------------------------------------- a GITEC
+# A medição de campo só vale se for do mesmo escopo do controle documental. A
+# GITEC mistura compra, inspeção de recebimento e cabo sob a mesma coluna TAG,
+# e os valores desses outros escopos são de outra EAP: se um deles entrar, o
+# medido salta de R$ 253 mil para R$ 9,3 milhões sem nada ter sido montado.
+print("\nMEDIÇÃO DE CAMPO (GITEC)")
+try:
+    gitec = pd.read_excel(PLANILHA, sheet_name="06_BASE_GITEC")
+except ValueError:
+    gitec = pd.DataFrame(columns=["TAG", "FASE", "VALOR", "STATUS"])
+    conferir("aba 06_BASE_GITEC existe", False, True)
+
+if not gitec.empty:
+    fases = set(gitec.FASE.dropna().astype(str).str.strip().unique())
+    conferir("só escopo de montagem", fases, {"Montagem Eletromecânica"})
+    conferir("toda medição tem tag da base",
+             int((~gitec.TAG.isin(set(tags.TAG))).sum()), 0)
+    conferir("tags medidas = tags marcadas no resumo",
+             int((resumo.MEDIDO_GITEC.astype(str).str.upper() == "SIM").sum()),
+             int(gitec.TAG.nunique()))
+    conferir("valor medido = soma da aba",
+             round(float(resumo.VALOR_GITEC.fillna(0).sum()), 2),
+             round(float(gitec.VALOR.fillna(0).sum()), 2))
+    # medir sem a documentação fechar é o que motivou o cartão; medir uma tag
+    # que nem montada está seria erro de base, e vale saber na hora
+    medidas = set(gitec.TAG)
+    montadas = set(tags.loc[tags.STATUS_MONTAGEM.astype(str).str.strip().str.upper()
+                            == "MONTADO", "TAG"])
+    conferir("medida sem estar montada", len(medidas - montadas), 0)
+
 # ---------------------------------------------------------------------- o app
 print(f"\nAPP  {ALVO}")
 try:
@@ -166,9 +196,31 @@ with sync_playwright() as p:
              round(avanco * 100, 1))
     # O cabeçalho já ficou em "—" por eu passar a chave de cache no lugar do
     # carimbo. Só falta data quem não sabe quando os dados são de fato.
-    carimbo = pg.locator(".du-selo:not(.filtro)").first.inner_text()
-    conferir("cabeçalho tem a data da planilha",
-             bool(re.search(r"\d{2}/\d{2}/\d{4}", carimbo)), True, carimbo.strip())
+
+    # O rodapé passou a carregar a medição de campo. Cada cartão é conferido
+    # contra a planilha, e o carimbo de atualização mudou de lugar: saiu do
+    # cabeçalho e virou o quinto cartão.
+    print("\n  Rodapé do Dashboard bate com a planilha")
+    rodape = {c.split("|")[0]: c.split("|")[1]
+              for c in pg.evaluate(TXT % ".du-mini") if "|" in c}
+    montadas_n = int((tags.STATUS_MONTAGEM.astype(str).str.strip().str.upper()
+                      == "MONTADO").sum())
+    preco = pd.to_numeric(tags.set_index("TAG").PRECO_UNITARIO,
+                          errors="coerce").fillna(0.0)
+    prontas = resumo[(resumo.AVANCO_DOCUMENTAL >= 1.0)
+                     & (resumo.MEDIDO_GITEC.astype(str).str.upper() != "SIM")]
+    conferir("Tags montadas", int(numero(rodape.get("Tags montadas", "0"))), montadas_n)
+    conferir("Previsto de medição", round(numero(rodape.get("Previsto de medição", "0")), 2),
+             round(float(preco.reindex(prontas.TAG).fillna(0).sum()), 2))
+    conferir("Valor total do rodapé", round(numero(rodape.get("Valor total", "0")), 2),
+             round(float(preco.sum()), 2))
+    conferir("Medido na GITEC", round(numero(rodape.get("Medido na GITEC", "0")), 2),
+             round(float(resumo.VALOR_GITEC.fillna(0).sum()), 2))
+    conferir("carimbo saiu do cabeçalho",
+             pg.evaluate("() => document.querySelectorAll('.du-cab .du-selo').length"), 0)
+    conferir("carimbo virou cartão",
+             bool(re.search(r"\d{2}/\d{2}/\d{4}", rodape.get("Atualizado em", ""))), True,
+             rodape.get("Atualizado em", ""))
 
     # Tela única: a promessa é caber sem rolar e sem esconder nada. Painel que
     # corta conteúdo por dentro é pior que barra de rolagem -- some informação

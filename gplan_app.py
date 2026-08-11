@@ -804,14 +804,14 @@ def inject_css():
         .fx-trilho.fxc-rubi i  { background:#f87171; }
         .fx-trilho.fxc-mudo i  { background:#7c8aa8; }
         .fx-trilho.fxc-verde i { background:#34d399; }
-        .fx-lg i.fxc-azul  { background:#5b8def; }
-        .fx-lg i.fxc-teal  { background:#2dd4bf; }
-        .fx-lg i.fxc-roxo  { background:#9d6bff; }
-        .fx-lg i.fxc-ambar { background:#fbbf24; }
-        .fx-lg i.fxc-rubi  { background:#f87171; }
-        .fx-lg i.fxc-mudo  { background:#7c8aa8; }
-        .fx-lg i.fxc-verde { background:#34d399; }
-        .fx-lg i.fxc-cinza { background:#3a4a68; }
+        .fx-lg i.fxc-azul, .du-lg i.fxc-azul  { background:#5b8def; }
+        .fx-lg i.fxc-teal, .du-lg i.fxc-teal  { background:#2dd4bf; }
+        .fx-lg i.fxc-roxo, .du-lg i.fxc-roxo  { background:#9d6bff; }
+        .fx-lg i.fxc-ambar, .du-lg i.fxc-ambar { background:#fbbf24; }
+        .fx-lg i.fxc-rubi, .du-lg i.fxc-rubi  { background:#f87171; }
+        .fx-lg i.fxc-mudo, .du-lg i.fxc-mudo  { background:#7c8aa8; }
+        .fx-lg i.fxc-verde, .du-lg i.fxc-verde { background:#34d399; }
+        .fx-lg i.fxc-cinza, .du-lg i.fxc-cinza { background:#3a4a68; }
         .fx { display:flex; flex-direction:column; gap:14px; }
         .fx svg { width:100%; height:100%; }
 
@@ -1892,7 +1892,7 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     st_norm = esperados["STATUS_SIGEM"].astype(str).str.strip().str.upper()
 
     kpis = (
-        du_kpi("Total de tags", br_num(total_tags), "instrumentos na base", 1.0,
+        du_kpi("Total de tags", br_num(total_tags), "", 1.0,
                "#5b8def", "shield", "/pesquisa")
         + du_kpi("Tags completas", br_num(completas),
                  f"{br_pct(completas / total_tags * 100)} do total",
@@ -1907,19 +1907,40 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
                  avanco, "#9d6bff", "trend")
     )
 
+    # A medicao de campo entra pela GITEC. Planilha antiga nao tem essas
+    # colunas, entao tudo aqui degrada para zero em vez de estourar.
+    tem_gitec = "VALOR_GITEC" in resumo.columns
+    medido = float(resumo["VALOR_GITEC"].fillna(0).sum()) if tem_gitec else 0.0
+    medido_apr = float(resumo.loc[
+        resumo.get("STATUS_GITEC", pd.Series("", index=resumo.index))
+        .astype(str).str.upper().str.startswith("APROVADO"), "VALOR_GITEC"
+    ].fillna(0).sum()) if tem_gitec else 0.0
+    montagem = (tags["STATUS_MONTAGEM"].astype(str).str.strip().str.upper()
+                if "STATUS_MONTAGEM" in tags.columns else pd.Series(dtype=str))
+    montados = int(montagem.eq("MONTADO").sum())
+
+    # Previsto de medicao: o que ja fechou a documentacao e a GITEC ainda nao
+    # mediu. Tag no SIGEM e na GITEC ja foi medida; tag so na GITEC tambem.
+    # Sobra o que esta 100% documental e fora da GITEC -- e o que vai ser
+    # medido. Dar R$ 0,00 com tag montada nao e falha de conta: quer dizer que
+    # nenhuma das montadas fechou a documentacao.
+    preco_tag = pd.to_numeric(tags.set_index("TAG")["PRECO_UNITARIO"],
+                              errors="coerce").fillna(0.0)
+    prontas = resumo[resumo["AVANCO_DOCUMENTAL"] >= 1.0]
+    if tem_gitec:
+        prontas = prontas[prontas["MEDIDO_GITEC"].astype(str).str.upper() != "SIM"]
+    previsto = float(preco_tag.reindex(prontas["TAG"]).fillna(0).sum())
+
     minis = (
-        du_mini("Cabos mapeados", br_num(int(resumo["QTD_CABOS"].fillna(0).sum())),
-                "com RIR e continuidade", "#5b8def", "shield")
-        + du_mini("Tubing", br_num(int(resumo["QTD_TUBING"].fillna(0).sum())),
-                  "linhas com RIMTU", "#2dd4bf", "check")
-        + du_mini("Recusados", br_num(int(st_norm.eq("RECUSADO").sum())),
-                  "voltaram da inspeção", "#f87171", "clock", "#du-recusados")
-        + du_mini("Em análise", br_num(int(st_norm.eq("EM ANÁLISE").sum())),
-                  "aguardando parecer", "#fbbf24", "archive",
-                  "/relatorios?status=" + quote("Em análise"))
-        + du_mini("Valor total", br_moeda(float(pd.to_numeric(
-            tags["PRECO_UNITARIO"], errors="coerce").fillna(0).sum())),
-            "preço de todas as tags", "#9d6bff", "trend")
+        du_mini("Tags montadas", br_num(montados),
+                f"{br_pct(montados / total_tags * 100)} do total" if total_tags else "",
+                "#5b8def", "shield")
+        + du_mini("Previsto de medição", br_moeda(previsto),
+                  f"{br_num(len(prontas))} prontas e não medidas", "#2dd4bf", "check")
+        + du_mini("Valor total", br_moeda(float(preco_tag.sum())), "", "#9d6bff", "trend")
+        + du_mini("Medido na GITEC", br_moeda(medido),
+                  f"{br_moeda(medido_apr)} aprovados" if medido else "", "#fbbf24", "archive")
+        + du_mini("Atualizado em", agora, "", "#7c8aa8", "clock")
     )
 
     top = resumo.sort_values(["RELATORIOS_PENDENTES", "RELATORIOS_ESPERADOS"],
@@ -1928,8 +1949,7 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
         '<div class="du-tela">'
         '<header class="du-cab"><div><div class="du-h1">Dashboard</div>'
         "<p>Visão geral do andamento de relatórios e integração SIGEM</p></div>"
-        f'<div class="du-acoes">{selo_filtro}'
-        f'<div class="du-selo"><i></i>Atualizado {agora}</div></div></header>'
+        f'<div class="du-acoes">{selo_filtro}</div></header>'
         f'<section class="du-kpis">{kpis}</section>'
         '<section class="du-meio">'
         f'<div class="du-col">{du_grupos(resumo)}{du_barras(esperados)}</div>'
@@ -2179,7 +2199,7 @@ def fx_rosca(feito: int, total: int, cor: str = "#2dd4bf") -> str:
 
 def fx_lg(rotulo: str, valor: object, pct: str, cor: str, total: bool = False) -> str:
     return (f'<div class="fx-lg{" total" if total else ""}">'
-            f'<i style="background:{cor};"></i><span class="nm">{esc(rotulo)}</span>'
+            f'<i class="{fx_classe_cor(cor)}"></i><span class="nm">{esc(rotulo)}</span>'
             f'<b>{esc(valor)}</b><em>{esc(pct)}</em></div>')
 
 
@@ -2423,11 +2443,11 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
     kpis = (
         fx_kpi("Aprovados", br_num(apr), f"{br_pct(apr / esp * 100)} dos esperados",
                apr / esp * 100, "#2dd4bf", "ok")
-        + fx_kpi("Postados no SIGEM", br_num(pos), "nem todo postado é aprovado",
+        + fx_kpi("Postados no SIGEM", br_num(pos), "",
                  pos / esp * 100, "#fbbf24", "nuvem")
         + fx_kpi("Pendentes", br_num(pen), f"{br_pct(pen / esp * 100)} dos esperados",
                  pen / esp * 100, "#f87171", "relogio")
-        + fx_kpi("Recusados", br_num(recusados), "voltaram da inspeção",
+        + fx_kpi("Recusados", br_num(recusados), "",
                  recusados / esp * 100, "#9d6bff", "alerta")
     )
     dados = (
@@ -3058,19 +3078,18 @@ def _modal_nivel(tipo: str, nome: object, sub: pd.DataFrame, rotulo_tipo: str) -
     if filho:
         quantos = n_mal if filho == "MALHA" else sub[filho].nunique()
         tiles += fx_tile({"SOP": "SOPs", "SSOP": "SSOPs", "MALHA": "Malhas"}[filho],
-                         br_num(quantos), "livro", "#5b8def", "degrau seguinte")
+                         br_num(quantos), "livro", "#5b8def")
     tiles += (
         fx_tile("Prioridade", prioridade_do_grupo(sub["SUBGRUPO_PRIORIDADE"]),
                 "alerta", "#fbbf24")
         + fx_tile("Valor total", br_moeda(sub["PRECO_UNITARIO"].sum()), "moeda", "#9d6bff")
-        + fx_tile("Valor avançado", br_moeda(sub["VALOR_AVANCADO"].sum()), "ok", "#34d399",
-                  "só tag 100% documental")
+        + fx_tile("Valor avançado", br_moeda(sub["VALOR_AVANCADO"].sum()), "ok", "#34d399")
     )
 
     # --------------------------------------------------------------- KPIs
     kpis = (
         fx_kpi("Aprovados", br_num(apr), f"{br_pct(pct)} dos esperados", pct, "#2dd4bf", "ok")
-        + fx_kpi("Postados no SIGEM", br_num(pos), "nem todo postado é aprovado",
+        + fx_kpi("Postados no SIGEM", br_num(pos), "",
                  (pos / esp * 100) if esp else 0, "#fbbf24", "nuvem")
         + fx_kpi("Pendentes", br_num(pen), f"{br_pct((pen / esp * 100) if esp else 0)} dos esperados",
                  (pen / esp * 100) if esp else 0, "#f87171", "relogio")
