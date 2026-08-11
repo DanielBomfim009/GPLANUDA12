@@ -2464,15 +2464,19 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
     )
 
     # --------------------------------------------------------------- KPIs
+    # TAG cancelada tem zero relatorio esperado -- e a ficha divide tudo por
+    # ele. Sem esta guarda a primeira cancelada derruba a aba Progresso, que
+    # monta a ficha de todas as 5.098.
+    def pct(n: int) -> float:
+        return (n / esp * 100) if esp else 0.0
+
     kpis = (
-        fx_kpi("Aprovados", br_num(apr), f"{br_pct(apr / esp * 100)} dos esperados",
-               apr / esp * 100, "#2dd4bf", "ok")
-        + fx_kpi("Postados no SIGEM", br_num(pos), "",
-                 pos / esp * 100, "#fbbf24", "nuvem")
-        + fx_kpi("Pendentes", br_num(pen), f"{br_pct(pen / esp * 100)} dos esperados",
-                 pen / esp * 100, "#f87171", "relogio")
-        + fx_kpi("Recusados", br_num(recusados), "",
-                 recusados / esp * 100, "#9d6bff", "alerta")
+        fx_kpi("Aprovados", br_num(apr), f"{br_pct(pct(apr))} dos esperados" if esp else "",
+               pct(apr), "#2dd4bf", "ok")
+        + fx_kpi("Postados no SIGEM", br_num(pos), "", pct(pos), "#fbbf24", "nuvem")
+        + fx_kpi("Pendentes", br_num(pen), f"{br_pct(pct(pen))} dos esperados" if esp else "",
+                 pct(pen), "#f87171", "relogio")
+        + fx_kpi("Recusados", br_num(recusados), "", pct(recusados), "#9d6bff", "alerta")
     )
     dados = (
         fx_dado("Critério de medição", da_base("CRITERIO_MEDICAO"))
@@ -2500,14 +2504,25 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
          "#Detalhes"], "".join(linhas), classe="gtbl gtbl-rel")
 
     # ------------------------------------------------- coluna da direita
-    legenda = (fx_lg("Aprovados", br_num(apr), br_pct(apr / esp * 100), "#2dd4bf")
-               + fx_lg("Pendentes", br_num(pen), br_pct(pen / esp * 100), "#f87171")
+    legenda = (fx_lg("Aprovados", br_num(apr), br_pct(pct(apr)), "#2dd4bf")
+               + fx_lg("Pendentes", br_num(pen), br_pct(pct(pen)), "#f87171")
                + fx_lg("Esperados", br_num(esp), "", "#3a4a68", total=True))
     nota = (f'<p class="fx-nota">Postado não é aprovado: {br_num(pos)} estão no SIGEM, '
             f"{br_num(pos - apr)} deles ainda sem liberação.</p>") if pos > apr else ""
-    avanco = fx_painel("Avanço documental", "seta",
-                       fx_rosca(apr, esp) + f'<div class="fx-leg">{legenda}</div>' + nota,
-                       classe_corpo="centro")
+    if esp:
+        avanco = fx_painel("Avanço documental", "seta",
+                           fx_rosca(apr, esp) + f'<div class="fx-leg">{legenda}</div>' + nota,
+                           classe_corpo="centro")
+    else:
+        # sem regra documental nao ha avanco: dizer por que, em vez de um
+        # donut em 0% que parece atraso
+        avanco = fx_painel(
+            "Avanço documental", "seta",
+            '<p class="fx-nota">Tag cancelada: não gera relatório nem pendência. '
+            "Continua na base para rastreio.</p>"
+            if str(r["STATUS_DOCUMENTAL"]).strip().upper() == "CANCELADA"
+            else '<p class="fx-nota">Nenhum relatório previsto para esta tag.</p>',
+            classe_corpo="centro")
 
     campo = [(rot, da_base(col)) for rot, col in
              (("Localização", "STATUS_LOCALIZACAO"), ("Calibração", "STATUS_CALIBRACAO"),
@@ -2885,7 +2900,7 @@ def render_gitec(gitec: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame,
         + fx_painel("Resumo da medição", "grade", f'<div class="fx-kpis">{kpis}</div>')
         + painel_item + tabela
         + '</div><div class="fx-col">'
-        + fx_painel("Medido x aguardando", "seta",
+        + fx_painel("Gitec x Status", "seta",
                     fx_rosca(int(medido_apr), int(medido_apr + em_verif) or 1)
                     + '<div class="fx-leg">'
                     + fx_lg("Aprovado", br_moeda(medido_apr), "", "#34d399")

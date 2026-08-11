@@ -82,9 +82,13 @@ n_aprovados = int(esperados["STATUS_SIGEM"].astype(str).str.strip().str.upper()
 avanco = n_aprovados / n_esp if n_esp else 0
 
 print("\nREGRAS DOCUMENTAIS")
-# toda TAG tem exatamente um destes: e a regra que define a base inteira
-conferir("CCP + RTFCJI + RIMITPI = TAGs",
-         int(esperados.RELATORIO.isin(["CCP", "RTFCJI", "RIMITPI"]).sum()), n_tags)
+# Toda TAG tem exatamente um destes -- menos a cancelada, que saiu de escopo
+# e nao gera relatorio nenhum, mas continua na base para rastreio.
+_canc = set(tags.loc[tags.STATUS_FINAL.astype(str).str.strip().str.upper()
+                     == "CANCELADO", "TAG"]) if "STATUS_FINAL" in tags.columns else set()
+conferir("CCP + RTFCJI + RIMITPI = TAGs ativas",
+         int(esperados.RELATORIO.isin(["CCP", "RTFCJI", "RIMITPI"]).sum()),
+         n_tags - len(_canc), f"{len(_canc)} canceladas fora")
 # A exclusividade e por TAG, nao pelo cabo. Um mesmo circuito liga duas
 # pontas: o instrumento responde pelo ensaio de comunicacao e a caixa de
 # juncao pelo de continuidade. Sao ensaios diferentes, em pontas diferentes.
@@ -102,12 +106,29 @@ conferir("esperados no resumo = linhas da 08",
 conferir("pendentes = esperados - aprovados",
          bool((resumo.RELATORIOS_PENDENTES
                == resumo.RELATORIOS_ESPERADOS - resumo.RELATORIOS_APROVADOS).all()), True)
+_com_regra = resumo[resumo.RELATORIOS_ESPERADOS > 0]
 conferir("avanço por TAG = aprovados / esperados",
-         bool(((resumo.AVANCO_DOCUMENTAL
-                - resumo.RELATORIOS_APROVADOS / resumo.RELATORIOS_ESPERADOS)
+         bool(((_com_regra.AVANCO_DOCUMENTAL
+                - _com_regra.RELATORIOS_APROVADOS / _com_regra.RELATORIOS_ESPERADOS)
                .abs() < 1e-9).all()), True)
+conferir("cancelada com avanço zerado",
+         float(resumo.loc[resumo.RELATORIOS_ESPERADOS == 0, "AVANCO_DOCUMENTAL"].sum()), 0.0)
 conferir("11_VALIDACOES sem inconsistência",
          str(validacoes.iloc[0]["TIPO_VALIDACAO"]), "SEM_INCONSISTENCIA")
+
+# TAG cancelada segue na base para rastreio, mas não cobra documentação: o
+# relatório dela nunca vai existir, e a pendência ficaria pendurada para
+# sempre sujando o avanço de todo mundo.
+canceladas = set(tags.loc[tags.STATUS_FINAL.astype(str).str.strip().str.upper()
+                          == "CANCELADO", "TAG"]) if "STATUS_FINAL" in tags.columns else set()
+conferir("cancelada não gera relatório esperado",
+         int(esperados.TAG.isin(canceladas).sum()), 0,
+         f"{len(canceladas)} canceladas")
+conferir("cancelada continua no resumo",
+         int(resumo.TAG.isin(canceladas).sum()), len(canceladas))
+conferir("cancelada declarada como tal",
+         int((resumo.loc[resumo.TAG.isin(canceladas), "STATUS_DOCUMENTAL"]
+              .astype(str).str.upper() == "CANCELADA").sum()), len(canceladas))
 
 # ---------------------------------------------------------------- a GITEC
 # A medição de campo só vale se for do mesmo escopo do controle documental. A
