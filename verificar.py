@@ -206,6 +206,95 @@ if not gitec.empty:
                             == "MONTADO", "TAG"])
     conferir("medida sem estar montada", len(medidas - montadas), 0)
 
+# ------------------------------------------------------ a planta e as áreas
+print("\nPLANTA  área da TAG, aba AUX e a marcação do PPTX")
+import json as _json
+
+MAPA = Path(__file__).resolve().parent / "assets" / "mapa" / "zonas.json"
+areas_por_tag: dict[str, str] = {}
+area_do_desenho: dict[str, str] = {}
+pct_area: dict[str, float] = {}
+
+if "05_BASE_LOCAÇÃO" not in wb.sheetnames:
+    conferir("aba 05_BASE_LOCAÇÃO existe", False, True)
+else:
+    locacao = pd.read_excel(PLANILHA, sheet_name="05_BASE_LOCAÇÃO")
+    cols = list(locacao.columns)
+    conferir("05_BASE_LOCAÇÃO traz a ÁREA", "AREA" in cols, True)
+    # O passo 2 do pipeline lê esta aba por posição: row[3] é bandeja, row[4]
+    # eletroduto, row[5] suporte. Uma coluna inserida no meio deslocaria as
+    # três e o RIMII sairia com a planta errada, sem erro nenhum na tela.
+    conferir("ordem que o build_infra_reports espera", cols[:6],
+             ["TAG", "DESCRICAO", "LOCACAO", "BANDEJA", "ELETRODUTO", "SUPORTE"])
+    if "AREA" in cols:
+        conferir("ÁREA é a última coluna", cols[-1], "AREA")
+        areas_por_tag = (locacao.dropna(subset=["AREA"])
+                         .assign(AREA=lambda d: d["AREA"].astype(str).str.strip())
+                         .set_index("TAG")["AREA"].to_dict())
+        conferir("TAGs com área na base", len(areas_por_tag) > 0, True,
+                 f"{len(areas_por_tag)} de {len(locacao)}")
+
+if "05_AUX_AREAS" not in wb.sheetnames:
+    conferir("aba 05_AUX_AREAS existe", False, True)
+else:
+    aux = pd.read_excel(PLANILHA, sheet_name="05_AUX_AREAS")
+    conferir("05_AUX_AREAS com as quatro colunas", list(aux.columns),
+             ["AREA", "NOME_AREA", "DESENHO", "DESENHO_GERAL"])
+    especificos = aux[~aux.DESENHO_GERAL.astype(bool)]
+    # Um desenho específico que aparecesse em duas áreas quebraria a conta da
+    # zona: ela não teria como saber de quem é o percentual.
+    conferir("desenho específico tem uma área só",
+             int(especificos.groupby("DESENHO").AREA.nunique().gt(1).sum()), 0)
+    conferir("desenho geral realmente atravessa áreas",
+             int(aux[aux.DESENHO_GERAL.astype(bool)]
+                 .groupby("DESENHO").AREA.nunique().le(1).sum()), 0)
+    area_do_desenho = dict(zip(especificos.DESENHO.astype(str).str.strip(),
+                               especificos.AREA.astype(str).str.strip()))
+
+if areas_por_tag:
+    ativas = tags[tags.STATUS_FINAL.astype(str).str.strip().str.upper() != "CANCELADO"].copy()
+    ativas["_area"] = ativas.TAG.map(areas_por_tag)
+    ativas = ativas[ativas._area.notna()]
+    ativas["_m"] = ativas.STATUS_MONTAGEM.astype(str).str.strip().str.upper() == "MONTADO"
+    g = ativas.groupby("_area")._m.agg(["size", "sum"])
+    pct_area = {a: round(r["sum"] / r["size"] * 100, 1) for a, r in g.iterrows()}
+    # TAG cancelada não gera pendência nem entra em avanço: se entrasse aqui,
+    # a zona mostraria um denominador maior do que o escopo real.
+    canceladas_com_area = {t for t in areas_por_tag
+                           if t in set(tags.loc[tags.STATUS_FINAL.astype(str)
+                                                .str.strip().str.upper() == "CANCELADO", "TAG"])}
+    conferir("cancelada fora da conta da área",
+             len(set(ativas.TAG) & canceladas_com_area), 0)
+
+if not MAPA.exists():
+    conferir("marcação do PPTX no repositório", False, True)
+else:
+    mapa = _json.loads(MAPA.read_text(encoding="utf-8"))
+    zonas = [z for p in mapa["pranchas"] for z in p["zonas"]]
+    conferir("pranchas geradas", len(mapa["pranchas"]), 3)
+    conferir("zonas na marcação", len(zonas), 20)
+    conferir("toda zona tem código de desenho",
+             sum(1 for z in zonas if not z["desenhos"]), 0)
+    for p in mapa["pranchas"]:
+        arq = MAPA.parent / p["arquivo"]
+        if not arq.exists():
+            conferir(f"imagem da prancha {p['id']}", False, True)
+    if area_do_desenho:
+        def area_da_zona(z: dict) -> set:
+            return {area_do_desenho.get(d) for d in z["desenhos"]} - {None}
+
+        # Cada zona precisa resolver para uma área só: é dela que sai o número
+        # que aparece dentro do contorno.
+        sem_area = [z for z in zonas if len(area_da_zona(z)) != 1]
+        conferir("toda zona resolve para uma área", len(sem_area), 0,
+                 ", ".join(str(z["desenhos"]) for z in sem_area[:2]))
+        vistas = {a for z in zonas for a in area_da_zona(z)}
+        conferir("área da zona existe na planilha", sorted(vistas - set(pct_area)), [])
+    # a zona fica dentro da prancha: uma marcação fora do quadro sumiria
+    conferir("zona dentro da prancha",
+             sum(1 for z in zonas if z["x"] < -1 or z["y"] < -1
+                 or z["x"] + z["l"] > 101 or z["y"] + z["a"] > 101), 0)
+
 # ---------------------------------------------------------------------- o app
 print(f"\nAPP  {ALVO}")
 try:
@@ -245,6 +334,7 @@ with sync_playwright() as p:
         ("/sigem", "Base SIGEM", "table.gtbl"),
         ("/progresso", "Progresso", "details.arv-n1"),
         ("/gitec", "Gitec", ".fx-tiles"),
+        ("/planta", "Planta", ".pl-tela"),
     ]:
         conferir(nome, abrir(caminho, marcador), True)
 
@@ -352,6 +442,73 @@ with sync_playwright() as p:
     # o topo da árvore é a FASE; SOP passou a ser o segundo nível
     conferir("Fases na árvore", pg.locator("details.arv-n1").count(),
              tags.FASE.fillna("-").astype(str).str.strip().nunique())
+
+    # Planta: o percentual dentro de cada zona é o da área, e a área é a do
+    # desenho que ele marcou no PPTX. Errar isso mostra o avanço de uma área
+    # em cima do arranjo de outra -- e ninguém percebe olhando.
+    print("\n  Planta desenha o número certo em cada zona")
+    if pct_area and abrir("/planta", ".pl-tela"):
+        conferir("pranchas na tela", pg.locator(".pl-tela").count(), 3)
+        conferir("zonas desenhadas", pg.locator(".pl-zona").count(), 20)
+        conferir("fundo de cada prancha carregou", pg.evaluate("""() =>
+            [...document.querySelectorAll('.pl-tela img')]
+                .filter(i => i.src.startsWith('data:image')).length"""), 3)
+        rotulos = pg.evaluate("""() => [...document.querySelectorAll('.pl-zona')]
+            .map(z => [z.querySelector('b').innerText,
+                       z.querySelector('i').innerText,
+                       z.title.split(String.fromCharCode(10))[0]])""")
+        erradas = []
+        for codigo, mostrado, titulo in rotulos:
+            m = re.search(r"área (\S+)", titulo)
+            if not m:
+                erradas.append(codigo)
+                continue
+            esperado = pct_area.get(m.group(1))
+            if esperado is None or abs(numero(mostrado) - esperado) > 0.05:
+                erradas.append(f"{codigo}: {mostrado} != {esperado}%")
+        conferir("percentual da zona = o da área", erradas, [])
+        # A zona é o próprio gráfico: o preenchimento sobe com o percentual.
+        # Se a variável não chegar ao CSS, todas ficam cheias e o mapa mente.
+        conferir("preenchimento acompanha o percentual", pg.evaluate("""() =>
+            [...document.querySelectorAll('.pl-zona')]
+                .filter(z => !/^-?\\d/.test(z.style.getPropertyValue('--p'))).length"""), 0)
+        kpi = {c.split("|")[0]: c.split("|")[1]
+               for c in pg.evaluate(TXT % ".pl-kpi") if "|" in c}
+        conferir("Áreas no cartão", int(numero(kpi.get("ÁREAS", "0"))), len(pct_area))
+        geral = sum(1 for a in pct_area.values() if a >= 99.5)
+        conferir("concluídas na legenda",
+                 int(numero(pg.evaluate(TXT % ".pl-ch.feito .qt b")[0])), geral)
+    elif pct_area:
+        conferir("Planta abre", False, True)
+
+    # O filtro da lateral vale para a tela inteira, aqui como nas outras abas:
+    # filtrou a fase, a planta mostra a montagem daquela fase.
+    # Contar áreas não bastaria: a fase maior toca as 15, e o número não muda
+    # nem se o filtro for ignorado. O que prova o corte é o total de
+    # instrumentos e quantos deles estão montados.
+    ativas_area = tags[(tags.STATUS_FINAL.astype(str).str.strip().str.upper() != "CANCELADO")
+                       & (tags.TAG.isin(areas_por_tag))] if areas_por_tag else pd.DataFrame()
+    if not ativas_area.empty and abrir("/planta?fase=" + _q(fase), ".pl-tela"):
+        sub = ativas_area[ativas_area.FASE.astype(str).str.strip() == fase].copy()
+        sub["_area"] = sub.TAG.map(areas_por_tag)
+        n_mont = int((sub.STATUS_MONTAGEM.astype(str).str.strip().str.upper()
+                      == "MONTADO").sum())
+        cartoes_pl = {c.split("|")[0]: c.split("|")
+                      for c in pg.evaluate(TXT % ".pl-kpi") if "|" in c}
+        montagem = cartoes_pl.get("MONTAGEM NAS ÁREAS", ["", "", ""])
+        conferir("instrumentos da fase na planta",
+                 int(numero(montagem[2].split(" de ")[1].split(" ")[0]))
+                 if len(montagem) > 2 and " de " in montagem[2] else -1, len(sub))
+        conferir("montados da fase na planta",
+                 int(numero(montagem[2].split(" de ")[0])) if len(montagem) > 2 else -1,
+                 n_mont)
+        conferir("recorte de verdade", len(sub) < len(ativas_area), True,
+                 f"{len(sub)} de {len(ativas_area)}")
+        conferir("áreas da fase", int(numero(cartoes_pl.get("ÁREAS", ["", "0"])[1])),
+                 sub._area.nunique())
+        conferir("filtro aparece no cabeçalho da Planta",
+                 pg.locator(".gplan-header .du-selo.filtro, .gplan-header .gplan-count-pill")
+                 .count() > 0, True)
 
     conferir("erros de JavaScript", erros_js[:1] or "nenhum", "nenhum")
     navegador.close()

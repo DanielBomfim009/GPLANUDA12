@@ -1,4 +1,6 @@
+import base64
 import io
+import json
 import math
 import os
 import time
@@ -269,8 +271,20 @@ def load_data(cache_key: str):
     else:
         gitec = pd.DataFrame(columns=["TAG", "ITEM_PPU_GITEC", "FASE", "AGRUPAMENTO",
                                       "ETAPA", "STATUS", "VALOR", "DATA_EXECUCAO"])
+    # A area de cada TAG e o mapa area<->desenho so existem em planilha gerada
+    # pelo pipeline novo. Sem eles a aba Planta abre explicando o que falta, em
+    # vez de quebrar.
+    locacao = (pd.read_excel(excel_file, sheet_name="05_BASE_LOCAÇÃO")
+               if "05_BASE_LOCAÇÃO" in excel_file.sheet_names
+               else pd.DataFrame(columns=["TAG", "AREA"]))
+    if "AREA" not in locacao.columns:
+        locacao["AREA"] = pd.NA
+    aux_areas = (pd.read_excel(excel_file, sheet_name="05_AUX_AREAS")
+                 if "05_AUX_AREAS" in excel_file.sheet_names
+                 else pd.DataFrame(columns=["AREA", "NOME_AREA", "DESENHO",
+                                            "DESENHO_GERAL"]))
     resumo = aplicar_regra_aprovados(resumo, esperados)
-    return tags, cabos, tubing, sigem, resumo, esperados, gitec
+    return tags, cabos, tubing, sigem, resumo, esperados, gitec, locacao, aux_areas
 
 
 # Um relatorio so conta como avanco depois de aprovado pela fiscalizacao.
@@ -287,7 +301,7 @@ REGRA_VERSAO = 9
 # desenho delas nao invalida nada: a aba Progresso continuava servindo o HTML
 # antigo, e a economia do sprite simplesmente nao aparecia. Subir este numero e
 # o que diz ao cache que o desenho mudou.
-VISUAL_VERSAO = 6
+VISUAL_VERSAO = 7
 
 
 def aprovado(serie: pd.Series) -> pd.Series:
@@ -1443,6 +1457,94 @@ def inject_css():
         .detail-value { font-size: 15px; font-weight: 700; color: var(--text-1); }
 
         div[data-testid="stMetric"] { background: var(--dark-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px 16px; }
+
+        /* ---------------------------------------------------- aba Planta */
+        .pl-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:16px; }
+        .pl-kpi { background:var(--dark-card); border:1px solid var(--border-color);
+                  border-radius:14px; padding:15px 17px; }
+        .pl-kpi .r { font-size:10px; letter-spacing:.75px; text-transform:uppercase;
+                     color:var(--text-3); font-weight:700; }
+        .pl-kpi .v { font-size:27px; font-weight:800; letter-spacing:-1.1px;
+                     line-height:1.15; margin-top:6px; color:var(--text-1); }
+        .pl-kpi .v.andando { color:var(--accent-amber); }
+        .pl-kpi .v.parado { color:var(--accent-red); }
+        .pl-kpi .s { font-size:11px; color:var(--text-3); margin-top:4px; }
+        .pl-pilha { display:flex; gap:4px; margin-top:10px; }
+        .pl-pilha span { height:4px; border-radius:99px; }
+        .pl-pilha .feito { background:var(--accent-teal); }
+        .pl-pilha .andando { background:var(--accent-amber); }
+        .pl-pilha .parado { background:var(--accent-red); }
+
+        .pl-pn { padding:16px 16px 14px; margin-bottom:14px; }
+        .pl-pn .gplan-panel-title { display:flex; align-items:baseline; gap:12px;
+                                    margin-bottom:12px; font-size:13px; }
+        .pl-res { margin-left:auto; font-size:11px; font-weight:500; color:var(--text-3); }
+        .pl-res b { font-weight:800; font-size:13px; }
+        .pl-res .feito { color:var(--accent-teal); }
+        .pl-res .andando { color:var(--accent-amber); }
+        .pl-res .parado { color:var(--accent-red); }
+
+        .pl-tela { position:relative; width:100%; height:0;
+                   border:1px solid var(--border-color); border-radius:11px;
+                   overflow:hidden; background:#080c16; }
+        /* O desenho vem preto sobre branco. Invertido, o traco fica claro sobre
+           o escuro e a prancha deixa de ser um retangulo branco no meio de uma
+           tela escura -- e as zonas passam a ler por cima dele. */
+        .pl-tela img { position:absolute; inset:0; width:100%; height:100%;
+                       object-fit:fill; filter:invert(1) brightness(.86) contrast(1.22);
+                       opacity:.52; }
+
+        .pl-zona { position:absolute; display:grid; place-items:center; border:1.5px solid;
+                   border-radius:8px; overflow:hidden; transition:filter .13s, box-shadow .13s; }
+        .pl-zona.rec { border-radius:3px; place-items:end start; padding:0 0 8px 8px; }
+        .pl-zona.feito { border-color:var(--accent-teal); background:rgba(45,212,191,.10);
+                         color:var(--accent-teal); }
+        .pl-zona.andando { border-color:var(--accent-amber); background:rgba(251,191,36,.10);
+                           color:var(--accent-amber); }
+        .pl-zona.parado { border-color:var(--accent-red); background:rgba(248,113,113,.09);
+                          color:var(--accent-red); }
+        /* O preenchimento sobe com o percentual: a zona e o proprio grafico. */
+        .pl-zona::before { content:""; position:absolute; left:0; right:0; bottom:0;
+                           height:calc(var(--p) * 1%); background:currentColor; opacity:.22; }
+        .pl-zona:hover { filter:brightness(1.35); box-shadow:0 0 0 2px currentColor; z-index:9; }
+        .pl-mio { position:relative; max-width:100%; display:flex; flex-direction:column;
+                  align-items:center; text-align:center; line-height:1.15;
+                  padding:5px 8px; border-radius:8px; background:rgba(8,12,22,.6); }
+        .pl-zona.rec .pl-mio { align-items:flex-start; text-align:left;
+                               max-width:calc(100% - 18px); }
+        .pl-mio b { font-size:var(--fs,11px); font-weight:750; color:var(--text-1);
+                    letter-spacing:-.1px; }
+        .pl-mio i { font-style:normal; font-size:calc(var(--fs,11px) * 1.4);
+                    font-weight:800; letter-spacing:-.4px; line-height:1.1; }
+        .pl-mio u { text-decoration:none; font-size:calc(var(--fs,11px) * .82);
+                    color:var(--text-2); font-weight:600; }
+        /* A etiqueta da area: fundo na cor do status, texto no fundo da tela.
+           Nao da para usar currentColor nos dois -- definir a cor do texto
+           redefine o currentColor da etiqueta, e ela some contra o proprio fundo. */
+        .pl-ar { position:absolute; top:0; left:0; font-size:9px; font-weight:800;
+                 letter-spacing:.4px; color:#0a0e1a; padding:1px 6px;
+                 border-radius:0 0 7px 0; line-height:1.5; }
+        .pl-zona.feito .pl-ar { background:var(--accent-teal); }
+        .pl-zona.andando .pl-ar { background:var(--accent-amber); }
+        .pl-zona.parado .pl-ar { background:var(--accent-red); }
+
+        .pl-lg { padding:16px; }
+        .pl-ch-c { display:flex; flex-direction:column; gap:9px; }
+        .pl-ch { display:flex; align-items:center; gap:11px; background:var(--dark-card-2);
+                 border:1px solid var(--border-color); border-radius:11px; padding:10px 12px; }
+        .pl-ch .sw { width:14px; height:28px; border-radius:5px; border:1.5px solid currentColor;
+                     flex:none; background:linear-gradient(180deg,transparent 45%,currentColor 45%); }
+        .pl-ch.feito { color:var(--accent-teal); }
+        .pl-ch.andando { color:var(--accent-amber); }
+        .pl-ch.parado { color:var(--accent-red); }
+        .pl-ch .tx b { display:block; font-size:12px; font-weight:750; color:var(--text-1); line-height:1.3; }
+        .pl-ch .tx em { font-style:normal; font-size:10.5px; color:var(--text-3); }
+        .pl-ch .qt { margin-left:auto; text-align:right; }
+        .pl-ch .qt b { display:block; font-size:16px; font-weight:800; line-height:1.2; }
+        .pl-ch .qt em { font-style:normal; font-size:10px; color:var(--text-3); }
+        .pl-dica { font-size:11px; line-height:1.55; color:var(--text-3);
+                   border-top:1px solid var(--border-color); padding-top:10px; margin:2px 0 0; }
+        @media (max-width:1100px) { .pl-kpis { grid-template-columns:repeat(2,1fr); } }
         </style>
         """.replace("__ICONES__", fx_css_icones())
     )
@@ -1563,6 +1665,15 @@ def br_pct(value: float, casas: int = 1) -> str:
     """Porcentagem com virgula. So para texto lido na tela -- largura de barra
     em CSS continua com ponto, senao o navegador descarta a regra."""
     return f"{value:.{casas}f}%".replace(".", ",")
+
+
+def br_moeda_curta(v: float) -> str:
+    """Valor abreviado, para caber num cartao: R$ 1,6M, R$ 535k, R$ 820."""
+    if abs(v) >= 1_000_000:
+        return f"R$ {v / 1_000_000:.1f}M".replace(".", ",")
+    if abs(v) >= 1_000:
+        return f"R$ {v / 1_000:,.0f}k".replace(",", ".")
+    return f"R$ {v:.0f}"
 
 
 def com_filtros(href: str) -> str:
@@ -2985,6 +3096,270 @@ def render_gitec(gitec: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame,
     )
 
 
+# ==========================================================================
+#  Aba Planta: o avanco de montagem desenhado sobre o arranjo da unidade
+# ==========================================================================
+
+MAPA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "mapa")
+
+
+def carregar_mapa() -> dict:
+    """As pranchas e o contorno das zonas, como o gerar_mapa_assets.py deixou."""
+    caminho = os.path.join(MAPA_DIR, "zonas.json")
+    if not os.path.exists(caminho):
+        return {"pranchas": []}
+    # A chave e a data do arquivo: rodou o gerador de novo, o mapa recarrega
+    # sozinho. Um numero de versao fixo aqui exigiria lembrar de subi-lo.
+    return _mapa_do_disco(os.path.getmtime(caminho))
+
+
+@st.cache_data(show_spinner=False)
+def _mapa_do_disco(mtime: float) -> dict:
+    """A imagem entra como data URI: o Streamlit nao serve arquivo estatico por
+    caminho relativo dentro do HTML que a gente injeta."""
+    caminho = os.path.join(MAPA_DIR, "zonas.json")
+    with open(caminho, encoding="utf-8") as f:
+        mapa = json.load(f)
+    for p in mapa["pranchas"]:
+        png = os.path.join(MAPA_DIR, p["arquivo"])
+        if os.path.exists(png):
+            with open(png, "rb") as img:
+                p["uri"] = "data:image/png;base64," + base64.b64encode(img.read()).decode()
+        else:
+            p["uri"] = ""
+    return mapa
+
+
+def classe_avanco(pct: float) -> str:
+    return "feito" if pct >= 99.5 else "andando" if pct > 0 else "parado"
+
+
+def dados_por_area(tags: pd.DataFrame, resumo: pd.DataFrame,
+                   locacao: pd.DataFrame, aux: pd.DataFrame) -> tuple[dict, dict, int]:
+    """Quanto cada area ja montou, e que desenho pertence a que area.
+
+    A TAG e localizada por area, nao por desenho -- a base nao tem coluna de
+    desenho por instrumento. Por isso o numero e sempre da area: duas zonas da
+    mesma area mostram o mesmo percentual, e isso e o dado, nao um arredondamento.
+
+    Os desenhos marcados como gerais (CHZ-113 e CHZ-302, que atravessam a
+    unidade) ficam de fora do mapa desenho->area: eles nao delimitam zona.
+    """
+    if locacao.empty or "AREA" not in locacao.columns:
+        return {}, {}, 0
+
+    area_da_tag = (locacao.dropna(subset=["AREA"])
+                   .assign(AREA=lambda d: d["AREA"].astype(str).str.strip())
+                   .set_index("TAG")["AREA"].to_dict())
+
+    nome, area_do_desenho = {}, {}
+    if not aux.empty:
+        for _, r in aux.iterrows():
+            a = str(r["AREA"]).strip()
+            nome.setdefault(a, str(r.get("NOME_AREA") or "").strip() or "—")
+            if not bool(r.get("DESENHO_GERAL")):
+                area_do_desenho[str(r["DESENHO"]).strip()] = a
+
+    t = tags.copy()
+    # TAG cancelada nao gera pendencia nem entra em avanco, aqui como no resto
+    if "STATUS_FINAL" in t.columns:
+        t = t[t["STATUS_FINAL"].astype(str).str.strip().str.upper() != "CANCELADO"]
+    t["_area"] = t["TAG"].map(area_da_tag)
+    t = t[t["_area"].notna()]
+    if t.empty:
+        return {}, area_do_desenho, 0
+
+    t["_montado"] = (t.get("STATUS_MONTAGEM", pd.Series("", index=t.index))
+                     .astype(str).str.strip().str.upper() == "MONTADO")
+    t["_preco"] = pd.to_numeric(t.get("PRECO_UNITARIO"), errors="coerce").fillna(0.0)
+    doc = (pd.to_numeric(resumo.get("AVANCO_DOCUMENTAL"), errors="coerce")
+           .fillna(0.0) * 100)
+    t["_doc"] = t["TAG"].map(dict(zip(resumo["TAG"], doc))).fillna(0.0)
+
+    areas = {}
+    for a, sub in t.groupby("_area"):
+        qtd = len(sub)
+        mont = int(sub["_montado"].sum())
+        areas[a] = {
+            "area": a, "nome": nome.get(a, "—"), "tags": qtd, "montados": mont,
+            "pct": round(mont / qtd * 100, 1) if qtd else 0.0,
+            "doc": round(sub["_doc"].mean(), 1),
+            "valor": float(sub["_preco"].sum()),
+            "valor_montado": float(sub.loc[sub["_montado"], "_preco"].sum()),
+        }
+    return areas, area_do_desenho, len(t)
+
+
+def zona_area(zona: dict, area_do_desenho: dict) -> str | None:
+    """A area da zona, se os desenhos dela apontarem todos para a mesma."""
+    alvo = {area_do_desenho.get(d) for d in zona.get("desenhos", [])} - {None}
+    return alvo.pop() if len(alvo) == 1 else None
+
+
+def codigos_da_zona(zona: dict) -> str:
+    """CHZ-325, ou CHZ-316/317, ou JEI-001 a 007 quando a lista e longa."""
+    c = [d.replace("800-", "") for d in zona.get("desenhos", [])]
+    if not c:
+        return "—"
+    if len(c) > 3:
+        return f"{c[0]} a {c[-1][-3:]}"
+    return c[0] + "".join("/" + x[-3:] for x in c[1:])
+
+
+# Largura util de cada prancha na tela, so para dimensionar o rotulo dentro da
+# zona: a coluna do Streamlit tem 1.600 px menos o respiro lateral.
+PLANTA_LARGURA = {"principal": 1500, "piperack": 1160, "se1200": 270}
+
+
+def planta_zonas_html(prancha: dict, areas: dict, area_do_desenho: dict) -> str:
+    largura = PLANTA_LARGURA.get(prancha["id"], 1500)
+    altura = largura * prancha["prop"] / 100
+    partes = []
+    for z in prancha["zonas"]:
+        a = areas.get(zona_area(z, area_do_desenho) or "")
+        if not a:
+            continue
+        rotulo = codigos_da_zona(z)
+        px, py = z["l"] / 100 * largura, z["a"] / 100 * altura
+        fs = max(8.5, min(13.0, (px - 14) / (len(rotulo) * 0.58)))
+        estilo = (f"left:{z['x']:.2f}%; top:{z['y']:.2f}%; width:{z['l']:.2f}%;"
+                  f" height:{z['a']:.2f}%; --p:{a['pct']:.1f}; --fs:{fs:.1f}px")
+        if z.get("recorte"):
+            estilo += f"; clip-path:{z['recorte']}"
+        # Numa zona pequena a etiqueta da area brigaria com o codigo pelo mesmo
+        # espaco; ali ela sai, e a area continua no resumo e no title.
+        etiqueta = (f'<span class="pl-ar">{esc(a["area"])}</span>'
+                    if px > 58 and py > 46 else "")
+        extra = (f'<u>{br_num(a["montados"])} de {br_num(a["tags"])}</u>'
+                 if py > 78 and px > 104 else "")
+        titulo = (f'{rotulo} · área {a["area"]} — {a["nome"]}\n'
+                  f'{br_num(a["montados"])} de {br_num(a["tags"])} montados '
+                  f'({br_pct(a["pct"])})')
+        partes.append(
+            f'<div class="pl-zona {classe_avanco(a["pct"])}'
+            f'{" rec" if z.get("recorte") else ""}" style="{estilo}"'
+            f' title="{esc(titulo)}">{etiqueta}'
+            f'<span class="pl-mio"><b>{esc(rotulo)}</b>'
+            f'<i>{br_pct(a["pct"])}</i>{extra}</span></div>')
+    return "".join(partes)
+
+
+def planta_prancha_html(prancha: dict, areas: dict, area_do_desenho: dict) -> str:
+    vistas = {z for z in (zona_area(z, area_do_desenho) for z in prancha["zonas"])
+              if z and z in areas}
+    qtd = sum(areas[a]["tags"] for a in vistas)
+    mont = sum(areas[a]["montados"] for a in vistas)
+    pct = mont / qtd * 100 if qtd else 0.0
+    return (
+        '<div class="gplan-panel pl-pn">'
+        f'<div class="gplan-panel-title">{esc(prancha["rotulo"])}'
+        f'<span class="pl-res">{len(vistas)} área{"s" if len(vistas) > 1 else ""}'
+        f' · {br_num(qtd)} instrumentos · '
+        f'<b class="{classe_avanco(pct)}">{br_pct(pct)}</b></span></div>'
+        f'<div class="pl-tela" style="padding-top:{prancha["prop"]:.3f}%">'
+        f'<img src="{prancha["uri"]}" alt="Planta — {esc(prancha["rotulo"])}">'
+        + planta_zonas_html(prancha, areas, area_do_desenho)
+        + "</div></div>")
+
+
+def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFrame,
+                  aux: pd.DataFrame):
+    """O avanco de montagem por area, desenhado sobre o arranjo da unidade.
+
+    A aba e so o visual e o resumo: serve para bater o olho e ver onde a
+    montagem anda e onde parou. O detalhe por TAG continua na Progresso.
+    """
+    render_header("Planta")
+
+    mapa = carregar_mapa()
+    areas, area_do_desenho, com_area = dados_por_area(tags, resumo, locacao, aux)
+
+    if not mapa["pranchas"]:
+        render_html('<div class="gplan-panel"><div class="gtbl-empty">'
+                    "A marcação das plantas não está no repositório. Rode "
+                    "<code>gerar_mapa_assets.py</code> apontando para o PPTX do mapa "
+                    "de infraestrutura.</div></div>")
+        return
+    if not areas:
+        render_html('<div class="gplan-panel"><div class="gtbl-empty">'
+                    "Esta planilha ainda não tem a área de cada TAG. Rode o pipeline "
+                    "com a 05_BASE_LOCAÇÃO.xlsx atualizada — ela traz a coluna ÁREA e "
+                    "a aba AUX, que é o que liga o instrumento ao desenho."
+                    "</div></div>")
+        return
+
+    total = sum(a["tags"] for a in areas.values())
+    mont = sum(a["montados"] for a in areas.values())
+    val_m = sum(a["valor_montado"] for a in areas.values())
+    val_t = sum(a["valor"] for a in areas.values())
+    pior = max(areas.values(), key=lambda a: a["tags"] - a["montados"])
+    faixas = [("feito", "Concluído", "100% montado", lambda a: a["pct"] >= 99.5),
+              ("andando", "Em andamento", "1% a 99%", lambda a: 0 < a["pct"] < 99.5),
+              ("parado", "Não iniciado", "nenhum montado", lambda a: a["pct"] == 0)]
+    contagem = {c: [a for a in areas.values() if f(a)] for c, _t, _f, f in faixas}
+
+    render_html(f"""
+      <div class="pl-kpis">
+        <div class="pl-kpi"><div class="r">Montagem nas áreas</div>
+          <div class="v andando">{br_pct(mont / total * 100 if total else 0)}</div>
+          <div class="s">{br_num(mont)} de {br_num(total)} instrumentos montados</div></div>
+        <div class="pl-kpi"><div class="r">Áreas</div>
+          <div class="v">{len(areas)}</div>
+          <div class="s">{len(contagem["feito"])} concluídas ·
+            {len(contagem["andando"])} em andamento ·
+            {len(contagem["parado"])} não iniciadas</div>
+          <div class="pl-pilha">{"".join(
+              f'<span class="{c}" style="flex:{len(contagem[c])}"></span>'
+              for c, _t, _f, _fn in faixas if contagem[c])}</div></div>
+        <div class="pl-kpi"><div class="r">Valor montado</div>
+          <div class="v">{br_moeda_curta(val_m)}</div>
+          <div class="s">de {br_moeda_curta(val_t)} nas áreas mapeadas</div></div>
+        <div class="pl-kpi"><div class="r">Maior lacuna</div>
+          <div class="v parado">{br_num(pior["tags"] - pior["montados"])}</div>
+          <div class="s">área {esc(pior["area"])} ·
+            {esc(pior["nome"])}</div></div>
+      </div>""")
+
+    por_id = {p["id"]: p for p in mapa["pranchas"]}
+    if "principal" in por_id:
+        render_html_pesado(planta_prancha_html(por_id["principal"], areas, area_do_desenho))
+
+    # As pranchas deitadas ficam embaixo da principal, na largura toda; a
+    # subestacao e um desenho em pe -- numa faixa larga ela viraria uma torre
+    # de mil pixels, entao vai para uma coluna estreita ao lado, com a legenda
+    # ocupando a altura que sobra do lado largo.
+    resto = [p for p in mapa["pranchas"] if p["id"] != "principal"]
+    largas = [p for p in resto if p["prop"] < 100]
+    altas = [p for p in resto if p["prop"] >= 100]
+    if altas:
+        col_a, col_b = st.columns([4, 1], gap="medium")
+    else:
+        col_a, col_b = st.container(), None
+    with col_a:
+        for p in largas:
+            render_html_pesado(planta_prancha_html(p, areas, area_do_desenho))
+        render_html(planta_legenda_html(faixas, contagem))
+    if col_b is not None:
+        with col_b:
+            for p in altas:
+                render_html_pesado(planta_prancha_html(p, areas, area_do_desenho))
+
+
+def planta_legenda_html(faixas: list, contagem: dict) -> str:
+    """A chave de leitura do mapa. Sem repetir area por area: isso e a Progresso."""
+    itens = "".join(
+        f'<div class="pl-ch {c}"><span class="sw"></span>'
+        f'<div class="tx"><b>{t}</b><em>{f}</em></div>'
+        f'<div class="qt"><b>{len(contagem[c])}</b>'
+        f'<em>{br_num(sum(a["tags"] for a in contagem[c]))} inst.</em></div></div>'
+        for c, t, f, _fn in faixas)
+    return ('<div class="gplan-panel pl-lg"><div class="gplan-panel-title">Legenda</div>'
+            f'<div class="pl-ch-c">{itens}'
+            '<p class="pl-dica">A cor vem do percentual da área; o preenchimento sobe '
+            'com ele. Duas zonas da mesma área mostram o mesmo número — o instrumento '
+            'é localizado por área, não por desenho.</p></div></div>')
+
+
 def vazio(v: object) -> bool:
     """A base marca ausencia com '-', nao com celula vazia."""
     return str(v).strip().upper() in SEM_VALOR
@@ -3800,7 +4175,8 @@ def main():
         st.stop()
 
     st.session_state["gplan_atualizado_em"] = data_atualizacao(fonte)
-    tags, cabos, tubing, sigem, resumo, esperados, gitec = load_data(cache_key)
+    (tags, cabos, tubing, sigem, resumo, esperados,
+     gitec, locacao, aux_areas) = load_data(cache_key)
 
     with st.sidebar:
         render_html(
@@ -3831,9 +4207,10 @@ def main():
     pesquisa_page = st.Page(lambda: _sob_carga("Carregando as tags", lambda: render_pesquisa_tag(resumo, esperados, tags, sigem, cache_key)), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
     sigem_page = st.Page(lambda: _sob_carga("Carregando a base SIGEM", lambda: render_sigem(sigem, esperados, any(escolhas.values()))), title="Base SIGEM", icon=":material/database:", url_path="sigem")
     gitec_page = st.Page(lambda: _sob_carga("Carregando a medição de campo", lambda: render_gitec(gitec_f, resumo, tags, esperados, sigem, cache_key)), title="Gitec", icon=":material/engineering:", url_path="gitec")
+    planta_page = st.Page(lambda: _sob_carga("Desenhando o avanço na planta", lambda: render_planta(tags, resumo, locacao, aux_areas)), title="Planta", icon=":material/map:", url_path="planta")
 
     nav = st.navigation([dashboard_page, progresso_page, relatorios_page, pesquisa_page,
-                         sigem_page, gitec_page], position="sidebar")
+                         sigem_page, gitec_page, planta_page], position="sidebar")
     nav.run()
 
 
