@@ -287,7 +287,7 @@ REGRA_VERSAO = 9
 # desenho delas nao invalida nada: a aba Progresso continuava servindo o HTML
 # antigo, e a economia do sprite simplesmente nao aparecia. Subir este numero e
 # o que diz ao cache que o desenho mudou.
-VISUAL_VERSAO = 4
+VISUAL_VERSAO = 6
 
 
 def aprovado(serie: pd.Series) -> pd.Series:
@@ -837,9 +837,12 @@ def inject_css():
         /* trilha: a cadeia de onde a coisa pendura */
         .fx-trilha { display:flex; align-items:center; gap:7px; flex-wrap:wrap;
                      font-size:11.5px; color:var(--text-3); }
+        /* o caminho de volta e clicavel, mas sem risco embaixo: sublinhado
+           aqui vira ruido, sao quatro links seguidos */
         .fx-trilha a { color:var(--text-2) !important; text-decoration:none !important;
-                       border-bottom:1px solid transparent; }
-        .fx-trilha a:hover { color:var(--text-1) !important; border-bottom-color:var(--accent-blue); }
+                       border-radius:5px; padding:1px 5px; margin:0 -2px; }
+        .fx-trilha a:hover { color:var(--text-1) !important;
+                             background:rgba(255,255,255,.06); }
         .fx-trilha .sep { color:#38455f; }
         .fx-trilha .aqui { color:var(--text-1); font-weight:650; }
 
@@ -1645,7 +1648,8 @@ def tag_link(value: object) -> str:
 
 
 def fichas_modais_html(tags_ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
-                       tags: pd.DataFrame, espera_por_doc: dict | None = None) -> str:
+                       tags: pd.DataFrame, espera_por_doc: dict | None = None,
+                       niveis_na_pagina: bool = False) -> str:
     """Modais das tags visiveis na pagina, abertos/fechados via CSS :target."""
     ids = list(dict.fromkeys(tags_ids))  # unicas, preservando a ordem
     # Indexar uma vez. Antes cada ficha varria resumo, esperados e tags
@@ -1663,7 +1667,8 @@ def fichas_modais_html(tags_ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
             continue
         corpo = tag_ficha_html(tag_id, g_resumo[tag_id], g_esp.get(tag_id, vazio_esp),
                                g_tags.get(tag_id, vazio_tags), com_cabecalho=False,
-                               espera_por_doc=espera_por_doc)
+                               espera_por_doc=espera_por_doc,
+                               niveis_na_pagina=niveis_na_pagina)
         if corpo is None:
             continue
         blocos += f"""
@@ -2447,7 +2452,8 @@ def fichas_relatorios_html(docs, esperados: pd.DataFrame, historico: dict) -> st
 
 def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
                    tags: pd.DataFrame, com_cabecalho: bool = True,
-                   espera_por_doc: dict | None = None) -> str | None:
+                   espera_por_doc: dict | None = None,
+                   niveis_na_pagina: bool = False) -> str | None:
     """Ficha completa da tag, como um bloco HTML unico.
 
     Serve tanto a aba Pesquisa tag quanto o modal aberto pelo Dashboard, pelos
@@ -2481,16 +2487,21 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
     recusados = int(st_norm.eq("RECUSADO").sum())
 
     # ------------------------------------------------------------- trilha
-    fase, sop = da_base("FASE"), da_base("SOP")
-    trilha = [("Fase " + str(fase), com_filtros("/progresso?fase=" + quote(str(fase)))
-               if fase != "—" else "")]
-    if sop != "—":
-        trilha.append(("SOP " + str(sop),
-                       com_filtros("/progresso?sop=" + quote(str(sop)))))
-    for rotulo, campo in (("SSOP", "SSOP"), ("Malha", "MALHA")):
+    # O caminho de volta: cada degrau abre a ficha daquele nivel. Na aba
+    # Progresso as fichas de nivel estao na propria pagina, entao basta a
+    # ancora e nada recarrega. Nas outras abas elas nao existem -- ali o link
+    # leva para a Progresso ja apontando para a ficha, em vez de virar uma
+    # ancora sem destino, que e clique que nao faz nada.
+    def degrau(tipo: str, valor: str) -> str:
+        alvo = f"#{_ancora(tipo, valor)}"
+        return alvo if niveis_na_pagina else com_filtros("/progresso") + alvo
+
+    trilha = []
+    for rotulo, campo, tipo in (("Fase", "FASE", "FASE"), ("SOP", "SOP", "SOP"),
+                                ("SSOP", "SSOP", "SSOP"), ("Malha", "MALHA", "MALHA")):
         v = da_base(campo)
         if v != "—":
-            trilha.append((f"{rotulo} {v}", ""))
+            trilha.append((f"{rotulo} {v}", degrau(tipo, str(v))))
     trilha.append((str(tag_id), ""))
 
     # -------------------------------------------------------------- tiles
@@ -2524,7 +2535,7 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
     dados = (
         fx_dado("Critério de medição", da_base("CRITERIO_MEDICAO"))
         + fx_dado("Preço unitário", br_moeda(float(preco)))
-        + fx_dado("SOP", sop)
+        + fx_dado("SOP", da_base("SOP"))
         + fx_dado("SSOP", da_base("SSOP"))
         + fx_dado("Segmento", da_base("SEGMENTO"))
         + fx_dado("Malha", da_base("MALHA"))
@@ -2550,8 +2561,7 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
     legenda = (fx_lg("Aprovados", br_num(apr), br_pct(pct(apr)), "#2dd4bf")
                + fx_lg("Pendentes", br_num(pen), br_pct(pct(pen)), "#f87171")
                + fx_lg("Esperados", br_num(esp), "", "#3a4a68", total=True))
-    nota = (f'<p class="fx-nota">Postado não é aprovado: {br_num(pos)} estão no SIGEM, '
-            f"{br_num(pos - apr)} deles ainda sem liberação.</p>") if pos > apr else ""
+    nota = ""
     if esp:
         avanco = fx_painel("Avanço documental", "seta",
                            fx_rosca(apr, esp) + f'<div class="fx-leg">{legenda}</div>' + nota,
@@ -2612,8 +2622,8 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
                       + fx_acao("Ver em Relatórios", "folha",
                                 com_filtros("/relatorios?busca=" + quote(str(tag_id))))
                       + fx_acao("Ver na árvore", "grade",
-                                com_filtros("/progresso?fase=" + quote(str(fase)))
-                                if fase != "—" else com_filtros("/progresso"))
+                                com_filtros("/progresso?fase=" + quote(str(da_base("FASE"))))
+                                if da_base("FASE") != "—" else com_filtros("/progresso"))
                       + "</div>")
 
     cabecalho = (
@@ -3098,6 +3108,19 @@ def grafico_avanco(titulo: str, g: pd.DataFrame, coluna: str,
 CADEIA = [("SOP", "SOP", "SSOP"), ("SSOP", "SSOP", "malhas"), ("MALHA", "Malha", "tags")]
 
 
+def assinatura_filtros() -> str:
+    """Os filtros ativos como texto, para entrar na chave de cache.
+
+    A arvore, as fichas de nivel e as das TAGs sao cacheadas, e a chave levava
+    so a planilha, o segmento, a malha e a pagina. Com um SOP filtrado na
+    lateral, os graficos e os totais mudavam -- eles sao calculados na hora --
+    mas a arvore vinha do cache, inteira, do jeito que estava antes do filtro.
+    A tela contava duas historias ao mesmo tempo.
+    """
+    return "|".join(f"{c}={st.session_state.get(f'gf_{c}', p)}"
+                    for c, _rot, p, _f, _col in FILTROS)
+
+
 def _ancora(tipo: str, valor: str) -> str:
     """Id do modal de um nivel. So alfanumerico, para ser id CSS valido."""
     limpo = "".join(c if c.isalnum() else "-" for c in str(valor))
@@ -3107,7 +3130,7 @@ def _ancora(tipo: str, valor: str) -> str:
 # max_entries baixo de proposito: cada entrada guarda ate ~5 MB de HTML e o
 # plano do Render tem 512 MB. Com 8 por funcao dava 83 MB so de cache.
 @st.cache_data(show_spinner=False, max_entries=3)
-def arvore_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
+def arvore_html(cache_key: str, filtro: str, f_seg: str, f_malha: str, pag: int,
                 _df: pd.DataFrame) -> str:
     """A arvore inteira, ja em HTML e sempre fechada.
 
@@ -3185,20 +3208,21 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
 
     lugar.markdown(tela_carregando(f"Montando a árvore de {n} instrumentos", 20,
                                    coberta=False), unsafe_allow_html=True)
-    arvore = arvore_html(cache_key, f_seg, f_malha, pag, df_pag)
+    filtro = assinatura_filtros()
+    arvore = arvore_html(cache_key, filtro, f_seg, f_malha, pag, df_pag)
 
     lugar.markdown(tela_carregando("Preparando as fichas de SOP, SSOP e malha", 55,
                                    coberta=False), unsafe_allow_html=True)
-    niveis = fichas_niveis_html(cache_key, f_seg, f_malha, pag, df_pag)
+    niveis = fichas_niveis_html(cache_key, filtro, f_seg, f_malha, pag, df_pag)
 
     lugar.markdown(tela_carregando(f"Preparando as fichas das {n} TAGs", 80,
                                    coberta=False), unsafe_allow_html=True)
-    fichas = fichas_tags_html(cache_key, f_seg, f_malha, pag,
+    fichas = fichas_tags_html(cache_key, filtro, f_seg, f_malha, pag,
                               df_pag["TAG"].tolist(), resumo, esperados, tags, sigem)
 
     lugar.markdown(tela_carregando("Preparando as fichas dos relatórios", 92,
                                    coberta=False), unsafe_allow_html=True)
-    fichas += fichas_relatorios_pagina(cache_key, f_seg, f_malha, pag,
+    fichas += fichas_relatorios_pagina(cache_key, filtro, f_seg, f_malha, pag,
                                        df_pag["TAG"].tolist(), esperados, sigem)
 
     lugar.html(
@@ -3211,7 +3235,7 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
 # max_entries baixo de proposito: cada entrada guarda muitos MB de HTML e o
 # plano do Render tem 512 MB.
 @st.cache_data(show_spinner=False, max_entries=3)
-def fichas_niveis_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
+def fichas_niveis_html(cache_key: str, filtro: str, f_seg: str, f_malha: str, pag: int,
                        _df: pd.DataFrame) -> str:
     """As fichas de SOP, SSOP e malha, todas fechadas."""
     partes = []
@@ -3223,7 +3247,7 @@ def fichas_niveis_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
 
 
 @st.cache_data(show_spinner=False, max_entries=3)
-def fichas_relatorios_pagina(cache_key: str, f_seg: str, f_malha: str, pag: int,
+def fichas_relatorios_pagina(cache_key: str, filtro: str, f_seg: str, f_malha: str, pag: int,
                              _tags_ids: list, _esperados: pd.DataFrame,
                              _sigem: pd.DataFrame) -> str:
     """Fichas dos relatorios das TAGs da pagina, so os ja postados.
@@ -3239,14 +3263,15 @@ def fichas_relatorios_pagina(cache_key: str, f_seg: str, f_malha: str, pag: int,
 
 
 @st.cache_data(show_spinner=False, max_entries=3)
-def fichas_tags_html(cache_key: str, f_seg: str, f_malha: str, pag: int,
+def fichas_tags_html(cache_key: str, filtro: str, f_seg: str, f_malha: str, pag: int,
                      _ids: list, _resumo: pd.DataFrame, _esperados: pd.DataFrame,
                      _tags: pd.DataFrame, _sigem: pd.DataFrame | None = None) -> str:
     """As fichas das 5.098 TAGs. Cada uma varre a 08_RELATORIOS_ESPERADOS, por
     isso o cache -- sem ele isso se repetia a cada clique."""
     espera = (espera_por_documento(_revisoes_por_doc(cache_key, _sigem))
               if _sigem is not None else None)
-    return fichas_modais_html(_ids, _resumo, _esperados, _tags, espera)
+    return fichas_modais_html(_ids, _resumo, _esperados, _tags, espera,
+                              niveis_na_pagina=True)
 
 
 def _totais(df: pd.DataFrame) -> str:
@@ -3343,14 +3368,16 @@ def _modal_nivel(tipo: str, nome: object, sub: pd.DataFrame, rotulo_tipo: str) -
     completas = int(sub["COMPLETA"].sum())
 
     # ------------------------------------------- trilha: a cadeia ate aqui
+    # A ficha de nivel so existe na aba Progresso, e todas as outras estao na
+    # mesma pagina: a trilha sobe por ancora, sem recarregar nada. So vale para
+    # o pai unico -- quando o nivel atravessa dois pais, "SOP-1 e mais 1" nao
+    # aponta para ficha nenhuma, entao fica como texto.
     trilha = []
     for pai in FX_ACIMA.get(tipo, []):
         v = _distintos(sub[pai], 1)
-        href = ""
-        if pai in ("FASE", "SOP") and v and v not in ("—", "-"):
-            chave = "fase" if pai == "FASE" else "sop"
-            href = com_filtros(f"/progresso?{chave}={quote(v)}")
-        trilha.append((f"{FX_ROTULO_NIVEL[pai]} {v}", href))
+        unico = sub[pai].nunique() == 1 and v not in ("—", "-", "")
+        trilha.append((f"{FX_ROTULO_NIVEL[pai]} {v}",
+                       f"#{_ancora(pai, v)}" if unico else ""))
     trilha.append((f"{FX_ROTULO_NIVEL[tipo]} {titulo}", ""))
 
     # --------------------------------------------------------------- tiles
