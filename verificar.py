@@ -472,9 +472,12 @@ with sync_playwright() as p:
         conferir("preenchimento acompanha o percentual", pg.evaluate("""() =>
             [...document.querySelectorAll('.pl-zona')]
                 .filter(z => !/^-?\\d/.test(z.style.getPropertyValue('--p'))).length"""), 0)
-        kpi = {c.split("|")[0]: c.split("|")[1]
-               for c in pg.evaluate(TXT % ".pl-kpi") if "|" in c}
-        conferir("Áreas no cartão", int(numero(kpi.get("ÁREAS", "0"))), len(pct_area))
+        # a contagem de áreas sai do próprio mapa: cada zona diz de quem é
+        areas_na_tela = {re.search(r"área (\S+)", t).group(1)
+                         for t in pg.evaluate(
+                             "() => [...document.querySelectorAll('.pl-zona')].map(z => z.title)")
+                         if re.search(r"área (\S+)", t)}
+        conferir("áreas desenhadas no mapa", len(areas_na_tela), len(pct_area))
         geral = sum(1 for a in pct_area.values() if a >= 99.5)
         conferir("concluídas na legenda",
                  int(numero(pg.evaluate(TXT % ".pl-ch.feito .qt b")[0])), geral)
@@ -496,6 +499,7 @@ with sync_playwright() as p:
         cartoes_pl = {c.split("|")[0]: c.split("|")
                       for c in pg.evaluate(TXT % ".pl-kpi") if "|" in c}
         montagem = cartoes_pl.get("MONTAGEM NAS ÁREAS", ["", "", ""])
+        valor = cartoes_pl.get("VALOR MONTADO", ["", "", ""])
         conferir("instrumentos da fase na planta",
                  int(numero(montagem[2].split(" de ")[1].split(" ")[0]))
                  if len(montagem) > 2 and " de " in montagem[2] else -1, len(sub))
@@ -504,8 +508,12 @@ with sync_playwright() as p:
                  n_mont)
         conferir("recorte de verdade", len(sub) < len(ativas_area), True,
                  f"{len(sub)} de {len(ativas_area)}")
-        conferir("áreas da fase", int(numero(cartoes_pl.get("ÁREAS", ["", "0"])[1])),
-                 sub._area.nunique())
+        areas_fase = {re.search(r"área (\S+)", t).group(1)
+                      for t in pg.evaluate(
+                          "() => [...document.querySelectorAll('.pl-zona')].map(z => z.title)")
+                      if re.search(r"área (\S+)", t)}
+        conferir("áreas da fase no mapa", len(areas_fase), sub._area.nunique())
+        conferir("cartão de valor montado presente", len(valor) > 2, True)
         conferir("filtro aparece no cabeçalho da Planta",
                  pg.locator(".gplan-header .du-selo.filtro, .gplan-header .gplan-count-pill")
                  .count() > 0, True)

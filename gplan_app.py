@@ -28,16 +28,24 @@ def render_html(html: str):
     st.markdown("\n".join(line.strip() for line in html.strip().split("\n")), unsafe_allow_html=True)
 
 
-LOGO_SVG = (
-    '<svg viewBox="0 0 48 48" fill="none">'
-    '<circle cx="24" cy="24" r="19" stroke="#232a44" stroke-width="5"/>'
-    '<path d="M24 5a19 19 0 0 1 15.6 29.8" stroke="url(#gpArc)" stroke-width="5" stroke-linecap="round"/>'
-    '<circle cx="24" cy="24" r="5.5" fill="#2dd4bf"/>'
-    '<path d="M24 24L33 15" stroke="#f4f6fb" stroke-width="3" stroke-linecap="round"/>'
-    '<defs><linearGradient id="gpArc" x1="24" y1="5" x2="40" y2="35" gradientUnits="userSpaceOnUse">'
-    '<stop stop-color="#5b8def"/><stop offset="1" stop-color="#2dd4bf"/>'
-    "</linearGradient></defs></svg>"
-)
+# A marca segue o tema pelas variaveis: o anel de fundo e o ponteiro sao os
+# que sumiriam -- anel escuro sobre fundo claro, ponteiro claro sobre card
+# branco. O arco e o miolo ficam nas cores da marca nos dois temas.
+def _logo_svg(sufixo: str = "") -> str:
+    grad = f"gpArc{sufixo}"
+    return (
+        '<svg viewBox="0 0 48 48" fill="none">'
+        '<circle cx="24" cy="24" r="19" stroke="var(--neutro)" stroke-width="5"/>'
+        f'<path d="M24 5a19 19 0 0 1 15.6 29.8" stroke="url(#{grad})" stroke-width="5" stroke-linecap="round"/>'
+        '<circle cx="24" cy="24" r="5.5" fill="var(--accent-teal)"/>'
+        '<path d="M24 24L33 15" stroke="var(--text-1)" stroke-width="3" stroke-linecap="round"/>'
+        f'<defs><linearGradient id="{grad}" x1="24" y1="5" x2="40" y2="35" gradientUnits="userSpaceOnUse">'
+        '<stop stop-color="var(--accent-blue)"/><stop offset="1" stop-color="var(--accent-teal)"/>'
+        "</linearGradient></defs></svg>"
+    )
+
+
+LOGO_SVG = _logo_svg()
 
 
 # A transicao inteira leva isso, mesmo quando o trabalho acaba antes. Sem o
@@ -144,6 +152,19 @@ STATUS_COLOR_MAP = {
     "Cancelado": "#4b5468",
 }
 DEFAULT_STATUS_COLORS = ["#5b8def", "#2dd4bf", "#fbbf24", "#f87171", "#9d6bff", "#7c8aa8", "#4b5468", "#34d399"]
+
+# O status vira classe, e a cor sai do tema. Guardar o hex e pinta-lo no
+# atributo style prendia o badge ao tema escuro: no claro o teal #2dd4bf sobre
+# a propria lavagem clara dava 1,7:1, e "Sem comentarios" sumia da tabela.
+STATUS_CLASSE = {
+    "Não postado": "mudo", "Sem comentários": "ok", "Com comentários": "andamento",
+    "Para construção": "warn", "Recusado": "crit", "Em análise": "roxo",
+    "Cancelado": "cinza",
+}
+
+
+def classe_status(label: str) -> str:
+    return STATUS_CLASSE.get(label, "mudo")
 
 REPORT_ROWS = [
     ("RIR instrumentos", "RIR", "BASE: RIR obrigatorio para todos os TAGs", False),
@@ -377,7 +398,7 @@ def paginate(df: pd.DataFrame, key: str, search_signature: str) -> pd.DataFrame:
     with col_mid:
         range_txt = f"{start + 1}–{end}" if total_rows else "0"
         render_html(
-            f'<div style="text-align:center; color:#9aa4bc; font-size:12.5px; padding-top:9px;">'
+            f'<div class="gtbl-pag">'
             f"Exibindo {range_txt} de {total_rows:,} · Página {current_page} de {total_pages}"
             f"</div>".replace(",", ".")
         )
@@ -445,25 +466,160 @@ def count_rows(df: pd.DataFrame, report: str, origin: str | None, emitted: bool,
     return int(len(subset))
 
 
+# ==========================================================================
+#  Tema: um único lugar decide toda cor da interface
+# ==========================================================================
+# Nada no CSS abaixo escreve uma cor literal. Tudo consome uma destas
+# variáveis, e trocar de tema é trocar este dicionário -- inclusive as
+# lavagens (rgba sobre a superfície) e os tons de texto sobre chip colorido,
+# que são justamente os que somem quando alguém só inverte fundo e letra.
+#
+# O tema claro não é o escuro invertido: o fundo é um cinza levemente azulado,
+# os cartões são brancos por cima dele, e as cores semânticas foram escurecidas
+# até terem contraste de leitura sobre branco -- o âmbar #fbbf24 sobre branco
+# dá 1,7:1, ilegível, e vira #a16207.
+TEMAS = {
+    "escuro": {
+        "bg": "#0a0e1a", "card": "#12172a", "card2": "#171d33", "fundo3": "#080c16",
+        "borda": "rgba(255,255,255,0.06)", "borda_forte": "rgba(255,255,255,0.12)",
+        # componente das lavagens: no escuro clareia a superfície, no claro escurece
+        "rgb_tinta": "255,255,255",
+        "texto1": "#f4f6fb", "texto2": "#a6b0c6", "texto3": "#828da8",
+        "neutro": "#3a4a68", "neutro2": "#4b5468",
+        "overlay": "rgba(6,9,18,0.68)", "sombra": "rgba(0,0,0,0.6)",
+        "sombra_leve": "rgba(0,0,0,0.35)",
+        "azul": "#5b8def", "roxo": "#9d6bff", "verde": "#34d399",
+        "vermelho": "#f87171", "ambar": "#fbbf24", "teal": "#2dd4bf",
+        "rgb_azul": "91,141,239", "rgb_roxo": "157,107,255", "rgb_verde": "52,211,153",
+        "rgb_vermelho": "248,113,113", "rgb_ambar": "251,191,36", "rgb_teal": "45,212,191",
+        # texto sobre chip da própria cor -- clareado no escuro, escurecido no claro
+        "txt_azul": "#a9c5ff", "txt_roxo": "#c9b6ff", "txt_verde": "#6ee7d0",
+        "txt_vermelho": "#fca5a5", "txt_ambar": "#fcd34d", "txt_teal": "#6ee7d0",
+        "sobre_cor": "#0a0e1a", "teal2": "#22c1b0",
+        # o desenho da planta vem preto sobre branco: invertido, o traço fica
+        # claro sobre o escuro e a prancha para de ser um retângulo branco
+        "rgb_chapa": "8,12,22",
+        "planta_filtro": "invert(1) brightness(.86) contrast(1.22)",
+        "planta_opacidade": ".52",
+        "esquema": "dark",
+    },
+    "claro": {
+        "bg": "#eef1f7", "card": "#ffffff", "card2": "#f3f5fa", "fundo3": "#e4e8f1",
+        "borda": "rgba(17,26,48,0.10)", "borda_forte": "rgba(17,26,48,0.20)",
+        "rgb_tinta": "17,26,48",
+        "texto1": "#111a30", "texto2": "#43506c", "texto3": "#5c6884",
+        "neutro": "#aeb9cc", "neutro2": "#95a1b8",
+        "overlay": "rgba(23,32,54,0.42)", "sombra": "rgba(23,32,54,0.18)",
+        "sombra_leve": "rgba(23,32,54,0.10)",
+        "azul": "#2f63d4", "roxo": "#7440cf", "verde": "#0f8f5f",
+        "vermelho": "#cf3b3b", "ambar": "#a16207", "teal": "#0b8478",
+        "rgb_azul": "47,99,212", "rgb_roxo": "116,64,207", "rgb_verde": "15,143,95",
+        "rgb_vermelho": "207,59,59", "rgb_ambar": "161,98,7", "rgb_teal": "11,132,120",
+        "txt_azul": "#1e4aa8", "txt_roxo": "#5b2fa8", "txt_verde": "#0a6c48",
+        "txt_vermelho": "#a72c2c", "txt_ambar": "#7c4a05", "txt_teal": "#08655c",
+        "sobre_cor": "#ffffff", "teal2": "#0a6f65",
+        # no claro o desenho já é escuro sobre branco: inverter deixaria a
+        # prancha preta no meio de uma tela clara
+        "rgb_chapa": "255,255,255",
+        "planta_filtro": "grayscale(1) contrast(1.35) brightness(.82)",
+        "planta_opacidade": ".55",
+        "esquema": "light",
+    },
+}
+TEMA_PADRAO = "escuro"
+
+
+def tema_ativo() -> str:
+    """O tema escolhido, lido antes de qualquer CSS sair.
+
+    A preferência vive na URL, o mesmo mecanismo que já guarda os filtros. É o
+    que sobrevive a fechar e reabrir, e é lido no primeiro instante da execução
+    -- ler depois faria a tela nascer num tema e trocar no meio do carregamento.
+    """
+    escolhido = st.session_state.get("gplan_tema")
+    if escolhido not in TEMAS:
+        escolhido = st.query_params.get("tema")
+    if escolhido not in TEMAS:
+        escolhido = TEMA_PADRAO
+    st.session_state["gplan_tema"] = escolhido
+    return escolhido
+
+
+def tokens_css(tema: str) -> str:
+    t = TEMAS.get(tema, TEMAS[TEMA_PADRAO])
+    return f"""
+          color-scheme: {t['esquema']};
+          --dark-bg: {t['bg']};
+          --dark-card: {t['card']};
+          --dark-card-2: {t['card2']};
+          --fundo-3: {t['fundo3']};
+          --border-color: {t['borda']};
+          --border-strong: {t['borda_forte']};
+          --rgb-tinta: {t['rgb_tinta']};
+          --overlay: {t['overlay']};
+          --sombra: {t['sombra']};
+          --sombra-leve: {t['sombra_leve']};
+          --text-1: {t['texto1']};
+          --text-2: {t['texto2']};
+          --text-3: {t['texto3']};
+          --neutro: {t['neutro']};
+          --neutro-2: {t['neutro2']};
+          --accent-blue: {t['azul']};
+          --accent-purple: {t['roxo']};
+          --accent-green: {t['verde']};
+          --accent-red: {t['vermelho']};
+          --accent-amber: {t['ambar']};
+          --accent-teal: {t['teal']};
+          --rgb-azul: {t['rgb_azul']};
+          --rgb-roxo: {t['rgb_roxo']};
+          --rgb-verde: {t['rgb_verde']};
+          --rgb-vermelho: {t['rgb_vermelho']};
+          --rgb-ambar: {t['rgb_ambar']};
+          --rgb-teal: {t['rgb_teal']};
+          --txt-azul: {t['txt_azul']};
+          --txt-roxo: {t['txt_roxo']};
+          --txt-verde: {t['txt_verde']};
+          --txt-vermelho: {t['txt_vermelho']};
+          --txt-ambar: {t['txt_ambar']};
+          --txt-teal: {t['txt_teal']};
+          --sobre-cor: {t['sobre_cor']};
+          --teal-2: {t['teal2']};
+          --rgb-chapa: {t['rgb_chapa']};
+          --planta-filtro: {t['planta_filtro']};
+          --planta-opacidade: {t['planta_opacidade']};"""
+
+
+def trocar_tema():
+    """Guarda a escolha na sessao e na URL, e deixa o Streamlit redesenhar.
+
+    Nao ha recarga de pagina: o Streamlit reexecuta o script, o inject_css sai
+    com o outro :root e a arvore inteira -- cartoes, tabelas, graficos, icones,
+    modais -- muda junto, porque todos leem as mesmas variaveis. A URL guarda a
+    preferencia para a proxima abertura.
+    """
+    novo = "claro" if st.session_state.get("gplan_tema") == "escuro" else "escuro"
+    st.session_state["gplan_tema"] = novo
+    st.query_params["tema"] = novo
+
+
+def seletor_tema():
+    """O botao de tema: so o icone, preso no alto a direita.
+
+    Fica fora do fluxo por CSS. Precisa ser um st.button de verdade -- um link
+    no cabecalho trocaria o tema recarregando a pagina inteira, e a planilha
+    leva segundos para voltar. Assim o Streamlit so reexecuta o script.
+    """
+    claro = tema_ativo() == "claro"
+    st.button("Tema", key="gplan_btn_tema", on_click=trocar_tema,
+              icon=":material/dark_mode:" if claro else ":material/light_mode:",
+              help="Mudar para o tema escuro" if claro else "Mudar para o tema claro")
+
+
 def inject_css():
     render_html(
         """
         <style>
-        :root {
-          --dark-bg: #0a0e1a;
-          --dark-card: #12172a;
-          --dark-card-2: #171d33;
-          --border-color: rgba(255,255,255,0.06);
-          --border-strong: rgba(255,255,255,0.12);
-          --accent-blue: #5b8def;
-          --accent-purple: #9d6bff;
-          --accent-green: #34d399;
-          --accent-red: #f87171;
-          --accent-amber: #fbbf24;
-          --accent-teal: #2dd4bf;
-          --text-1: #f4f6fb;
-          --text-2: #9aa4bc;
-          --text-3: #6b7590;
+        :root {__TOKENS__
         }
 
         .stApp { background: var(--dark-bg); }
@@ -474,8 +630,18 @@ def inject_css():
           max-width: 1600px !important;
         }
         [data-testid="stHeader"] { background: transparent !important; }
+        /* O indicador de execucao do Streamlit -- "Running", "Stop", "Rerun" --
+           nasce com a cor do config e some no tema claro. Fica sobre o
+           conteudo, entao leva superficie propria para nao se perder nele. */
+        [data-testid="stStatusWidget"] { background: var(--dark-card) !important;
+          border: 1px solid var(--border-strong) !important; border-radius: 10px;
+          box-shadow: 0 4px 14px var(--sombra-leve); }
+        [data-testid="stStatusWidget"] *, [data-testid="stStatusWidget"] button {
+          color: var(--text-1) !important; }
+        [data-testid="stStatusWidget"] svg, [data-testid="stStatusWidget"] svg * {
+          fill: var(--text-1) !important; stroke: var(--text-1) !important; }
         section[data-testid="stSidebar"] {
-          background: linear-gradient(180deg, #0d1224 0%, #0a0e1a 100%);
+          background: linear-gradient(180deg, var(--fundo-3) 0%, var(--dark-bg) 100%);
           border-right: 1px solid var(--border-color);
           width: 212px !important; min-width: 212px !important;
         }
@@ -517,18 +683,18 @@ def inject_css():
         }
         section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a:hover,
         section[data-testid="stSidebar"] nav a:hover {
-          background: rgba(255,255,255,0.05) !important;
+          background: rgba(var(--rgb-tinta),0.05) !important;
           color: var(--text-1) !important;
         }
         section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[aria-current="page"],
         section[data-testid="stSidebar"] nav a[aria-current="page"] {
-          background: linear-gradient(135deg, rgba(91,141,239,0.18), rgba(157,107,255,0.12)) !important;
-          color: #ffffff !important;
-          box-shadow: inset 0 0 0 1px rgba(91,141,239,0.3);
+          background: linear-gradient(135deg, rgba(var(--rgb-azul),0.18), rgba(var(--rgb-roxo),0.12)) !important;
+          color: var(--text-1) !important;
+          box-shadow: inset 0 0 0 1px rgba(var(--rgb-azul),0.3);
         }
         section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[aria-current="page"] span,
         section[data-testid="stSidebar"] nav a[aria-current="page"] span {
-          color: #ffffff !important;
+          color: var(--text-1) !important;
         }
 
 
@@ -583,14 +749,14 @@ def inject_css():
                    font-size:11px; color:var(--text-2); white-space:nowrap; }
         .du-selo i { width:6px; height:6px; border-radius:50%; background:var(--accent-green);
                      box-shadow:0 0 8px var(--accent-green); }
-        .du-selo.filtro { border-color:rgba(251,191,36,.45); color:var(--text-1); }
-        .du-selo.filtro i { background:#fbbf24; box-shadow:0 0 8px #fbbf24; }
+        .du-selo.filtro { border-color:rgba(var(--rgb-ambar),.45); color:var(--text-1); }
+        .du-selo.filtro i { background:var(--accent-amber); box-shadow:0 0 8px var(--accent-amber); }
 
         .du-kpis { display:grid; grid-template-columns:repeat(5,1fr); gap:clamp(8px,.85vw,13px); }
         .du-kpi { background:var(--dark-card); border:1px solid var(--border-color); border-radius:13px;
                   padding:clamp(9px,1.35vh,14px) clamp(11px,.85vw,15px);
                   display:flex; flex-direction:column; gap:6px; text-decoration:none; }
-        a.du-kpi:hover { border-color:rgba(91,141,239,.45); }
+        a.du-kpi:hover { border-color:rgba(var(--rgb-azul),.45); }
         .du-kpi .topo { display:flex; align-items:center; gap:9px; }
         .du-kpi .tile { width:clamp(26px,3.2vh,33px); height:clamp(26px,3.2vh,33px); border-radius:9px;
                         flex:none; display:flex; align-items:center; justify-content:center; }
@@ -599,8 +765,18 @@ def inject_css():
         .du-kpi .val { font-size:clamp(21px,3.4vh,31px); font-weight:800; letter-spacing:-.8px;
                        line-height:1; color:var(--text-1); }
         .du-kpi .sub { font-size:10px; color:var(--text-3); }
-        .du-trilho { height:3px; border-radius:99px; background:rgba(255,255,255,.07); overflow:hidden; }
-        .du-trilho i { display:block; height:100%; border-radius:99px; }
+        .du-trilho { height:3px; border-radius:99px; background:rgba(var(--rgb-tinta),.07);
+                     overflow:hidden; color:var(--accent-green); }
+        .du-trilho i { display:block; height:100%; border-radius:99px; background:currentColor; }
+        /* o quadradinho do icone: cor pela classe, fundo na lavagem dela */
+        .tile.fxc-azul  { color:var(--accent-blue);   background:rgba(var(--rgb-azul),.13); }
+        .tile.fxc-teal  { color:var(--accent-teal);   background:rgba(var(--rgb-teal),.13); }
+        .tile.fxc-roxo  { color:var(--accent-purple); background:rgba(var(--rgb-roxo),.13); }
+        .tile.fxc-ambar { color:var(--accent-amber);  background:rgba(var(--rgb-ambar),.13); }
+        .tile.fxc-rubi  { color:var(--accent-red);    background:rgba(var(--rgb-vermelho),.13); }
+        .tile.fxc-verde { color:var(--accent-green);  background:rgba(var(--rgb-verde),.13); }
+        .tile.fxc-mudo  { color:var(--text-2);        background:rgba(var(--rgb-tinta),.10); }
+        .tile.fxc-cinza { color:var(--neutro);        background:rgba(var(--rgb-tinta),.08); }
 
         .du-meio { display:grid; grid-template-columns:1.58fr 1fr; gap:clamp(8px,.85vw,13px); min-height:0; }
         .du-col { display:grid; grid-template-rows:auto 1fr; gap:clamp(8px,1.15vh,13px); min-height:0; }
@@ -613,17 +789,17 @@ def inject_css():
         .du-rodape { flex:none; border-top:1px solid var(--border-color); padding:clamp(6px,.9vh,9px);
                      text-align:center; font-size:10.5px; color:var(--text-2); text-decoration:none;
                      display:block; }
-        .du-rodape:hover { color:var(--text-1); background:rgba(255,255,255,.04); }
+        .du-rodape:hover { color:var(--text-1); background:rgba(var(--rgb-tinta),.04); }
 
         .du-grupos { display:grid; grid-template-columns:repeat(auto-fit,minmax(0,1fr));
                      gap:clamp(6px,.6vw,10px); min-height:0; }
         .du-gp { background:var(--dark-card-2); border:1px solid var(--border-color); border-radius:10px;
                  padding:clamp(7px,1vh,11px) clamp(8px,.6vw,12px);
                  display:flex; flex-direction:column; gap:5px; text-decoration:none; }
-        a.du-gp:hover { border-color:rgba(45,212,191,.45); }
+        a.du-gp:hover { border-color:rgba(var(--rgb-teal),.45); }
         .du-gp .lin { display:flex; justify-content:space-between; align-items:baseline; }
         .du-gp .nm { font-size:10.5px; color:var(--text-2); }
-        .du-tela .du-gp .pc { font-size:10.5px; font-weight:700; color:var(--accent-green); }
+        .du-tela .du-gp .pc { font-size:10.5px; font-weight:700; color:var(--txt-verde); }
         .du-gp .qt { font-size:clamp(15px,2.15vh,21px); font-weight:800; letter-spacing:-.5px;
                      line-height:1; color:var(--text-1); }
         .du-gp .qt em { font-style:normal; font-size:9.5px; color:var(--text-3);
@@ -638,9 +814,9 @@ def inject_css():
         .du-br:hover .nm { color:var(--text-1); }
         .du-br .nm { font-size:10.5px; color:var(--text-2); white-space:nowrap;
                      overflow:hidden; text-overflow:ellipsis; }
-        .du-br .tr { height:6px; border-radius:99px; background:rgba(255,255,255,.06); overflow:hidden; }
+        .du-br .tr { height:6px; border-radius:99px; background:rgba(var(--rgb-tinta),.06); overflow:hidden; }
         .du-br .tr i { display:block; height:100%; border-radius:99px;
-                       background:linear-gradient(90deg,#1fa98f,var(--accent-green)); }
+                       background:linear-gradient(90deg,var(--teal-2),var(--accent-green)); }
         .du-br .fr { font-size:10px; color:var(--text-3); text-align:right; }
         .du-br .pc { font-size:10.5px; font-weight:700; color:var(--text-1); text-align:right; }
 
@@ -672,7 +848,7 @@ def inject_css():
                           border-bottom:1px solid var(--border-color); flex:none; }
         .du-tab .corpo { flex:1; min-height:0; display:grid;
                          grid-auto-rows:minmax(min-content,1fr); overflow-y:auto; }
-        .du-tab .lin { border-bottom:1px solid rgba(255,255,255,.045); font-size:10.5px;
+        .du-tab .lin { border-bottom:1px solid rgba(var(--rgb-tinta),.045); font-size:10.5px;
                        min-height:0; line-height:1.2; }
         .du-tab .lin:last-child { border-bottom:0; }
         .du-tela .du-tab .tp { color:var(--text-3); }
@@ -690,13 +866,13 @@ def inject_css():
         .du-tab .corpo::-webkit-scrollbar { width:5px; }
         .du-barras::-webkit-scrollbar-thumb, .du-leg::-webkit-scrollbar-thumb,
         .du-tab .corpo::-webkit-scrollbar-thumb {
-          background:rgba(255,255,255,.13); border-radius:99px; }
+          background:rgba(var(--rgb-tinta),.13); border-radius:99px; }
 
         .du-pe { display:grid; grid-template-columns:repeat(5,1fr); gap:clamp(8px,.85vw,13px); }
         .du-mini { background:var(--dark-card); border:1px solid var(--border-color); border-radius:13px;
                    padding:clamp(8px,1.15vh,12px) clamp(11px,.85vw,15px);
                    display:flex; align-items:center; gap:11px; text-decoration:none; }
-        a.du-mini:hover { border-color:rgba(91,141,239,.45); }
+        a.du-mini:hover { border-color:rgba(var(--rgb-azul),.45); }
         .du-mini .tile { width:clamp(24px,3vh,31px); height:clamp(24px,3vh,31px); border-radius:9px;
                          flex:none; display:flex; align-items:center; justify-content:center; }
         .du-mini .tile svg { width:14px; height:14px; }
@@ -769,7 +945,7 @@ def inject_css():
         .flt-titulo { font-size:9.5px; letter-spacing:.6px; text-transform:uppercase;
                       color:var(--text-3); font-weight:700; white-space:nowrap; }
         .flt-conta { font-size:10px; color:var(--text-3); white-space:nowrap; }
-        .flt-conta b { color:var(--accent-green); }
+        .flt-conta b { color:var(--txt-verde); }
         section[data-testid="stSidebar"] .stSelectbox label { font-size:9.5px !important;
           color:var(--text-3) !important; margin-bottom:0 !important;
           min-height:0 !important; line-height:1.25 !important; }
@@ -780,6 +956,141 @@ def inject_css():
           font-size:11.5px !important; min-height:30px !important; }
         section[data-testid="stSidebar"] .stButton button { width:100%; font-size:11px !important;
           padding:4px 10px !important; border-radius:8px !important; }
+        /* ------- botao de tema: so o icone, preso no alto a direita -------
+           Fora do fluxo, ao lado do menu do proprio Streamlit. O rotulo existe
+           para leitor de tela, mas nao ocupa espaco. */
+        .st-key-gplan_btn_tema { position: fixed !important; top: 11px; right: 58px;
+          z-index: 999990; width: auto !important; }
+        .st-key-gplan_btn_tema button {
+          width: 38px !important; height: 38px !important; min-height: 0 !important;
+          padding: 0 !important; border-radius: 50% !important;
+          display: inline-flex !important; align-items: center; justify-content: center;
+          background: var(--dark-card) !important;
+          border: 1px solid var(--border-strong) !important;
+          box-shadow: 0 4px 14px var(--sombra-leve); }
+        .st-key-gplan_btn_tema button:hover {
+          background: rgba(var(--rgb-azul),0.16) !important;
+          border-color: rgba(var(--rgb-azul),0.5) !important;
+          transform: translateY(-1px); }
+        .st-key-gplan_btn_tema button p,
+        .st-key-gplan_btn_tema button [data-testid="stMarkdownContainer"] {
+          display: none !important; }
+        .st-key-gplan_btn_tema button [data-testid="stIconMaterial"] {
+          margin: 0 !important; font-size: 20px !important; color: var(--text-1) !important; }
+        @media (max-width: 700px) { .st-key-gplan_btn_tema { right: 50px; top: 8px; } }
+
+        /* ---------------------------------------------------------------
+           Chrome do proprio Streamlit. O config.toml fixa base="dark", entao
+           no tema claro os widgets nasceriam com texto claro sobre fundo
+           claro -- rotulo, valor selecionado, lista do dropdown e placeholder
+           sumiriam. Tudo aqui le os mesmos tokens, e serve aos dois temas.
+           --------------------------------------------------------------- */
+        /* A cor base desce por heranca. Listar span/div/p aqui daria a estas
+           regras especificidade maior que a de qualquer classe do app -- a
+           etiqueta da zona, por exemplo, perdia o proprio --sobre-cor e voltava
+           a ser texto claro em cima de amarelo. */
+        .stApp, .stMarkdown, [data-testid="stMarkdownContainer"] { color: var(--text-1); }
+        label, .stSelectbox label, .stMultiSelect label, .stTextInput label,
+        [data-testid="stWidgetLabel"] p { color: var(--text-2) !important; }
+
+        /* O controle do selectbox nesta versao e um div[role=group] com as cores
+           do config.toml queimadas dentro -- fundo #0a0e1a e texto claro. No
+           tema claro isso vira caixa preta com letra branca no meio da tela
+           branca. Vale para selectbox, multiselect e campo de texto. */
+        [data-testid="stSelectbox"] div[role="group"],
+        [data-testid="stMultiSelect"] div[role="group"],
+        [data-testid="stTextInput"] div[role="group"],
+        [data-baseweb="select"] > div, [data-baseweb="input"],
+        .stTextInput input, .stNumberInput input, .stTextArea textarea {
+          background: var(--dark-card-2) !important; color: var(--text-1) !important;
+          border-color: var(--border-color) !important; }
+        /* tudo que esta dentro do controle -- valor escolhido, pilulas,
+           contador -- e nao so o input: o texto ali nasce com a cor do
+           config.toml e no tema claro fica branco sobre branco */
+        [data-testid="stSelectbox"] div[role="group"] *,
+        [data-testid="stMultiSelect"] div[role="group"] *,
+        [data-testid="stTextInput"] div[role="group"] *,
+        [data-testid="stSelectbox"] input, [data-testid="stMultiSelect"] input,
+        [data-testid="stTextInput"] input, [data-testid="stSelectbox"] button,
+        [data-testid="stMultiSelect"] button, [role="combobox"] {
+          color: var(--text-1) !important; background: transparent !important; }
+        /* O Streamlit pendura um icone de ancora em todo <h1> do markdown, com
+           a cor do config a 60% -- no tema claro some contra o fundo. */
+        [data-testid="stHeaderActionElements"] svg,
+        [data-testid="stHeaderActionElements"] svg * {
+          stroke: var(--text-3) !important; color: var(--text-3) !important; }
+        /* o texto de espera do multiselect fica fora do role=group */
+        [data-testid="stMultiSelect"] div, [data-testid="stMultiSelect"] span {
+          color: var(--text-1); }
+        [data-testid="stMultiSelect"] [class*="placeholder"],
+        [data-testid="stMultiSelect"] div[aria-live] { color: var(--text-3) !important; }
+        /* o icone do menu e uma ligadura de fonte, nao um svg: sem herdar a
+           cor do link ele fica com a do config e some no tema claro */
+        section[data-testid="stSidebar"] nav a span,
+        section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a span {
+          color: inherit !important; }
+        [data-testid="stSelectbox"] svg, [data-testid="stMultiSelect"] svg,
+        [data-testid="stTextInput"] svg, [data-baseweb="select"] svg {
+          fill: var(--text-2) !important; color: var(--text-2) !important; }
+        input::placeholder, textarea::placeholder {
+          color: var(--text-3) !important; opacity: 1 !important; }
+
+        /* a lista de opcoes e portalada para fora do widget: sem regra propria
+           ela nasce com o fundo do config e o texto some */
+        [role="listbox"], [role="dialog"] [role="listbox"], [data-baseweb="menu"],
+        div[data-testid="stSelectboxVirtualDropdown"],
+        div[data-testid="stSelectboxVirtualDropdown"] ul {
+          background: var(--dark-card) !important; color: var(--text-1) !important;
+          border: 1px solid var(--border-color) !important;
+          box-shadow: 0 18px 46px var(--sombra) !important; }
+        [role="option"], [data-baseweb="menu"] li,
+        div[data-testid="stSelectboxVirtualDropdown"] li {
+          color: var(--text-1) !important; background: transparent !important; }
+        [role="option"]:hover, [role="option"][data-focused],
+        [role="option"][aria-selected="true"], [data-baseweb="menu"] li:hover,
+        div[data-testid="stSelectboxVirtualDropdown"] li:hover {
+          background: rgba(var(--rgb-azul),0.16) !important; color: var(--text-1) !important; }
+
+        /* O body guarda as cores do config.toml, e e nele que os portais
+           nascem: sem isto o menu suspenso abre escuro no tema claro. */
+        body { background: var(--dark-bg) !important; color: var(--text-1) !important; }
+        /* O botao Deploy e afordancia do Streamlit Cloud e nao serve aqui --
+           sem tira-lo, o botao de tema cai em cima dele no canto. */
+        [data-testid="stAppDeployButton"] { display: none !important; }
+        /* Icones do proprio Streamlit -- recolher a lateral, menu do canto,
+           setas de expander. Nascem com a cor do config.toml: quase brancos, o
+           que no tema claro os deixa invisiveis contra o fundo. */
+        [data-testid="stHeader"] svg, [data-testid="stToolbar"] svg,
+        [data-testid="stSidebarCollapseButton"] svg,
+        [data-testid="stExpandSidebarButton"] svg,
+        [data-testid="stSidebarCollapsedControl"] svg,
+        [data-testid="stMainMenu"] svg, [data-testid="stExpander"] svg {
+          fill: var(--text-2) !important; color: var(--text-2) !important; }
+        [data-testid="stHeader"] { background: transparent !important; }
+
+        .stButton button, [data-testid="stBaseButton-secondary"] {
+          background: var(--dark-card-2) !important; color: var(--text-1) !important;
+          border: 1px solid var(--border-color) !important; }
+        .stButton button:hover, [data-testid="stBaseButton-secondary"]:hover {
+          background: rgba(var(--rgb-azul),0.14) !important;
+          border-color: rgba(var(--rgb-azul),0.45) !important;
+          color: var(--text-1) !important; }
+        .stButton button:focus-visible, a:focus-visible, button:focus-visible {
+          outline: 2px solid var(--accent-blue) !important; outline-offset: 2px; }
+        .stButton button svg, [data-testid="stBaseButton-secondary"] svg {
+          fill: currentColor !important; }
+
+        /* pilulas de multiselect e chips */
+        [data-baseweb="tag"] { background: rgba(var(--rgb-azul),0.18) !important;
+          color: var(--text-1) !important; border-color: rgba(var(--rgb-azul),0.35) !important; }
+        [data-baseweb="tag"] svg { fill: var(--text-1) !important; }
+
+        /* barra de rolagem: a padrao do Chrome no claro fica quase invisivel */
+        * { scrollbar-color: var(--neutro) transparent; }
+        ::-webkit-scrollbar { width: 10px; height: 10px; }
+        ::-webkit-scrollbar-thumb { background: var(--neutro); border-radius: 8px;
+          border: 2px solid transparent; background-clip: padding-box; }
+        ::-webkit-scrollbar-track { background: transparent; }
 
 
         /* =========================================================
@@ -794,9 +1105,9 @@ def inject_css():
            fica grudado no topo para nao se perder a coluna no meio da rolagem. */
         .fx-rolagem { max-height: min(52vh, 620px); overflow-y: auto; }
         .fx-rolagem table.gtbl thead th { position: sticky; top: 0; z-index: 2;
-          background: #131b2d; }
+          background: var(--dark-card-2); }
         .fx-rolagem::-webkit-scrollbar { width: 8px; }
-        .fx-rolagem::-webkit-scrollbar-thumb { background: rgba(255,255,255,.13);
+        .fx-rolagem::-webkit-scrollbar-thumb { background: rgba(var(--rgb-tinta),.13);
           border-radius: 99px; }
         .fx-rolagem::-webkit-scrollbar-track { background: transparent; }
         /* Icone: <span> vazio pintado por mascara. O desenho vem de fx_css_icones. */
@@ -809,12 +1120,13 @@ def inject_css():
         .fx-acao .ic .fxi, .fx-com .cab .ic .fxi, .fx-cab .marca .fxi
           { width:100%; height:100%; }
         .fx-folha { width:12px; height:12px; vertical-align:-1px; margin-right:7px;
-                    color:#7f93b5; }
+                    color:var(--text-2); }
 
         /* Donut sem SVG: anel de conic-gradient com furo de mascara. */
+        .fx-rosca { color:var(--accent-teal); }
         .fx-rosca .anel { position:absolute; inset:0; border-radius:50%;
-          background:conic-gradient(var(--cor,#2dd4bf) calc(var(--p,0) * 1%),
-                                    rgba(255,255,255,.07) 0);
+          background:conic-gradient(currentColor calc(var(--p,0) * 1%),
+                                    rgba(var(--rgb-tinta),.07) 0);
           /* as paradas de cor de um gradiente radial sao relativas a linha do
              gradiente, nao a caixa: com calc(50% - 13px) o furo saia com 15px
              em vez de 43 e o donut virava uma pizza cheia. Em fracao do raio
@@ -822,29 +1134,29 @@ def inject_css():
           -webkit-mask:radial-gradient(farthest-side, #0000 75%, #000 76%);
           mask:radial-gradient(farthest-side, #0000 75%, #000 76%); }
         /* Cores dos blocos como classe -- ver FX_COR. */
-        .fxc-azul  { color:#5b8def; } .fx-tile .ic.fxc-azul  { background:rgba(91,141,239,.11); }
-        .fxc-teal  { color:#2dd4bf; } .fx-tile .ic.fxc-teal  { background:rgba(45,212,191,.11); }
-        .fxc-roxo  { color:#9d6bff; } .fx-tile .ic.fxc-roxo  { background:rgba(157,107,255,.11); }
-        .fxc-ambar { color:#fbbf24; } .fx-tile .ic.fxc-ambar { background:rgba(251,191,36,.11); }
-        .fxc-rubi  { color:#f87171; } .fx-tile .ic.fxc-rubi  { background:rgba(248,113,113,.11); }
-        .fxc-mudo  { color:#7c8aa8; } .fx-tile .ic.fxc-mudo  { background:rgba(124,138,168,.13); }
-        .fxc-verde { color:#34d399; } .fx-tile .ic.fxc-verde { background:rgba(52,211,153,.11); }
-        .fxc-cinza { color:#3a4a68; }
-        .fx-trilho.fxc-azul i  { background:#5b8def; }
-        .fx-trilho.fxc-teal i  { background:#2dd4bf; }
-        .fx-trilho.fxc-roxo i  { background:#9d6bff; }
-        .fx-trilho.fxc-ambar i { background:#fbbf24; }
-        .fx-trilho.fxc-rubi i  { background:#f87171; }
-        .fx-trilho.fxc-mudo i  { background:#7c8aa8; }
-        .fx-trilho.fxc-verde i { background:#34d399; }
-        .fx-lg i.fxc-azul, .du-lg i.fxc-azul  { background:#5b8def; }
-        .fx-lg i.fxc-teal, .du-lg i.fxc-teal  { background:#2dd4bf; }
-        .fx-lg i.fxc-roxo, .du-lg i.fxc-roxo  { background:#9d6bff; }
-        .fx-lg i.fxc-ambar, .du-lg i.fxc-ambar { background:#fbbf24; }
-        .fx-lg i.fxc-rubi, .du-lg i.fxc-rubi  { background:#f87171; }
-        .fx-lg i.fxc-mudo, .du-lg i.fxc-mudo  { background:#7c8aa8; }
-        .fx-lg i.fxc-verde, .du-lg i.fxc-verde { background:#34d399; }
-        .fx-lg i.fxc-cinza, .du-lg i.fxc-cinza { background:#3a4a68; }
+        .fxc-azul  { color:var(--accent-blue); } .fx-tile .ic.fxc-azul  { background:rgba(var(--rgb-azul),.11); }
+        .fxc-teal  { color:var(--accent-teal); } .fx-tile .ic.fxc-teal  { background:rgba(var(--rgb-teal),.11); }
+        .fxc-roxo  { color:var(--accent-purple); } .fx-tile .ic.fxc-roxo  { background:rgba(var(--rgb-roxo),.11); }
+        .fxc-ambar { color:var(--accent-amber); } .fx-tile .ic.fxc-ambar { background:rgba(var(--rgb-ambar),.11); }
+        .fxc-rubi  { color:var(--accent-red); } .fx-tile .ic.fxc-rubi  { background:rgba(var(--rgb-vermelho),.11); }
+        .fxc-mudo  { color:var(--text-2); } .fx-tile .ic.fxc-mudo  { background:rgba(var(--rgb-tinta),.13); }
+        .fxc-verde { color:var(--accent-green); } .fx-tile .ic.fxc-verde { background:rgba(var(--rgb-verde),.11); }
+        .fxc-cinza { color:var(--neutro); }
+        .fx-trilho.fxc-azul i  { background:var(--accent-blue); }
+        .fx-trilho.fxc-teal i  { background:var(--accent-teal); }
+        .fx-trilho.fxc-roxo i  { background:var(--accent-purple); }
+        .fx-trilho.fxc-ambar i { background:var(--accent-amber); }
+        .fx-trilho.fxc-rubi i  { background:var(--accent-red); }
+        .fx-trilho.fxc-mudo i  { background:var(--text-2); }
+        .fx-trilho.fxc-verde i { background:var(--accent-green); }
+        .fx-lg i.fxc-azul, .du-lg i.fxc-azul  { background:var(--accent-blue); }
+        .fx-lg i.fxc-teal, .du-lg i.fxc-teal  { background:var(--accent-teal); }
+        .fx-lg i.fxc-roxo, .du-lg i.fxc-roxo  { background:var(--accent-purple); }
+        .fx-lg i.fxc-ambar, .du-lg i.fxc-ambar { background:var(--accent-amber); }
+        .fx-lg i.fxc-rubi, .du-lg i.fxc-rubi  { background:var(--accent-red); }
+        .fx-lg i.fxc-mudo, .du-lg i.fxc-mudo  { background:var(--text-2); }
+        .fx-lg i.fxc-verde, .du-lg i.fxc-verde { background:var(--accent-green); }
+        .fx-lg i.fxc-cinza, .du-lg i.fxc-cinza { background:var(--neutro); }
         .fx { display:flex; flex-direction:column; gap:14px; }
         .fx svg { width:100%; height:100%; }
 
@@ -856,8 +1168,8 @@ def inject_css():
         .fx-trilha a { color:var(--text-2) !important; text-decoration:none !important;
                        border-radius:5px; padding:1px 5px; margin:0 -2px; }
         .fx-trilha a:hover { color:var(--text-1) !important;
-                             background:rgba(255,255,255,.06); }
-        .fx-trilha .sep { color:#38455f; }
+                             background:rgba(var(--rgb-tinta),.06); }
+        .fx-trilha .sep { color:var(--text-3); }
         .fx-trilha .aqui { color:var(--text-1); font-weight:650; }
 
         /* tiles do topo */
@@ -866,7 +1178,7 @@ def inject_css():
         .fx-tile { background:var(--dark-card-2); border:1px solid var(--border-color);
                    border-radius:12px; padding:11px 12px; display:flex; align-items:center;
                    gap:10px; min-width:0; text-decoration:none !important; }
-        a.fx-tile:hover { border-color:rgba(91,141,239,.5); }
+        a.fx-tile:hover { border-color:rgba(var(--rgb-azul),.5); }
         .fx-tile .ic { width:31px; height:31px; flex:none; border-radius:9px; padding:7px;
                        display:grid; place-items:center; }
         .fx-tile .cp { min-width:0; display:flex; flex-direction:column; gap:2px; }
@@ -903,7 +1215,7 @@ def inject_css():
         .fx-kpi .val { font-size:25px; font-weight:800; letter-spacing:-.9px; line-height:1;
                        color:var(--text-1); }
         .fx-kpi .sub { font-size:10px; color:var(--text-3); min-height:24px; }
-        .fx-trilho { height:3px; border-radius:99px; background:rgba(255,255,255,.07); overflow:hidden; }
+        .fx-trilho { height:3px; border-radius:99px; background:rgba(var(--rgb-tinta),.07); overflow:hidden; }
         .fx-trilho i { display:block; height:100%; border-radius:99px; }
 
         /* dados em par rotulo/valor */
@@ -935,7 +1247,7 @@ def inject_css():
 
         /* linhas de info */
         .fx-linha { display:flex; align-items:center; justify-content:space-between; gap:10px;
-                    font-size:12px; padding:7px 0; border-bottom:1px solid rgba(255,255,255,.045); }
+                    font-size:12px; padding:7px 0; border-bottom:1px solid rgba(var(--rgb-tinta),.045); }
         .fx-linha:last-child { border-bottom:0; }
         .fx-linha > span:first-child { color:var(--text-2); }
         .fx-linha b { font-weight:700; font-size:12.5px; color:var(--text-1); }
@@ -948,33 +1260,33 @@ def inject_css():
                    background:var(--dark-card); border:1px solid var(--border-color);
                    border-radius:9px; padding:9px 11px; }
         .fx-acao .ic { width:15px; height:15px; flex:none; color:var(--text-3); }
-        .fx-acao:hover { border-color:rgba(91,141,239,.5); }
+        .fx-acao:hover { border-color:rgba(var(--rgb-azul),.5); }
 
 
         /* revisoes do relatorio */
-        .fx-rev-atual td { background:rgba(251,191,36,.05); }
+        .fx-rev-atual td { background:rgba(var(--rgb-ambar),.05); }
         .fx-atual { font-size:8.5px; letter-spacing:.6px; text-transform:uppercase;
-                    color:#fbbf24; background:rgba(251,191,36,.14);
-                    border:1px solid rgba(251,191,36,.3); border-radius:5px;
+                    color:var(--txt-ambar); background:rgba(var(--rgb-ambar),.14);
+                    border:1px solid rgba(var(--rgb-ambar),.3); border-radius:5px;
                     padding:1px 5px; margin-left:6px; font-weight:700; vertical-align:1px; }
         .fx-com { border-radius:10px; padding:10px 12px; border:1px solid; margin:0 0 4px; }
-        .fx-com.rec { background:rgba(248,113,113,.075); border-color:rgba(248,113,113,.3); }
-        .fx-com.obs { background:rgba(91,141,239,.06); border-color:rgba(91,141,239,.26); }
+        .fx-com.rec { background:rgba(var(--rgb-vermelho),.075); border-color:rgba(var(--rgb-vermelho),.3); }
+        .fx-com.obs { background:rgba(var(--rgb-azul),.06); border-color:rgba(var(--rgb-azul),.26); }
         .fx-com .cab { display:flex; align-items:center; gap:7px; font-size:10px; letter-spacing:.6px;
                        text-transform:uppercase; font-weight:700; margin-bottom:6px; }
-        .fx-com.rec .cab { color:#ff8f9c; }
-        .fx-com.obs .cab { color:#8fb4ff; }
+        .fx-com.rec .cab { color:var(--txt-vermelho); }
+        .fx-com.obs .cab { color:var(--txt-azul); }
         .fx-com .cab .ic { width:13px; height:13px; flex:none; }
         .fx-com p { white-space:pre-wrap; word-break:break-word; font-size:11.5px;
                     line-height:1.55; margin:0; }
-        .fx-com.rec p { color:#ffc4cb; }
-        .fx-com.obs p { color:#c3d6ff; }
+        .fx-com.rec p { color:var(--txt-vermelho); }
+        .fx-com.obs p { color:var(--txt-azul); }
         .gtbl td.fx-com-cel { padding:0 14px 10px !important; }
 
         /* cabecalho da ficha fora do modal (aba Pesquisa tag) */
         .fx-cab { display:flex; align-items:center; gap:12px; }
         .fx-cab .marca { width:40px; height:40px; flex:none; border-radius:12px; padding:10px;
-                         display:grid; place-items:center; background:rgba(91,141,239,.15);
+                         display:grid; place-items:center; background:rgba(var(--rgb-azul),.15);
                          color:var(--accent-blue); }
         .fx-cab h2 { font-size:21px; font-weight:800; letter-spacing:-.5px; margin:0;
                      color:var(--text-1); line-height:1.15; }
@@ -1008,7 +1320,7 @@ def inject_css():
         .kpi-label { font-size: 11.5px; color: var(--text-2); font-weight:600; letter-spacing:0.2px; }
         .kpi-value { font-size: 30px; font-weight: 800; color: var(--text-1); letter-spacing:-0.8px; margin-bottom:14px; }
         .kpi-progress-row { display:flex; align-items:center; gap:10px; }
-        .kpi-track { flex:1; height:5px; background: rgba(255,255,255,0.06); border-radius:3px; overflow:hidden; }
+        .kpi-track { flex:1; height:5px; background: rgba(var(--rgb-tinta),0.06); border-radius:3px; overflow:hidden; }
         .kpi-fill { height:100%; border-radius:3px; }
         .kpi-pct { font-size:12px; font-weight:700; color: var(--text-1); min-width:38px; text-align:right; }
 
@@ -1026,9 +1338,9 @@ def inject_css():
         }
         /* nowrap para cada registro ocupar uma linha so; quem estoura a largura
            rola no container .gtbl-scroll, em vez de quebrar e inchar a altura. */
-        .gtbl td { padding:12px 14px; border-bottom:1px solid rgba(255,255,255,0.04) !important; font-size:13px; color:var(--text-1); white-space:nowrap; }
+        .gtbl td { padding:12px 14px; border-bottom:1px solid rgba(var(--rgb-tinta),0.04) !important; font-size:13px; color:var(--text-1); white-space:nowrap; }
         .gtbl tbody tr:last-child td { border-bottom:none !important; }
-        .gtbl tbody tr:hover td { background:rgba(255,255,255,0.025) !important; }
+        .gtbl tbody tr:hover td { background:rgba(var(--rgb-tinta),0.025) !important; }
         /* Centralizado (e nao a direita) para o numero ficar sob o proprio
            cabecalho, em vez de encostar na coluna seguinte.
            Precisa de "th.gtbl-num"/"td.gtbl-num": so ".gtbl-num" perde em
@@ -1045,21 +1357,28 @@ def inject_css():
         .gtbl-strong { font-weight:600; }
         .gtbl-scroll { overflow-x:auto; }
         .gtbl-tag {
-          display:inline-block; font-size:12px; font-weight:600; color:#a9c5ff; white-space:nowrap;
-          background:rgba(91,141,239,0.14); border:1px solid rgba(91,141,239,0.22);
+          display:inline-block; font-size:12px; font-weight:600; color:var(--txt-azul); white-space:nowrap;
+          background:rgba(var(--rgb-azul),0.14); border:1px solid rgba(var(--rgb-azul),0.22);
           padding:3px 9px; border-radius:6px; letter-spacing:0.2px;
         }
-        a.gtbl-link, a.gtbl-link:hover, a.gtbl-link:visited { text-decoration:none !important; color:#a9c5ff !important; }
-        a.gtbl-link:hover { background:rgba(91,141,239,0.26) !important; border-color:rgba(91,141,239,0.45) !important; }
+        a.gtbl-link, a.gtbl-link:hover, a.gtbl-link:visited { text-decoration:none !important; color:var(--txt-azul) !important; }
+        a.gtbl-link:hover { background:rgba(var(--rgb-azul),0.26) !important; border-color:rgba(var(--rgb-azul),0.45) !important; }
         .gtbl-badge {
           display:inline-block; min-width:26px; text-align:center; font-size:11.5px; font-weight:600;
           padding:3px 9px; border-radius:6px; font-variant-numeric:tabular-nums; white-space:nowrap;
         }
-        .gtbl-badge.crit { color:#fca5a5; background:rgba(248,113,113,0.16); border:1px solid rgba(248,113,113,0.28); }
-        .gtbl-badge.warn { color:#fcd34d; background:rgba(251,191,36,0.14); border:1px solid rgba(251,191,36,0.26); }
-        .gtbl-badge.ok   { color:#6ee7d0; background:rgba(45,212,191,0.13); border:1px solid rgba(45,212,191,0.24); }
+        .gtbl-badge.crit { color:var(--txt-vermelho); background:rgba(var(--rgb-vermelho),0.16); border:1px solid rgba(var(--rgb-vermelho),0.28); }
+        .gtbl-badge.warn { color:var(--txt-ambar); background:rgba(var(--rgb-ambar),0.14); border:1px solid rgba(var(--rgb-ambar),0.26); }
+        .gtbl-badge.ok   { color:var(--txt-teal); background:rgba(var(--rgb-teal),0.13); border:1px solid rgba(var(--rgb-teal),0.24); }
         /* etapa do caminho, nao alerta: azul, a mesma familia da pill de TAG */
-        .gtbl-badge.andamento { color:#a9c5ff; background:rgba(91,141,239,0.14); border:1px solid rgba(91,141,239,0.26); }
+        .gtbl-badge.andamento { color:var(--txt-azul); background:rgba(var(--rgb-azul),0.14); border:1px solid rgba(var(--rgb-azul),0.26); }
+        .gtbl-badge.roxo { color:var(--txt-roxo); background:rgba(var(--rgb-roxo),0.14); border:1px solid rgba(var(--rgb-roxo),0.26); }
+        .gtbl-badge.mudo { color:var(--text-2); background:rgba(var(--rgb-tinta),0.07); border:1px solid rgba(var(--rgb-tinta),0.13); }
+        .gtbl-badge.cinza { color:var(--text-3); background:rgba(var(--rgb-tinta),0.05); border:1px solid rgba(var(--rgb-tinta),0.10); }
+        .gtbl-pag { text-align:center; color:var(--text-2); font-size:12.5px; padding-top:9px; }
+        /* as fatias do donut do SIGEM: a cor vem da classe, o traco a segue */
+        .du-rosca svg .fatia { stroke:currentColor; }
+        .du-rosca svg .trilho { stroke:rgba(var(--rgb-tinta),.07); }
         .gtbl-empty { padding:34px 4px; text-align:center; color:var(--text-3); font-size:13px; }
         /* Recusados ha mais tempo: linha inteira clicavel, leva para a aba
            Relatorios ja buscando a TAG. */
@@ -1078,8 +1397,8 @@ def inject_css():
                   text-transform:uppercase; color:var(--text-3); }
         .fx-val { font-size:19px; font-weight:800; color:var(--text-1);
                   letter-spacing:-0.4px; font-variant-numeric:tabular-nums; }
-        .fx-val.ruim { color:#fca5a5; }
-        .fx-val.bom { color:#6ee7d0; }
+        .fx-val.ruim { color:var(--txt-vermelho); }
+        .fx-val.bom { color:var(--txt-teal); }
         @media (max-width:900px) { .fx-faixa { grid-auto-flow:row; grid-auto-columns:auto;
                                                grid-template-columns:repeat(2,1fr); } }
         .rec-resumo { font-size:12px; color:var(--text-3); margin-bottom:10px; }
@@ -1090,41 +1409,41 @@ def inject_css():
           text-decoration:none !important; transition:border-color 120ms, background 120ms;
         }
         a.rec-linha:last-child { margin-bottom:0; }
-        a.rec-linha:hover { background:rgba(255,255,255,0.04);
-                            border-color:rgba(248,113,113,0.4); }
+        a.rec-linha:hover { background:rgba(var(--rgb-tinta),0.04);
+                            border-color:rgba(var(--rgb-vermelho),0.4); }
         .rec-tag { font-size:12.5px; font-weight:600; color:var(--text-1); }
         .rec-rel { font-size:11px; color:var(--text-3); }
-        .rec-dias { font-size:11.5px; font-weight:600; color:#fca5a5;
+        .rec-dias { font-size:11.5px; font-weight:600; color:var(--txt-vermelho);
                     font-variant-numeric:tabular-nums; white-space:nowrap; }
         /* O motivo da recusa e o que precisa ser tratado: vermelho e legivel,
            nao pill -- o texto da fiscalizacao pode ser longo.
            Precisa de ".gtbl td.rel-com": so ".rel-com" perde em especificidade
            para ".gtbl td { color:var(--text-1) }" e o texto saia branco. */
-        .gtbl td.rel-com { color:#fca5a5; font-size:12.5px; white-space:pre-wrap;
+        .gtbl td.rel-com { color:var(--txt-vermelho); font-size:12.5px; white-space:pre-wrap;
                            max-width:520px; line-height:1.45; }
         .rel-titulo { font-size:15px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
                       letter-spacing:-0.2px; word-break:break-all; }
         .rel-sit { flex-shrink:0; align-self:center; }
         a.rel-sigem {
           display:inline-block; font-size:11.5px; font-weight:600; white-space:nowrap;
-          color:#a9c5ff !important; background:rgba(91,141,239,0.14);
-          border:1px solid rgba(91,141,239,0.26); border-radius:6px; padding:3px 10px;
+          color:var(--txt-azul) !important; background:rgba(var(--rgb-azul),0.14);
+          border:1px solid rgba(var(--rgb-azul),0.26); border-radius:6px; padding:3px 10px;
           text-decoration:none !important; transition:background 120ms;
         }
-        a.rel-sigem:hover { background:rgba(91,141,239,0.26); border-color:rgba(91,141,239,0.45); }
+        a.rel-sigem:hover { background:rgba(var(--rgb-azul),0.26); border-color:rgba(var(--rgb-azul),0.45); }
         /* Abre a ficha do relatorio. Fica em coluna propria porque o endereco
            do documento e longo demais para virar area de clique. */
         a.btn-detalhes {
           display:inline-block; font-size:11.5px; font-weight:600; white-space:nowrap;
-          color:#c9d4ea !important; background:rgba(255,255,255,0.06);
+          color:var(--txt-azul) !important; background:rgba(var(--rgb-tinta),0.06);
           border:1px solid var(--border-strong); border-radius:7px; padding:4px 12px;
           text-decoration:none !important; transition:background 120ms, border-color 120ms;
         }
-        a.btn-detalhes:hover { background:rgba(91,141,239,0.2);
-                               border-color:rgba(91,141,239,0.45); color:#a9c5ff !important; }
+        a.btn-detalhes:hover { background:rgba(var(--rgb-azul),0.2);
+                               border-color:rgba(var(--rgb-azul),0.45); color:var(--txt-azul) !important; }
         .prg-trilha { font-size:12.5px; color:var(--text-2); margin-bottom:18px; }
         .prg-sep { color:var(--text-3); margin:0 2px; }
-        a.prg-link { color:#a9c5ff !important; text-decoration:none !important; font-weight:600; }
+        a.prg-link { color:var(--txt-azul) !important; text-decoration:none !important; font-weight:600; }
         a.prg-link:hover { text-decoration:underline !important; }
         .prg-nome { color:var(--text-2); }
         .prg-tot {
@@ -1146,7 +1465,7 @@ def inject_css():
                    color:var(--text-3); font-weight:700; margin-bottom:5px; }
         .fn-titulo { font-size:22px; font-weight:800; color:var(--text-1); letter-spacing:-0.5px; }
         .fn-avanco { display:flex; align-items:center; gap:12px; }
-        .fn-track { width:160px; height:9px; background:rgba(255,255,255,0.07);
+        .fn-track { width:160px; height:9px; background:rgba(var(--rgb-tinta),0.07);
                     border-radius:5px; overflow:hidden; }
         .fn-fill { height:100%; border-radius:5px; }
         .fn-fill.ok { background:var(--accent-teal); }
@@ -1165,10 +1484,10 @@ def inject_css():
         a.prg-atalho {
           display:inline-block; margin-bottom:16px; padding:10px 18px;
           font-size:12.5px; font-weight:600; text-decoration:none !important;
-          color:#a9c5ff !important; background:rgba(91,141,239,0.12);
-          border:1px solid rgba(91,141,239,0.28); border-radius:9px; transition:background 120ms;
+          color:var(--txt-azul) !important; background:rgba(var(--rgb-azul),0.12);
+          border:1px solid rgba(var(--rgb-azul),0.28); border-radius:9px; transition:background 120ms;
         }
-        a.prg-atalho:hover { background:rgba(91,141,239,0.22); }
+        a.prg-atalho:hover { background:rgba(var(--rgb-azul),0.22); }
 
         /* arvore SOP > SSOP > TAGs em <details>: expande sem ida ao servidor */
         .arvore { display:flex; flex-direction:column; gap:8px; }
@@ -1185,8 +1504,8 @@ def inject_css():
           cursor:pointer; list-style:none; user-select:none; transition:background 120ms;
         }
         .arv-no > summary::-webkit-details-marker { display:none; }
-        .arv-no > summary:hover { background:rgba(255,255,255,0.035); }
-        .arv-no[open] > summary { background:rgba(255,255,255,0.03);
+        .arv-no > summary:hover { background:rgba(var(--rgb-tinta),0.035); }
+        .arv-no[open] > summary { background:rgba(var(--rgb-tinta),0.03);
                                   border-bottom:1px solid var(--border-color); }
         .arv-seta {
           width:17px; height:17px; flex-shrink:0; position:relative;
@@ -1206,7 +1525,7 @@ def inject_css():
            sem sublinhado: so muda de cor ao passar o mouse. */
         a.arv-ficha { text-decoration:none !important; color:var(--text-1) !important;
                       transition:color 120ms; }
-        a.arv-ficha:hover { color:#a9c5ff !important; }
+        a.arv-ficha:hover { color:var(--txt-azul) !important; }
         .arv-vazio { width:17px; }
         .arv-num { font-size:11.5px; color:var(--text-3); white-space:nowrap; font-variant-numeric:tabular-nums; }
         .arv-sub { color:var(--text-2); font-weight:600; }
@@ -1214,7 +1533,7 @@ def inject_css():
         /* a barra ocupa a coluna inteira; a porcentagem tem largura propria
            para os digitos ficarem alinhados de uma linha para outra */
         .arv-avanco { display:grid; grid-template-columns:1fr 52px; align-items:center; gap:11px; }
-        .arv-track { height:8px; background:rgba(255,255,255,0.07); border-radius:5px; overflow:hidden; }
+        .arv-track { height:8px; background:rgba(var(--rgb-tinta),0.07); border-radius:5px; overflow:hidden; }
         .arv-fill { display:block; height:100%; border-radius:4px; }
         .arv-fill.ok { background:var(--accent-teal); }
         .arv-fill.warn { background:var(--accent-amber); }
@@ -1249,7 +1568,7 @@ def inject_css():
         .gpl-cheia { background:var(--dark-bg); }
         /* desfoca em vez de tapar: a tela anterior continua ali atras, entao a
            troca parece continuacao e nao um recomeco do zero */
-        .gpl-vidro { background:rgba(10,14,26,0.72); backdrop-filter:blur(7px);
+        .gpl-vidro { background:var(--overlay); backdrop-filter:blur(7px);
                      -webkit-backdrop-filter:blur(7px); }
         @keyframes gpl-entra { from { opacity:0; } to { opacity:1; } }
         /* Sai dissolvendo. Remover o elemento o apagaria num quadro so, que e
@@ -1266,9 +1585,9 @@ def inject_css():
         .gpl-nome { font-size:18px; font-weight:800; color:var(--text-1); letter-spacing:-0.4px; }
         .gpl-txt { font-size:12.5px; color:var(--text-2); min-height:16px; }
         .gpl-track { width:250px; height:6px; border-radius:4px; overflow:hidden;
-                     background:rgba(255,255,255,0.08); }
+                     background:rgba(var(--rgb-tinta),0.08); }
         .gpl-fill { height:100%; border-radius:4px; transition:width 260ms ease;
-                    background:linear-gradient(90deg,#5b8def,#2dd4bf); }
+                    background:linear-gradient(90deg,var(--accent-blue),var(--accent-teal)); }
         /* sem etapa conhecida a barra corre de ponta a ponta, sem fingir % */
         .gpl-indet { width:40%; animation:gpl-corre 1.15s ease-in-out infinite; }
         @keyframes gpl-corre { 0% { margin-left:-40%; } 100% { margin-left:100%; } }
@@ -1297,15 +1616,15 @@ def inject_css():
                    overflow:hidden; text-overflow:ellipsis; }
         .gr-pct { font-size:12px; font-weight:800; color:var(--accent-teal);
                   font-variant-numeric:tabular-nums; flex-shrink:0; }
-        .gr-track { height:6px; background:rgba(255,255,255,0.05); border-radius:4px; overflow:hidden; }
+        .gr-track { height:6px; background:rgba(var(--rgb-tinta),0.05); border-radius:4px; overflow:hidden; }
         .gr-fill { height:100%; border-radius:4px;
-                   background:linear-gradient(90deg, var(--accent-teal), #22c1b0); transition:width 400ms ease; }
+                   background:linear-gradient(90deg, var(--accent-teal), var(--teal-2)); transition:width 400ms ease; }
         .gr-sub { font-size:9.5px; color:var(--text-3); margin-top:4px; white-space:nowrap;
                   overflow:hidden; text-overflow:ellipsis; }
 
         /* barra de avanco dentro da celula da tabela */
         .cel-avanco { display:flex; align-items:center; gap:9px; justify-content:flex-end; }
-        .cel-track { width:62px; height:6px; background:rgba(255,255,255,0.06); border-radius:4px; overflow:hidden; flex-shrink:0; }
+        .cel-track { width:62px; height:6px; background:rgba(var(--rgb-tinta),0.06); border-radius:4px; overflow:hidden; flex-shrink:0; }
         .cel-fill { height:100%; border-radius:4px; }
         .cel-fill.ok { background:var(--accent-teal); }
         .cel-fill.warn { background:var(--accent-amber); }
@@ -1331,7 +1650,7 @@ def inject_css():
         .sg-leg-row {
           display:flex; align-items:center; gap:10px; padding:7px 8px;
           margin: 0 -8px; border-radius:7px;
-          border-bottom:1px solid rgba(255,255,255,0.04);
+          border-bottom:1px solid rgba(var(--rgb-tinta),0.04);
         }
         .sg-leg-row:last-child { border-bottom:none; }
         .sg-leg-dot { width:9px; height:9px; border-radius:3px; flex-shrink:0; }
@@ -1343,7 +1662,7 @@ def inject_css():
            estilo de link que o Streamlit aplica. */
         a.rep-row, a.sg-leg-row { text-decoration: none !important; cursor: pointer; }
         a.rep-row { display: block; border-radius: 8px; padding: 6px 8px; margin: 0 -8px 8px; transition: background 120ms; }
-        a.rep-row:hover { background: rgba(255,255,255,0.035); }
+        a.rep-row:hover { background: rgba(var(--rgb-tinta),0.035); }
         a.rep-row:last-of-type { margin-bottom: 0; }
         /* cor explicita: "inherit" herdaria o azul de link do Streamlit */
         a.rep-row .rep-name { color: var(--text-1) !important; }
@@ -1354,7 +1673,7 @@ def inject_css():
         .sg-seg { transition: opacity 120ms; }
         .sg-donut:hover .sg-seg { opacity: 0.45; }
         .sg-donut .sg-seg:hover { opacity: 1; }
-        a.sg-leg-row:hover { background: rgba(255,255,255,0.035); }
+        a.sg-leg-row:hover { background: rgba(var(--rgb-tinta),0.035); }
         a.sg-leg-row:hover .sg-leg-name { color: var(--text-1); }
 
         .rep-row { margin-bottom: 14px; }
@@ -1362,10 +1681,10 @@ def inject_css():
         .rep-label { display:flex; justify-content:space-between; margin-bottom:6px; font-size:12.5px; }
         .rep-name { font-weight:600; color: var(--text-1); }
         .rep-stat { color: var(--text-3); font-variant-numeric: tabular-nums; }
-        .rep-track { height:7px; background: rgba(255,255,255,0.05); border-radius:4px; overflow:hidden; display:flex; }
-        .rep-done { background: linear-gradient(90deg, var(--accent-teal), #22c1b0); height:100%; }
-        .rep-pending { background: rgba(255,255,255,0.05); height:100%; }
-        .doc-tag { font-size:9px; font-weight:600; color: var(--text-3); background: rgba(255,255,255,0.06); padding:1px 6px; border-radius:4px; text-transform:uppercase; letter-spacing:0.3px; margin-left:6px; }
+        .rep-track { height:7px; background: rgba(var(--rgb-tinta),0.05); border-radius:4px; overflow:hidden; display:flex; }
+        .rep-done { background: linear-gradient(90deg, var(--accent-teal), var(--teal-2)); height:100%; }
+        .rep-pending { background: rgba(var(--rgb-tinta),0.05); height:100%; }
+        .doc-tag { font-size:9px; font-weight:600; color: var(--text-3); background: rgba(var(--rgb-tinta),0.06); padding:1px 6px; border-radius:4px; text-transform:uppercase; letter-spacing:0.3px; margin-left:6px; }
 
         .group-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:16px; }
         .group-card-v2 { background: var(--dark-card-2); border: 1px solid var(--border-color); border-radius: 12px; padding: 18px; }
@@ -1374,8 +1693,8 @@ def inject_css():
         .group-card-pct { font-size:13px; font-weight:800; color: var(--accent-teal); }
         .group-card-value { font-size:24px; font-weight:800; color: var(--text-1); letter-spacing:-0.4px; margin-bottom:12px; }
         .group-card-unit { font-size:11px; font-weight:500; color: var(--text-3); }
-        .group-card-track { height:6px; background: rgba(255,255,255,0.06); border-radius:3px; overflow:hidden; margin-bottom:12px; }
-        .group-card-fill { height:100%; border-radius:3px; background: linear-gradient(90deg, var(--accent-teal), #22c1b0); }
+        .group-card-track { height:6px; background: rgba(var(--rgb-tinta),0.06); border-radius:3px; overflow:hidden; margin-bottom:12px; }
+        .group-card-fill { height:100%; border-radius:3px; background: linear-gradient(90deg, var(--accent-teal), var(--teal-2)); }
         .group-card-nums { display:flex; justify-content:space-between; font-size:11px; color: var(--text-3); }
 
         .tag-detail-card { background: var(--dark-card); border: 1px solid var(--border-strong); border-radius: 16px; padding: 26px 28px; }
@@ -1408,13 +1727,13 @@ def inject_css():
         .fmodal:target,
         .fmodal-on { display:flex; align-items:center; justify-content:center; padding:32px 20px; }
         .fmodal-bg {
-          position:absolute; inset:0; background:rgba(6,9,18,0.68);
+          position:absolute; inset:0; background:var(--overlay);
           backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
         }
         .fmodal-box {
           position:relative; width:min(1080px, 100%); max-height:88vh; overflow:auto;
           background:var(--dark-card); border:1px solid var(--border-strong);
-          border-radius:16px; box-shadow:0 24px 70px rgba(0,0,0,0.6);
+          border-radius:16px; box-shadow:0 24px 70px var(--sombra);
           animation: fmodal-in 140ms ease-out;
         }
         @keyframes fmodal-in { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
@@ -1429,7 +1748,7 @@ def inject_css():
           font-size:26px; line-height:1; color:var(--text-3) !important; text-decoration:none !important;
           padding:0 6px; border-radius:8px;
         }
-        .fmodal-x:hover { color:var(--text-1) !important; background:rgba(255,255,255,0.06); }
+        .fmodal-x:hover { color:var(--text-1) !important; background:rgba(var(--rgb-tinta),0.06); }
         .fmodal-body { padding:16px 28px 28px; }
         .fmodal-body .ficha-sub { margin-top:4px; }
 
@@ -1438,14 +1757,14 @@ def inject_css():
         div[data-baseweb="modal"] > div:first-child {
           backdrop-filter: blur(6px) !important;
           -webkit-backdrop-filter: blur(6px) !important;
-          background: rgba(6, 9, 18, 0.68) !important;
+          background: var(--overlay) !important;
         }
         /* o painel do dialog e um <section>, nao um <div> */
         div[data-testid="stDialog"] [role="dialog"] {
           background: var(--dark-card) !important;
           border: 1px solid var(--border-strong) !important;
           border-radius: 16px !important;
-          box-shadow: 0 24px 70px rgba(0,0,0,0.6) !important;
+          box-shadow: 0 24px 70px var(--sombra) !important;
         }
         div[data-testid="stDialog"] [role="dialog"] h2 {
           font-size: 20px !important; font-weight: 800 !important;
@@ -1459,21 +1778,24 @@ def inject_css():
         div[data-testid="stMetric"] { background: var(--dark-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px 16px; }
 
         /* ---------------------------------------------------- aba Planta */
-        .pl-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:16px; }
+        .pl-kpis { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; margin-bottom:16px; }
         .pl-kpi { background:var(--dark-card); border:1px solid var(--border-color);
-                  border-radius:14px; padding:15px 17px; }
+                  border-radius:14px; padding:15px 18px; }
         .pl-kpi .r { font-size:10px; letter-spacing:.75px; text-transform:uppercase;
                      color:var(--text-3); font-weight:700; }
-        .pl-kpi .v { font-size:27px; font-weight:800; letter-spacing:-1.1px;
-                     line-height:1.15; margin-top:6px; color:var(--text-1); }
+        .pl-linha { display:flex; align-items:center; gap:18px; margin-top:7px; }
+        .pl-kpi .v { font-size:29px; font-weight:800; letter-spacing:-1.2px;
+                     line-height:1.1; color:var(--text-1); white-space:nowrap; }
         .pl-kpi .v.andando { color:var(--accent-amber); }
-        .pl-kpi .v.parado { color:var(--accent-red); }
-        .pl-kpi .s { font-size:11px; color:var(--text-3); margin-top:4px; }
-        .pl-pilha { display:flex; gap:4px; margin-top:10px; }
-        .pl-pilha span { height:4px; border-radius:99px; }
-        .pl-pilha .feito { background:var(--accent-teal); }
-        .pl-pilha .andando { background:var(--accent-amber); }
-        .pl-pilha .parado { background:var(--accent-red); }
+        .pl-kpi .s { font-size:11px; color:var(--text-3); margin-top:8px; }
+        .pl-barra { flex:1; height:8px; border-radius:99px; min-width:60px;
+                    background:rgba(var(--rgb-tinta),.07); position:relative;
+                    display:flex; align-items:center; }
+        .pl-barra i { display:block; height:100%; border-radius:99px; }
+        .pl-barra i.feito { background:var(--accent-teal); }
+        .pl-barra i.andando { background:var(--accent-amber); }
+        .pl-barra .pc { position:absolute; right:0; top:-19px; font-size:11px;
+                        font-weight:750; color:var(--text-2); }
 
         .pl-pn { padding:16px 16px 14px; margin-bottom:14px; }
         .pl-pn .gplan-panel-title { display:flex; align-items:baseline; gap:12px;
@@ -1486,22 +1808,26 @@ def inject_css():
 
         .pl-tela { position:relative; width:100%; height:0;
                    border:1px solid var(--border-color); border-radius:11px;
-                   overflow:hidden; background:#080c16; }
+                   overflow:hidden; background:var(--fundo-3); }
         /* O desenho vem preto sobre branco. Invertido, o traco fica claro sobre
            o escuro e a prancha deixa de ser um retangulo branco no meio de uma
            tela escura -- e as zonas passam a ler por cima dele. */
         .pl-tela img { position:absolute; inset:0; width:100%; height:100%;
-                       object-fit:fill; filter:invert(1) brightness(.86) contrast(1.22);
-                       opacity:.52; }
+                       object-fit:fill; filter:var(--planta-filtro);
+                       opacity:var(--planta-opacidade); }
 
+        /* a zona virou link para abrir a ficha: sem isto o navegador sublinha
+           codigo, percentual e contagem */
         .pl-zona { position:absolute; display:grid; place-items:center; border:1.5px solid;
-                   border-radius:8px; overflow:hidden; transition:filter .13s, box-shadow .13s; }
+                   border-radius:8px; overflow:hidden; text-decoration:none !important;
+                   transition:filter .13s, box-shadow .13s; }
+        .pl-zona:hover, .pl-zona:visited { text-decoration:none !important; }
         .pl-zona.rec { border-radius:3px; place-items:end start; padding:0 0 8px 8px; }
-        .pl-zona.feito { border-color:var(--accent-teal); background:rgba(45,212,191,.10);
+        .pl-zona.feito { border-color:var(--accent-teal); background:rgba(var(--rgb-teal),.10);
                          color:var(--accent-teal); }
-        .pl-zona.andando { border-color:var(--accent-amber); background:rgba(251,191,36,.10);
+        .pl-zona.andando { border-color:var(--accent-amber); background:rgba(var(--rgb-ambar),.10);
                            color:var(--accent-amber); }
-        .pl-zona.parado { border-color:var(--accent-red); background:rgba(248,113,113,.09);
+        .pl-zona.parado { border-color:var(--accent-red); background:rgba(var(--rgb-vermelho),.09);
                           color:var(--accent-red); }
         /* O preenchimento sobe com o percentual: a zona e o proprio grafico. */
         .pl-zona::before { content:""; position:absolute; left:0; right:0; bottom:0;
@@ -1509,7 +1835,7 @@ def inject_css():
         .pl-zona:hover { filter:brightness(1.35); box-shadow:0 0 0 2px currentColor; z-index:9; }
         .pl-mio { position:relative; max-width:100%; display:flex; flex-direction:column;
                   align-items:center; text-align:center; line-height:1.15;
-                  padding:5px 8px; border-radius:8px; background:rgba(8,12,22,.6); }
+                  padding:5px 8px; border-radius:8px; background:rgba(var(--rgb-chapa),.72); }
         .pl-zona.rec .pl-mio { align-items:flex-start; text-align:left;
                                max-width:calc(100% - 18px); }
         .pl-mio b { font-size:var(--fs,11px); font-weight:750; color:var(--text-1);
@@ -1522,11 +1848,26 @@ def inject_css():
            Nao da para usar currentColor nos dois -- definir a cor do texto
            redefine o currentColor da etiqueta, e ela some contra o proprio fundo. */
         .pl-ar { position:absolute; top:0; left:0; font-size:9px; font-weight:800;
-                 letter-spacing:.4px; color:#0a0e1a; padding:1px 6px;
+                 letter-spacing:.4px; color:var(--sobre-cor); padding:1px 6px;
                  border-radius:0 0 7px 0; line-height:1.5; }
         .pl-zona.feito .pl-ar { background:var(--accent-teal); }
         .pl-zona.andando .pl-ar { background:var(--accent-amber); }
         .pl-zona.parado .pl-ar { background:var(--accent-red); }
+
+        /* A lista de instrumentos rola dentro do painel. Paginar aqui obrigaria
+           a fechar a ficha para trocar de pagina -- o modal e :target puro, nao
+           guarda estado -- e a area 140 tem 749 instrumentos. O cabecalho fica
+           preso no topo, senao some na primeira rolada. */
+        .pl-rol { max-height:min(46vh, 430px); overflow-y:auto; overflow-x:auto; }
+        .pl-rol .gtbl-scroll { overflow:visible; }
+        .pl-rol thead th { position:sticky; top:0; z-index:2;
+                           background:var(--dark-card-2); }
+        .pl-rol td.desc { color:var(--text-2); max-width:200px; overflow:hidden;
+                          text-overflow:ellipsis; white-space:nowrap; }
+        .pl-sim { display:inline-block; font-size:10.5px; font-weight:700;
+                  color:var(--txt-verde); background:rgba(var(--rgb-verde),.13);
+                  border:1px solid rgba(var(--rgb-verde),.28); border-radius:6px; padding:1px 7px; }
+        .pl-nao { color:var(--text-3); }
 
         .pl-lg { padding:16px; }
         .pl-ch-c { display:flex; flex-direction:column; gap:9px; }
@@ -1542,11 +1883,10 @@ def inject_css():
         .pl-ch .qt { margin-left:auto; text-align:right; }
         .pl-ch .qt b { display:block; font-size:16px; font-weight:800; line-height:1.2; }
         .pl-ch .qt em { font-style:normal; font-size:10px; color:var(--text-3); }
-        .pl-dica { font-size:11px; line-height:1.55; color:var(--text-3);
-                   border-top:1px solid var(--border-color); padding-top:10px; margin:2px 0 0; }
         @media (max-width:1100px) { .pl-kpis { grid-template-columns:repeat(2,1fr); } }
         </style>
         """.replace("__ICONES__", fx_css_icones())
+            .replace("__TOKENS__", tokens_css(tema_ativo()))
     )
 
 
@@ -1712,11 +2052,7 @@ def tag_pill(value: object) -> str:
 def status_badge(status: str) -> str:
     """Badge com a cor do proprio status, reaproveitando o mapa usado no donut."""
     label = sentence_case(status)
-    color = STATUS_COLOR_MAP.get(label, "#7c8aa8")
-    return (
-        f'<span class="gtbl-badge" style="color:{color}; background:{color}1f; '
-        f'border:1px solid {color}3d;">{esc(label)}</span>'
-    )
+    return (f'<span class="gtbl-badge {classe_status(label)}">{esc(label)}</span>')
 
 
 def yes_no_badge(value: object) -> str:
@@ -1859,8 +2195,13 @@ def fichas_completas(ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
 
 
 def du_tile(cor: str, icone: str) -> str:
+    """O quadradinho do icone. A cor entra como classe, nunca no style.
+
+    Pintar o hex no atributo prendia o cartao ao tema escuro: no claro o
+    #fbbf24 do icone sobre a propria lavagem clara dava 1,5:1.
+    """
     svg = KPI_ICONS.get(icone, "")
-    return (f'<span class="tile" style="background:{cor}22;color:{cor};">'
+    return (f'<span class="tile {fx_classe_cor(cor)}">'
             f'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
             f'stroke-linecap="round" stroke-linejoin="round">{svg}</svg></span>')
 
@@ -1868,8 +2209,8 @@ def du_tile(cor: str, icone: str) -> str:
 def du_kpi(rot: str, val: str, sub: str, pct: float, cor: str, icone: str, href: str = "") -> str:
     corpo = (f'<div class="topo">{du_tile(cor, icone)}<div class="rot">{rot}</div></div>'
              f'<div class="val">{val}</div><div class="sub">{sub}</div>'
-             f'<div class="du-trilho"><i style="width:{max(0.0, min(pct, 1.0)) * 100:.1f}%;'
-             f'background:{cor};"></i></div>')
+             f'<div class="du-trilho {fx_classe_cor(cor)}">'
+             f'<i style="width:{max(0.0, min(pct, 1.0)) * 100:.1f}%;"></i></div>')
     if href:
         return f'<a class="du-kpi" href="{com_filtros(href)}" target="_self">{corpo}</a>'
     return f'<div class="du-kpi">{corpo}</div>'
@@ -1888,8 +2229,7 @@ def du_grupos(resumo: pd.DataFrame) -> str:
         f'<span class="lin"><span class="nm">{esc(sentence_case(r["GRUPO_REGRA"]))}</span>'
         f'<span class="pc">{br_pct(r["avanco"])}</span></span>'
         f'<span class="qt">{br_num(int(r["tags"]))}<em>tags</em></span>'
-        f'<span class="du-trilho"><i style="width:{r["avanco"]:.1f}%;'
-        f'background:var(--accent-green);"></i></span>'
+        f'<span class="du-trilho"><i style="width:{r["avanco"]:.1f}%;"></i></span>'
         f'<span class="pe"><span>{br_num(int(r["aprovados"]))} aprovados</span>'
         f'<span>{br_num(int(r["esperados"]))} esp.</span></span></a>'
         for _, r in g.iterrows())
@@ -1932,7 +2272,7 @@ def du_status(esperados: pd.DataFrame) -> str:
         comp = valor / total * circ
         fatias += (f'<a href="{com_filtros("/relatorios?status=" + quote(rotulo))}" target="_self">'
                    f'<title>{esc(rotulo)} · {br_num(valor)}</title>'
-                   f'<circle cx="60" cy="60" r="{raio}" fill="none" stroke="{cor}" '
+                   f'<circle class="fatia {fx_classe_cor(cor)}" cx="60" cy="60" r="{raio}" fill="none" '
                    f'stroke-width="{largura}" stroke-dasharray="{comp:.2f} {circ - comp:.2f}" '
                    f'stroke-dashoffset="{-giro:.2f}" transform="rotate(-90 60 60)"></circle></a>')
         giro += comp
@@ -1946,7 +2286,7 @@ def du_status(esperados: pd.DataFrame) -> str:
                     f'<span class="p">{br_pct(valor / total * 100)}</span></a>')
     return ('<div class="du-pn"><div class="du-t">Status SIGEM</div><div class="du-miolo"><div class="du-sigem">'
             f'<div class="du-rosca"><svg viewBox="0 0 120 120">'
-            f'<circle cx="60" cy="60" r="{raio}" fill="none" stroke="rgba(255,255,255,.06)" '
+            f'<circle class="trilho" cx="60" cy="60" r="{raio}" fill="none" '
             f'stroke-width="{largura}"></circle>{fatias}</svg>'
             f'<div class="centro"><b>{br_num(int(len(esperados)))}</b><span>relatórios</span></div></div>'
             f'<div class="du-leg">{legenda}</div></div></div></div>')
@@ -2331,13 +2671,15 @@ def fx_painel(titulo: str, icone: str, corpo: str, conta: str = "",
             f'<div class="fx-pn-c {classe_corpo}">{corpo}</div></div>')
 
 
-def fx_rosca(feito: int, total: int, cor: str = "#2dd4bf") -> str:
+def fx_rosca(feito: int, total: int, cor: str = "#2dd4bf",
+             rotulo: str = "aprovado") -> str:
     # Donut em conic-gradient com um furo de mascara no meio: mesmo desenho do
     # SVG, sem uma tag que o st.html va descartar.
     pct = (feito / total * 100) if total else 0.0
-    return (f'<div class="fx-rosca" style="--p:{pct:.1f};--cor:{cor};">'
+    return (f'<div class="fx-rosca {fx_classe_cor(cor)}" style="--p:{pct:.1f};">'
             '<div class="anel"></div>'
-            f'<div class="centro"><b>{br_pct(pct)}</b><span>aprovado</span></div></div>')
+            f'<div class="centro"><b>{br_pct(pct)}</b><span>{esc(rotulo)}</span>'
+            "</div></div>")
 
 
 def fx_lg(rotulo: str, valor: object, pct: str, cor: str, total: bool = False) -> str:
@@ -3135,7 +3477,8 @@ def classe_avanco(pct: float) -> str:
 
 
 def dados_por_area(tags: pd.DataFrame, resumo: pd.DataFrame,
-                   locacao: pd.DataFrame, aux: pd.DataFrame) -> tuple[dict, dict, int]:
+                   locacao: pd.DataFrame,
+                   aux: pd.DataFrame) -> tuple[dict, dict, pd.DataFrame]:
     """Quanto cada area ja montou, e que desenho pertence a que area.
 
     A TAG e localizada por area, nao por desenho -- a base nao tem coluna de
@@ -3146,7 +3489,7 @@ def dados_por_area(tags: pd.DataFrame, resumo: pd.DataFrame,
     unidade) ficam de fora do mapa desenho->area: eles nao delimitam zona.
     """
     if locacao.empty or "AREA" not in locacao.columns:
-        return {}, {}, 0
+        return {}, {}, pd.DataFrame()
 
     area_da_tag = (locacao.dropna(subset=["AREA"])
                    .assign(AREA=lambda d: d["AREA"].astype(str).str.strip())
@@ -3165,16 +3508,24 @@ def dados_por_area(tags: pd.DataFrame, resumo: pd.DataFrame,
     if "STATUS_FINAL" in t.columns:
         t = t[t["STATUS_FINAL"].astype(str).str.strip().str.upper() != "CANCELADO"]
     t["_area"] = t["TAG"].map(area_da_tag)
-    t = t[t["_area"].notna()]
+    t = t[t["_area"].notna()].copy()
     if t.empty:
-        return {}, area_do_desenho, 0
+        return {}, area_do_desenho, pd.DataFrame()
 
     t["_montado"] = (t.get("STATUS_MONTAGEM", pd.Series("", index=t.index))
                      .astype(str).str.strip().str.upper() == "MONTADO")
     t["_preco"] = pd.to_numeric(t.get("PRECO_UNITARIO"), errors="coerce").fillna(0.0)
-    doc = (pd.to_numeric(resumo.get("AVANCO_DOCUMENTAL"), errors="coerce")
-           .fillna(0.0) * 100)
-    t["_doc"] = t["TAG"].map(dict(zip(resumo["TAG"], doc))).fillna(0.0)
+    # O que a ficha da planta mostra por instrumento vem do resumo: avanco
+    # documental, se a GITEC ja mediu e quanto.
+    r = resumo.set_index("TAG")
+    doc = pd.to_numeric(r.get("AVANCO_DOCUMENTAL"), errors="coerce").fillna(0.0)
+    t["_docfrac"] = t["TAG"].map(doc).fillna(0.0)
+    t["_medido"] = (t["TAG"].map(r.get("MEDIDO_GITEC", pd.Series(dtype=object)))
+                    .astype(str).str.strip().str.upper())
+    t["_valorgitec"] = t["TAG"].map(
+        pd.to_numeric(r.get("VALOR_GITEC"), errors="coerce")).fillna(0.0)
+    if "GRUPO_REGRA" in r.columns:
+        t["GRUPO_REGRA"] = t["TAG"].map(r["GRUPO_REGRA"])
 
     areas = {}
     for a, sub in t.groupby("_area"):
@@ -3183,11 +3534,11 @@ def dados_por_area(tags: pd.DataFrame, resumo: pd.DataFrame,
         areas[a] = {
             "area": a, "nome": nome.get(a, "—"), "tags": qtd, "montados": mont,
             "pct": round(mont / qtd * 100, 1) if qtd else 0.0,
-            "doc": round(sub["_doc"].mean(), 1),
+            "doc": round(sub["_docfrac"].mean() * 100, 1),
             "valor": float(sub["_preco"].sum()),
             "valor_montado": float(sub.loc[sub["_montado"], "_preco"].sum()),
         }
-    return areas, area_do_desenho, len(t)
+    return areas, area_do_desenho, t
 
 
 def zona_area(zona: dict, area_do_desenho: dict) -> str | None:
@@ -3234,13 +3585,13 @@ def planta_zonas_html(prancha: dict, areas: dict, area_do_desenho: dict) -> str:
                  if py > 78 and px > 104 else "")
         titulo = (f'{rotulo} · área {a["area"]} — {a["nome"]}\n'
                   f'{br_num(a["montados"])} de {br_num(a["tags"])} montados '
-                  f'({br_pct(a["pct"])})')
+                  f'({br_pct(a["pct"])}) — clique para abrir a ficha')
         partes.append(
-            f'<div class="pl-zona {classe_avanco(a["pct"])}'
+            f'<a class="pl-zona {classe_avanco(a["pct"])}'
             f'{" rec" if z.get("recorte") else ""}" style="{estilo}"'
-            f' title="{esc(titulo)}">{etiqueta}'
+            f' href="#{_ancora("PLANTA", rotulo)}" title="{esc(titulo)}">{etiqueta}'
             f'<span class="pl-mio"><b>{esc(rotulo)}</b>'
-            f'<i>{br_pct(a["pct"])}</i>{extra}</span></div>')
+            f'<i>{br_pct(a["pct"])}</i>{extra}</span></a>')
     return "".join(partes)
 
 
@@ -3272,7 +3623,7 @@ def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFram
     render_header("Planta")
 
     mapa = carregar_mapa()
-    areas, area_do_desenho, com_area = dados_por_area(tags, resumo, locacao, aux)
+    areas, area_do_desenho, base = dados_por_area(tags, resumo, locacao, aux)
 
     if not mapa["pranchas"]:
         render_html('<div class="gplan-panel"><div class="gtbl-empty">'
@@ -3292,32 +3643,30 @@ def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFram
     mont = sum(a["montados"] for a in areas.values())
     val_m = sum(a["valor_montado"] for a in areas.values())
     val_t = sum(a["valor"] for a in areas.values())
-    pior = max(areas.values(), key=lambda a: a["tags"] - a["montados"])
     faixas = [("feito", "Concluído", "100% montado", lambda a: a["pct"] >= 99.5),
               ("andando", "Em andamento", "1% a 99%", lambda a: 0 < a["pct"] < 99.5),
               ("parado", "Não iniciado", "nenhum montado", lambda a: a["pct"] == 0)]
     contagem = {c: [a for a in areas.values() if f(a)] for c, _t, _f, f in faixas}
 
+    pct_mont = mont / total * 100 if total else 0.0
+    pct_valor = val_m / val_t * 100 if val_t else 0.0
+    # Dois cartoes largos: o numero de um lado e a barra ocupando o resto da
+    # linha. Com so dois, empilhar valor e barra deixaria metade do cartao vazia.
     render_html(f"""
       <div class="pl-kpis">
         <div class="pl-kpi"><div class="r">Montagem nas áreas</div>
-          <div class="v andando">{br_pct(mont / total * 100 if total else 0)}</div>
+          <div class="pl-linha">
+            <div class="v andando">{br_pct(pct_mont)}</div>
+            <div class="pl-barra"><i class="andando" style="width:{pct_mont:.1f}%"></i></div>
+          </div>
           <div class="s">{br_num(mont)} de {br_num(total)} instrumentos montados</div></div>
-        <div class="pl-kpi"><div class="r">Áreas</div>
-          <div class="v">{len(areas)}</div>
-          <div class="s">{len(contagem["feito"])} concluídas ·
-            {len(contagem["andando"])} em andamento ·
-            {len(contagem["parado"])} não iniciadas</div>
-          <div class="pl-pilha">{"".join(
-              f'<span class="{c}" style="flex:{len(contagem[c])}"></span>'
-              for c, _t, _f, _fn in faixas if contagem[c])}</div></div>
         <div class="pl-kpi"><div class="r">Valor montado</div>
-          <div class="v">{br_moeda_curta(val_m)}</div>
+          <div class="pl-linha">
+            <div class="v">{br_moeda_curta(val_m)}</div>
+            <div class="pl-barra"><i class="feito" style="width:{pct_valor:.1f}%"></i>
+              <span class="pc">{br_pct(pct_valor)}</span></div>
+          </div>
           <div class="s">de {br_moeda_curta(val_t)} nas áreas mapeadas</div></div>
-        <div class="pl-kpi"><div class="r">Maior lacuna</div>
-          <div class="v parado">{br_num(pior["tags"] - pior["montados"])}</div>
-          <div class="s">área {esc(pior["area"])} ·
-            {esc(pior["nome"])}</div></div>
       </div>""")
 
     por_id = {p["id"]: p for p in mapa["pranchas"]}
@@ -3344,6 +3693,147 @@ def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFram
             for p in altas:
                 render_html_pesado(planta_prancha_html(p, areas, area_do_desenho))
 
+    # As fichas ficam no fim da pagina, fechadas: o :target so abre a que a
+    # zona clicada aponta. Sem todas geradas, o clique cairia no vazio.
+    render_html_pesado(planta_fichas_html(mapa, areas, area_do_desenho, base))
+
+
+def planta_ficha_html(desenho: str, area: dict, sub: pd.DataFrame,
+                      irmaos: list[str]) -> str:
+    """A ficha da planta: tudo que esta cadastrado nos instrumentos dela.
+
+    A lista de TAGs rola dentro do painel em vez de paginar. Paginar aqui
+    obrigaria a fechar a ficha para trocar de pagina -- o modal e :target puro,
+    nao tem estado proprio -- e a area 140 tem 749 instrumentos.
+    """
+    n = len(sub)
+    montados = int(sub["_montado"].sum())
+    pct = montados / n * 100 if n else 0.0
+    completos = int((sub["_docfrac"] >= 1.0).sum())
+    medidos = int((sub["_medido"] == "SIM").sum())
+    doc = float(sub["_docfrac"].mean() * 100) if n else 0.0
+    valor = float(sub["_preco"].sum())
+    valor_mont = float(sub.loc[sub["_montado"], "_preco"].sum())
+    medido_valor = float(sub["_valorgitec"].sum())
+    sem_medicao = int(((sub["_montado"]) & (sub["_medido"] != "SIM")).sum())
+    tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
+
+    trilha = [(f'Área {area["area"]}', ""), (esc(area["nome"]), ""), (desenho, "")]
+
+    tiles = (
+        fx_tile("Instrumentos", br_num(n), "tag", "#2dd4bf",
+                f"{br_num(completos)} com documentação completa")
+        + fx_tile("Montados", br_num(montados), "ok", "#34d399", br_pct(pct))
+        + fx_tile("Avanço documental", br_pct(doc), "livro", "#5b8def")
+        + fx_tile("Valor total", br_moeda(valor), "moeda", "#9d6bff")
+        + fx_tile("Medido na GITEC", br_moeda(medido_valor), "seta", "#fbbf24",
+                  f"{br_num(medidos)} instrumentos")
+    )
+
+    kpis = (
+        fx_kpi("Montados em campo", br_num(montados), f"{br_pct(pct)} da área",
+               pct, "#34d399", "ok")
+        + fx_kpi("Documentação completa", br_num(completos),
+                 f"de {br_num(n)} instrumentos",
+                 completos / n * 100 if n else 0, "#5b8def", "livro")
+        + fx_kpi("Medidos pela GITEC", br_num(medidos), br_moeda(medido_valor),
+                 medidos / n * 100 if n else 0, "#fbbf24", "moeda")
+        + fx_kpi("Montados sem medição", br_num(sem_medicao),
+                 f"de {br_num(montados)} montados",
+                 sem_medicao / montados * 100 if montados else 0, "#f87171", "relogio")
+    )
+    grupos = (sub["GRUPO_REGRA"].dropna().astype(str).str.title().value_counts()
+              if "GRUPO_REGRA" in sub.columns else pd.Series(dtype=int))
+    dados = (
+        fx_dado("Área", f'{area["area"]} · {area["nome"]}')
+        + fx_dado("Outras plantas da área",
+                  ", ".join(d.replace("800-", "") for d in irmaos) or "—")
+        + fx_dado("Tipos de instrumento",
+                  ", ".join(f"{k} ({v})" for k, v in grupos.head(4).items()) or "—")
+        + fx_dado("Valor montado", f"{br_moeda(valor_mont)} de {br_moeda(valor)}")
+    )
+
+    # ------------------------------------------------- a lista, com rolagem
+    linhas = []
+    for _, r in sub.sort_values(["_montado", "TAG"], ascending=[False, True]).iterrows():
+        d = float(r["_docfrac"]) * 100
+        linhas.append(
+            "<tr>"
+            f'<td>{tag_pill(r["TAG"])}</td>'
+            f'<td class="desc">{esc(r.get("DESCRICAO", ""))}</td>'
+            f'<td>{"<span class=\'pl-sim\'>Montado</span>" if r["_montado"] else "<span class=\'pl-nao\'>—</span>"}</td>'
+            f'<td class="num">{br_pct(d)}</td>'
+            f'<td>{"<span class=\'pl-sim\'>Medido</span>" if r["_medido"] == "SIM" else "<span class=\'pl-nao\'>—</span>"}</td>'
+            f'<td class="num">{br_moeda(float(r["_preco"]))}</td>'
+            "</tr>")
+    tabela = html_table(
+        ["TAG", "Descrição", "Montagem", "#Doc.", "Medição", "#Valor"],
+        "".join(linhas), "Nenhum instrumento nesta planta.",
+        classe="gtbl gtbl-tags")
+
+    direita = fx_painel(
+        "Montagem da planta", "seta",
+        fx_rosca(montados, n, "#34d399", "montado")
+        + '<div class="fx-leg">'
+        + fx_lg("Montados", br_num(montados), br_pct(pct), "#34d399")
+        + fx_lg("A montar", br_num(n - montados),
+                br_pct(100 - pct if n else 0), "#f87171")
+        + fx_lg("Instrumentos", br_num(n), "", "#3a4a68", total=True)
+        + "</div>",
+        classe_corpo="centro")
+
+    return (
+        f'<div class="fmodal" id="{_ancora("PLANTA", desenho)}">'
+        '<a class="fmodal-bg" href="#" aria-label="Fechar"></a>'
+        '<div class="fmodal-box"><div class="fmodal-head">'
+        '<div><div class="fn-tipo">Planta</div>'
+        f'<div class="fmodal-title">{esc(desenho)}</div></div>'
+        '<div class="fn-avanco">'
+        f'<div class="fn-track"><div class="fn-fill {tom}" style="width:{max(pct, 1.5):.1f}%;"></div></div>'
+        f'<div class="fn-pct">{br_pct(pct)}</div></div>'
+        '<a class="fmodal-x" href="#" aria-label="Fechar">&times;</a></div>'
+        f'<div class="fmodal-body"><div class="fx">{fx_trilha(trilha)}'
+        f'<div class="fx-tiles">{tiles}</div>'
+        '<div class="fx-corpo"><div class="fx-col">'
+        + fx_painel("Resumo da planta", "grade",
+                    f'<div class="fx-kpis">{kpis}</div><div class="fx-dados">{dados}</div>')
+        + fx_painel("Instrumentos", "tag", f'<div class="pl-rol">{tabela}</div>',
+                    conta=f"{br_num(n)} tags · role para ver todas",
+                    classe_corpo="zero")
+        + f'</div><div class="fx-col">{direita}</div></div></div></div></div></div>'
+    )
+
+
+def planta_fichas_html(mapa: dict, areas: dict, area_do_desenho: dict,
+                       base: pd.DataFrame) -> str:
+    """Uma ficha por zona marcada, todas fechadas.
+
+    Por zona, e nao por desenho: a zona e o que se clica, e a area 140 aparece
+    em duas delas com sete codigos JEI numa -- gerar uma ficha por codigo
+    repetiria oito vezes a mesma lista de 749 instrumentos.
+
+    Sem gerar todas de uma vez, o clique cairia numa ancora inexistente e
+    simplesmente nao faria nada.
+    """
+    zonas = [z for p in mapa["pranchas"] for z in p["zonas"]]
+    por_area: dict[str, list[str]] = {}
+    for z in zonas:
+        a = zona_area(z, area_do_desenho)
+        if a:
+            por_area.setdefault(a, []).extend(z["desenhos"])
+
+    partes = []
+    for z in zonas:
+        a = zona_area(z, area_do_desenho)
+        if not a or a not in areas:
+            continue
+        meus = set(z["desenhos"])
+        irmaos = [x.replace("800-", "") for x in dict.fromkeys(por_area.get(a, []))
+                  if x not in meus]
+        partes.append(planta_ficha_html(codigos_da_zona(z), areas[a],
+                                        base[base["_area"] == a], irmaos))
+    return "".join(partes)
+
 
 def planta_legenda_html(faixas: list, contagem: dict) -> str:
     """A chave de leitura do mapa. Sem repetir area por area: isso e a Progresso."""
@@ -3354,10 +3844,7 @@ def planta_legenda_html(faixas: list, contagem: dict) -> str:
         f'<em>{br_num(sum(a["tags"] for a in contagem[c]))} inst.</em></div></div>'
         for c, t, f, _fn in faixas)
     return ('<div class="gplan-panel pl-lg"><div class="gplan-panel-title">Legenda</div>'
-            f'<div class="pl-ch-c">{itens}'
-            '<p class="pl-dica">A cor vem do percentual da área; o preenchimento sobe '
-            'com ele. Duas zonas da mesma área mostram o mesmo número — o instrumento '
-            'é localizado por área, não por desenho.</p></div></div>')
+            f'<div class="pl-ch-c">{itens}</div></div>')
 
 
 def vazio(v: object) -> bool:
@@ -4161,6 +4648,7 @@ def main():
         initial_sidebar_state="expanded",
     )
     inject_css()
+    seletor_tema()
 
     # O carimbo da planilha e a chave de cache sao coisas diferentes: a chave
     # leva a versao da regra colada no fim, e quem le a data precisa do valor
@@ -4181,15 +4669,8 @@ def main():
     with st.sidebar:
         render_html(
             '<div class="gplan-brand">'
-            '<svg class="gplan-brand-mark" viewBox="0 0 48 48" fill="none">'
-            '<circle cx="24" cy="24" r="19" stroke="#232a44" stroke-width="5"/>'
-            '<path d="M24 5a19 19 0 0 1 15.6 29.8" stroke="url(#gplanArc)" stroke-width="5" stroke-linecap="round"/>'
-            '<circle cx="24" cy="24" r="5.5" fill="#2dd4bf"/>'
-            '<path d="M24 24L33 15" stroke="#f4f6fb" stroke-width="3" stroke-linecap="round"/>'
-            '<defs><linearGradient id="gplanArc" x1="24" y1="5" x2="40" y2="35" gradientUnits="userSpaceOnUse">'
-            '<stop stop-color="#5b8def"/><stop offset="1" stop-color="#2dd4bf"/>'
-            "</linearGradient></defs></svg>"
-            '<div class="gplan-brand-text">'
+            + _logo_svg("Lat").replace("<svg ", '<svg class="gplan-brand-mark" ')
+            + '<div class="gplan-brand-text">'
             '<div class="gplan-brand-name">Gplan</div>'
             '<div class="gplan-brand-sub">Instrumentação · U-12</div>'
             "</div></div>"
