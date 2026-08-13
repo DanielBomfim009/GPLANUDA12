@@ -1778,24 +1778,26 @@ def inject_css():
         div[data-testid="stMetric"] { background: var(--dark-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px 16px; }
 
         /* ---------------------------------------------------- aba Planta */
-        .pl-kpis { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; margin-bottom:16px; }
+        .pl-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:16px; }
         .pl-kpi { background:var(--dark-card); border:1px solid var(--border-color);
                   border-radius:14px; padding:15px 18px; }
         .pl-kpi .r { font-size:10px; letter-spacing:.75px; text-transform:uppercase;
                      color:var(--text-3); font-weight:700; }
-        .pl-linha { display:flex; align-items:center; gap:18px; margin-top:7px; }
         .pl-kpi .v { font-size:29px; font-weight:800; letter-spacing:-1.2px;
-                     line-height:1.1; color:var(--text-1); white-space:nowrap; }
+                     line-height:1.1; color:var(--text-1); white-space:nowrap;
+                     margin-top:7px; }
+        /* o valor por extenso e longo: encolhe com a coluna em vez de estourar */
+        .pl-kpi .v.dinheiro { font-size:clamp(15px, 1.42vw, 23px); letter-spacing:-.6px; }
         .pl-kpi .v.andando { color:var(--accent-amber); }
-        .pl-kpi .s { font-size:11px; color:var(--text-3); margin-top:8px; }
-        .pl-barra { flex:1; height:8px; border-radius:99px; min-width:60px;
-                    background:rgba(var(--rgb-tinta),.07); position:relative;
-                    display:flex; align-items:center; }
+        .pl-kpi .v.feito { color:var(--accent-teal); }
+        .pl-kpi .v.parado { color:var(--accent-red); }
+        .pl-kpi .s { font-size:11px; color:var(--text-3); margin-top:6px; }
+        .pl-barra { height:8px; border-radius:99px; margin-top:10px;
+                    background:rgba(var(--rgb-tinta),.07); overflow:hidden; }
         .pl-barra i { display:block; height:100%; border-radius:99px; }
         .pl-barra i.feito { background:var(--accent-teal); }
         .pl-barra i.andando { background:var(--accent-amber); }
-        .pl-barra .pc { position:absolute; right:0; top:-19px; font-size:11px;
-                        font-weight:750; color:var(--text-2); }
+        .pl-barra i.parado { background:var(--accent-red); }
 
         .pl-pn { padding:16px 16px 14px; margin-bottom:14px; }
         .pl-pn .gplan-panel-title { display:flex; align-items:baseline; gap:12px;
@@ -1883,7 +1885,8 @@ def inject_css():
         .pl-ch .qt { margin-left:auto; text-align:right; }
         .pl-ch .qt b { display:block; font-size:16px; font-weight:800; line-height:1.2; }
         .pl-ch .qt em { font-style:normal; font-size:10px; color:var(--text-3); }
-        @media (max-width:1100px) { .pl-kpis { grid-template-columns:repeat(2,1fr); } }
+        @media (max-width:1250px) { .pl-kpis { grid-template-columns:repeat(2,1fr); } }
+        @media (max-width:620px) { .pl-kpis { grid-template-columns:1fr; } }
         </style>
         """.replace("__ICONES__", fx_css_icones())
             .replace("__TOKENS__", tokens_css(tema_ativo()))
@@ -2005,15 +2008,6 @@ def br_pct(value: float, casas: int = 1) -> str:
     """Porcentagem com virgula. So para texto lido na tela -- largura de barra
     em CSS continua com ponto, senao o navegador descarta a regra."""
     return f"{value:.{casas}f}%".replace(".", ",")
-
-
-def br_moeda_curta(v: float) -> str:
-    """Valor abreviado, para caber num cartao: R$ 1,6M, R$ 535k, R$ 820."""
-    if abs(v) >= 1_000_000:
-        return f"R$ {v / 1_000_000:.1f}M".replace(".", ",")
-    if abs(v) >= 1_000:
-        return f"R$ {v / 1_000:,.0f}k".replace(",", ".")
-    return f"R$ {v:.0f}"
 
 
 def com_filtros(href: str) -> str:
@@ -2388,9 +2382,9 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
                  avanco, "#9d6bff", "trend")
     )
 
-    # A medicao de campo entra pela GITEC. Planilha antiga nao tem essas
+    # A medicao de campo entra pelo GITEC. Planilha antiga nao tem essas
     # colunas, entao tudo aqui degrada para zero em vez de estourar.
-    # Estar na GITEC nao e estar medido: o evento vai para a fiscalizacao e so
+    # Estar no GITEC nao e estar medido: o evento vai para a fiscalizacao e so
     # vira medicao quando ela aprova. VALOR_GITEC ja traz so o aprovado.
     tem_gitec = "VALOR_GITEC" in resumo.columns
     medido_apr = float(resumo["VALOR_GITEC"].fillna(0).sum()) if tem_gitec else 0.0
@@ -2400,9 +2394,9 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
                 if "STATUS_MONTAGEM" in tags.columns else pd.Series(dtype=str))
     montados = int(montagem.eq("MONTADO").sum())
 
-    # Previsto de medicao: o que ja fechou a documentacao e a GITEC ainda nao
-    # mediu. Tag no SIGEM e na GITEC ja foi medida; tag so na GITEC tambem.
-    # Sobra o que esta 100% documental e fora da GITEC -- e o que vai ser
+    # Previsto de medicao: o que ja fechou a documentacao e o GITEC ainda nao
+    # mediu. Tag no SIGEM e no GITEC ja foi medido; tag so no GITEC tambem.
+    # Sobra o que esta 100% documental e fora do GITEC -- e o que vai ser
     # medido. Dar R$ 0,00 com tag montada nao e falha de conta: quer dizer que
     # nenhuma das montadas fechou a documentacao.
     preco_tag = pd.to_numeric(tags.set_index("TAG")["PRECO_UNITARIO"],
@@ -2420,7 +2414,7 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
         + du_mini("Valor total", br_moeda(float(preco_tag.sum())), "", "#9d6bff", "trend")
         # medido de verdade e o aprovado; o que esta em verificacao ainda pode
         # voltar, entao fica embaixo em vez de somar no numero grande
-        + du_mini("Medido na GITEC", br_moeda(medido_apr),
+        + du_mini("Medido no GITEC", br_moeda(medido_apr),
                   f"{br_moeda(em_verif)} aguardando aprovação" if em_verif else "",
                   "#fbbf24", "archive", "/gitec")
         + du_mini("Última atualização", agora, "Sincronizado", "#5b8def", "calendario")
@@ -3251,7 +3245,7 @@ SEM_VALOR = {"-", "", "NAN", "NONE"}
 
 
 def servico_do_agrupamento(valor: object) -> str:
-    """Só o serviço do agrupamento da GITEC.
+    """Só o serviço do agrupamento do GITEC.
 
     Vem como "B_4.3.8.1.2_Instalação de analisadores incluindo materiais...".
     O código já tem coluna própria ao lado, e repetir aqui empurrava a tabela
@@ -3264,7 +3258,7 @@ def servico_do_agrupamento(valor: object) -> str:
 
 def render_gitec(gitec: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame,
                  esperados: pd.DataFrame, sigem: pd.DataFrame, cache_key: str = ""):
-    """A medição de campo: o que a GITEC já mediu dos instrumentos da base.
+    """A medição de campo: o que o GITEC já mediu dos instrumentos da base.
 
     É o outro lado da conta do controle documental. A documentação diz o que
     pode ser medido; esta aba diz o que foi. O cruzamento das duas é o que
@@ -3275,7 +3269,7 @@ def render_gitec(gitec: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame,
 
     if gitec.empty:
         render_html('<div class="gplan-panel"><div class="gtbl-empty">'
-                    "Nenhuma medição da GITEC nesta planilha. Rode o pipeline com a "
+                    "Nenhuma medição do GITEC nesta planilha. Rode o pipeline com a "
                     "06_BASE_GITEC.xlsx na pasta das bases.</div></div>")
         return
 
@@ -3319,7 +3313,7 @@ def render_gitec(gitec: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame,
         + fx_kpi("Aguardando aprovação", br_moeda(em_verif), "ainda não é medição",
                  (em_verif / total_obra * 100) if total_obra else 0, "#fbbf24", "relogio")
         + fx_kpi("Previsto de medição", br_moeda(previsto),
-                 f"{br_num(len(prontas))} prontas e fora da GITEC",
+                 f"{br_num(len(prontas))} prontas e fora do GITEC",
                  (previsto / total_obra * 100) if total_obra else 0, "#2dd4bf", "nuvem")
         + fx_kpi("Valor da obra", br_moeda(total_obra), "", 100, "#9d6bff", "moeda")
     )
@@ -3516,7 +3510,7 @@ def dados_por_area(tags: pd.DataFrame, resumo: pd.DataFrame,
                      .astype(str).str.strip().str.upper() == "MONTADO")
     t["_preco"] = pd.to_numeric(t.get("PRECO_UNITARIO"), errors="coerce").fillna(0.0)
     # O que a ficha da planta mostra por instrumento vem do resumo: avanco
-    # documental, se a GITEC ja mediu e quanto.
+    # documental, se o GITEC ja mediu e quanto.
     r = resumo.set_index("TAG")
     doc = pd.to_numeric(r.get("AVANCO_DOCUMENTAL"), errors="coerce").fillna(0.0)
     t["_docfrac"] = t["TAG"].map(doc).fillna(0.0)
@@ -3531,12 +3525,19 @@ def dados_por_area(tags: pd.DataFrame, resumo: pd.DataFrame,
     for a, sub in t.groupby("_area"):
         qtd = len(sub)
         mont = int(sub["_montado"].sum())
+        # O que ja foi montado se divide em duas partes que somam o todo: o que
+        # o GITEC ja aprovou e o que ainda nao virou medicao. Estar no GITEC nao
+        # basta -- so o aprovado conta, que e o que MEDIDO_GITEC ja diz.
+        montado = sub["_montado"]
+        medido = montado & (sub["_medido"] == "SIM")
         areas[a] = {
             "area": a, "nome": nome.get(a, "—"), "tags": qtd, "montados": mont,
             "pct": round(mont / qtd * 100, 1) if qtd else 0.0,
             "doc": round(sub["_docfrac"].mean() * 100, 1),
             "valor": float(sub["_preco"].sum()),
-            "valor_montado": float(sub.loc[sub["_montado"], "_preco"].sum()),
+            "valor_montado": float(sub.loc[montado, "_preco"].sum()),
+            "valor_medido": float(sub.loc[medido, "_preco"].sum()),
+            "montados_medidos": int(medido.sum()),
         }
     return areas, area_do_desenho, t
 
@@ -3648,25 +3649,37 @@ def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFram
               ("parado", "Não iniciado", "nenhum montado", lambda a: a["pct"] == 0)]
     contagem = {c: [a for a in areas.values() if f(a)] for c, _t, _f, f in faixas}
 
+    val_med = sum(a["valor_medido"] for a in areas.values())
+    val_sem = val_m - val_med
+    n_med = sum(a["montados_medidos"] for a in areas.values())
+
     pct_mont = mont / total * 100 if total else 0.0
     pct_valor = val_m / val_t * 100 if val_t else 0.0
-    # Dois cartoes largos: o numero de um lado e a barra ocupando o resto da
-    # linha. Com so dois, empilhar valor e barra deixaria metade do cartao vazia.
+    pct_sem = val_sem / val_m * 100 if val_m else 0.0
+    pct_med = val_med / val_m * 100 if val_m else 0.0
+    # O valor sai por extenso: o que se leva para reuniao de medicao e o numero
+    # cheio, e "R$ 535k" nao serve para conferir com o GITEC. Os dois ultimos
+    # cartoes sao a divisao do segundo -- somados, dao o valor montado.
     render_html(f"""
       <div class="pl-kpis">
         <div class="pl-kpi"><div class="r">Montagem nas áreas</div>
-          <div class="pl-linha">
-            <div class="v andando">{br_pct(pct_mont)}</div>
-            <div class="pl-barra"><i class="andando" style="width:{pct_mont:.1f}%"></i></div>
-          </div>
-          <div class="s">{br_num(mont)} de {br_num(total)} instrumentos montados</div></div>
+          <div class="v andando">{br_pct(pct_mont)}</div>
+          <div class="s">{br_num(mont)} de {br_num(total)} instrumentos montados</div>
+          <div class="pl-barra"><i class="andando" style="width:{pct_mont:.1f}%"></i></div></div>
         <div class="pl-kpi"><div class="r">Valor montado</div>
-          <div class="pl-linha">
-            <div class="v">{br_moeda_curta(val_m)}</div>
-            <div class="pl-barra"><i class="feito" style="width:{pct_valor:.1f}%"></i>
-              <span class="pc">{br_pct(pct_valor)}</span></div>
-          </div>
-          <div class="s">de {br_moeda_curta(val_t)} nas áreas mapeadas</div></div>
+          <div class="v dinheiro">{br_moeda(val_m)}</div>
+          <div class="s">{br_pct(pct_valor)} de {br_moeda(val_t)} nas áreas mapeadas</div>
+          <div class="pl-barra"><i class="feito" style="width:{pct_valor:.1f}%"></i></div></div>
+        <div class="pl-kpi"><div class="r">Montado sem medir</div>
+          <div class="v dinheiro parado">{br_moeda(val_sem)}</div>
+          <div class="s">{br_num(mont - n_med)} instrumentos ·
+            {br_pct(pct_sem)} do montado</div>
+          <div class="pl-barra"><i class="parado" style="width:{pct_sem:.1f}%"></i></div></div>
+        <div class="pl-kpi"><div class="r">Montado e medido no GITEC</div>
+          <div class="v dinheiro feito">{br_moeda(val_med)}</div>
+          <div class="s">{br_num(n_med)} instrumentos ·
+            {br_pct(pct_med)} do montado</div>
+          <div class="pl-barra"><i class="feito" style="width:{pct_med:.1f}%"></i></div></div>
       </div>""")
 
     por_id = {p["id"]: p for p in mapa["pranchas"]}
@@ -3726,7 +3739,7 @@ def planta_ficha_html(desenho: str, area: dict, sub: pd.DataFrame,
         + fx_tile("Montados", br_num(montados), "ok", "#34d399", br_pct(pct))
         + fx_tile("Avanço documental", br_pct(doc), "livro", "#5b8def")
         + fx_tile("Valor total", br_moeda(valor), "moeda", "#9d6bff")
-        + fx_tile("Medido na GITEC", br_moeda(medido_valor), "seta", "#fbbf24",
+        + fx_tile("Medido no GITEC", br_moeda(medido_valor), "seta", "#fbbf24",
                   f"{br_num(medidos)} instrumentos")
     )
 
@@ -3736,7 +3749,7 @@ def planta_ficha_html(desenho: str, area: dict, sub: pd.DataFrame,
         + fx_kpi("Documentação completa", br_num(completos),
                  f"de {br_num(n)} instrumentos",
                  completos / n * 100 if n else 0, "#5b8def", "livro")
-        + fx_kpi("Medidos pela GITEC", br_num(medidos), br_moeda(medido_valor),
+        + fx_kpi("Medidos pelo GITEC", br_num(medidos), br_moeda(medido_valor),
                  medidos / n * 100 if n else 0, "#fbbf24", "moeda")
         + fx_kpi("Montados sem medição", br_num(sem_medicao),
                  f"de {br_num(montados)} montados",

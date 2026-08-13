@@ -153,7 +153,7 @@ if "DATA_PARECER" in sigem_full.columns:
     conferir("recusado sempre tem de onde contar", _sem_data, 0,
              f"{_sem_par} sem parecer usam a data de postagem")
 
-# ---------------------------------------------------------------- a GITEC
+# ---------------------------------------------------------------- o GITEC
 # A medição de campo só vale se for do mesmo escopo do controle documental. A
 # GITEC mistura compra, inspeção de recebimento e cabo sob a mesma coluna TAG,
 # e os valores desses outros escopos são de outra EAP: se um deles entrar, o
@@ -167,7 +167,7 @@ except ValueError:
 
 if not gitec.empty:
     # A planilha é um controle por TAG, e item de PPU, critério e preço moram
-    # nela. O que vale da GITEC é o que mede esses itens: cabo e tubing são
+    # nela. O que vale do GITEC é o que mede esses itens: cabo e tubing são
     # outro controle, e compra não é montagem.
     itens = set(tags.ITEM_PPU.astype(str).str.strip())
     conferir("todo item medido é PPU da base",
@@ -183,7 +183,7 @@ if not gitec.empty:
                           if ppu_tag.get(t, i) != i))
     declaradas = int(validacoes.TIPO_VALIDACAO.astype(str).eq("GITEC_ITEM_DIVERGENTE").sum())
     conferir("divergência de item declarada", declaradas, divergentes)
-    # Estar na GITEC não é estar medido: o evento entra lá quando vai para a
+    # Estar no GITEC não é estar medido: o evento entra lá quando vai para a
     # fiscalização e só vira medição quando ela aprova. Enquanto não aprovar,
     # nada foi medido — e o valor ainda pode não virar medição nenhuma.
     ap = gitec.STATUS.astype(str).str.strip().str.upper().str.startswith("APROVADO")
@@ -256,6 +256,9 @@ if areas_por_tag:
     ativas["_area"] = ativas.TAG.map(areas_por_tag)
     ativas = ativas[ativas._area.notna()]
     ativas["_m"] = ativas.STATUS_MONTAGEM.astype(str).str.strip().str.upper() == "MONTADO"
+    ativas["_p"] = pd.to_numeric(ativas.PRECO_UNITARIO, errors="coerce").fillna(0.0)
+    _med = dict(zip(resumo.TAG, resumo.MEDIDO_GITEC.astype(str).str.strip().str.upper()))
+    ativas["_gitec"] = ativas.TAG.map(_med) == "SIM"
     g = ativas.groupby("_area")._m.agg(["size", "sum"])
     pct_area = {a: round(r["sum"] / r["size"] * 100, 1) for a, r in g.iterrows()}
     # TAG cancelada não gera pendência nem entra em avanço: se entrasse aqui,
@@ -265,6 +268,21 @@ if areas_por_tag:
                                                 .str.strip().str.upper() == "CANCELADO", "TAG"])}
     conferir("cancelada fora da conta da área",
              len(set(ativas.TAG) & canceladas_com_area), 0)
+    # Os tres cartoes de dinheiro da Planta. Os dois ultimos sao a divisao do
+    # segundo: somados tem de dar exatamente o valor montado, senao ha
+    # instrumento caindo fora dos dois lados ou contado duas vezes.
+    valor_planta = {
+        "montado": round(float(ativas.loc[ativas._m, "_p"].sum()), 2),
+        "medido": round(float(ativas.loc[ativas._m & ativas._gitec, "_p"].sum()), 2),
+        "total": round(float(ativas._p.sum()), 2),
+    }
+    valor_planta["sem_medir"] = round(valor_planta["montado"] - valor_planta["medido"], 2)
+    conferir("montado = medido + sem medir",
+             round(valor_planta["medido"] + valor_planta["sem_medir"], 2),
+             valor_planta["montado"])
+    # Medir sem ter montado seria erro de base: a medicao paga a montagem.
+    conferir("medido sem estar montado",
+             int((ativas._gitec & ~ativas._m).sum()), 0)
 
 if not MAPA.exists():
     conferir("marcação do PPTX no repositório", False, True)
@@ -372,7 +390,7 @@ with sync_playwright() as p:
              round(float(preco.reindex(prontas.TAG).fillna(0).sum()), 2))
     conferir("Valor total do rodapé", round(numero(rodape.get("Valor total", "0")), 2),
              round(float(preco.sum()), 2))
-    conferir("Medido na GITEC", round(numero(rodape.get("Medido na GITEC", "0")), 2),
+    conferir("Medido no GITEC", round(numero(rodape.get("Medido no GITEC", "0")), 2),
              round(float(resumo.VALOR_GITEC.fillna(0).sum()), 2))
     conferir("carimbo saiu do cabeçalho",
              pg.evaluate("() => document.querySelectorAll('.du-cab .du-selo').length"), 0)
@@ -478,6 +496,19 @@ with sync_playwright() as p:
                              "() => [...document.querySelectorAll('.pl-zona')].map(z => z.title)")
                          if re.search(r"área (\S+)", t)}
         conferir("áreas desenhadas no mapa", len(areas_na_tela), len(pct_area))
+        # O valor sai por extenso de proposito: e o que se leva para a reuniao
+        # de medicao, e abreviado nao da para conferir com o GITEC.
+        cart = {c.split("|")[0]: c.split("|") for c in pg.evaluate(TXT % ".pl-kpi") if "|" in c}
+        for rotulo, chave in [("VALOR MONTADO", "montado"),
+                              ("MONTADO SEM MEDIR", "sem_medir"),
+                              ("MONTADO E MEDIDO NO GITEC", "medido")]:
+            linhas_c = cart.get(rotulo, ["", "0"])
+            conferir(f"cartão {rotulo.lower()}",
+                     round(numero(linhas_c[1]), 2), valor_planta[chave])
+        conferir("valor por extenso, sem abreviar",
+                 bool(re.search(r"R\$ [\d.]+,\d{2}$",
+                                cart.get("VALOR MONTADO", ["", ""])[1].strip())), True,
+                 cart.get("VALOR MONTADO", ["", "?"])[1])
         geral = sum(1 for a in pct_area.values() if a >= 99.5)
         conferir("concluídas na legenda",
                  int(numero(pg.evaluate(TXT % ".pl-ch.feito .qt b")[0])), geral)
