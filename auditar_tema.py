@@ -54,8 +54,13 @@ SONDA = r"""
     return (x + 0.05) / (y + 0.05);
   };
   const rgba = txt => {
-    const m = (txt || "").match(/[\d.]+/g);
-    if (!m) return null;
+    txt = (txt || "").trim();
+    // a paleta do :root vem em hex; o computed style dos elementos, em rgb()
+    const h = txt.match(/^#([0-9a-f]{6})$/i);
+    if (h) return [parseInt(h[1].slice(0,2),16), parseInt(h[1].slice(2,4),16),
+                   parseInt(h[1].slice(4,6),16), 1];
+    const m = txt.match(/[\d.]+/g);
+    if (!m || m.length < 3) return null;
     return [+m[0], +m[1], +m[2], m.length > 3 ? +m[3] : 1];
   };
   const sobre = (frente, fundo) => frente.slice(0,3).map(
@@ -136,6 +141,42 @@ SONDA = r"""
       // traco de gauge/donut e area colorida grande, nao simbolo fino: o
       // limite util ali e o de elemento grafico
       marca(el, nome, sobre(c, fundoDe(svg)), fundoDe(svg), MIN_G, "");
+    }
+  }
+
+  // ---- superficie que nao acompanhou o tema -------------------------------
+  // Um campo escuro com letra clara tem contraste interno otimo -- a medicao
+  // de texto passa direto por ele. O defeito e outro: a superficie ficou com a
+  // cor do tema anterior e vira uma caixa escura no meio da tela clara. Foi
+  // assim que o campo de busca da Pesquisa tag passou batido.
+  {
+    const fundoPagina = lum(fundoDe(document.querySelector(".stApp") || document.body));
+    const claro = fundoPagina > 0.5;
+    // Chip pintado com uma cor semantica e escuro de proposito no tema claro --
+    // o ambar de leitura e #a16207. Comparar com a paleta viva do :root separa
+    // "preenchimento da cor" de "superficie que ficou no tema anterior".
+    const raiz = getComputedStyle(document.documentElement);
+    const paleta = new Set(["--accent-blue", "--accent-purple", "--accent-green",
+                            "--accent-red", "--accent-amber", "--accent-teal",
+                            "--teal-2", "--neutro", "--neutro-2"]
+      .map(n => (rgba(raiz.getPropertyValue(n).trim()) || []).slice(0, 3).join(",")));
+    for (const el of document.querySelectorAll("body *")) {
+      const s = getComputedStyle(el);
+      const c = rgba(s.backgroundColor);
+      if (!c || c[3] < 0.6) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 40 || r.height < 12) continue;
+      if (!visivel(el)) continue;
+      if (paleta.has(c.slice(0, 3).join(","))) continue;
+      const l = lum(c.slice(0, 3));
+      // no claro, superficie quase preta; no escuro, superficie quase branca
+      if ((claro && l < 0.25) || (!claro && l > 0.75)) {
+        achados.push({tipo: "superficie", razao: +l.toFixed(2), minimo: claro ? 0.25 : 0.75,
+          classe: (el.className || "").toString().slice(0, 60),
+          tag: el.tagName.toLowerCase(), cor: s.backgroundColor,
+          fundo: `luz da pagina ${fundoPagina.toFixed(2)}`,
+          texto: (el.getAttribute("data-testid") || "")});
+      }
     }
   }
 

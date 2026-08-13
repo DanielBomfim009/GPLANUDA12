@@ -322,7 +322,7 @@ REGRA_VERSAO = 9
 # desenho delas nao invalida nada: a aba Progresso continuava servindo o HTML
 # antigo, e a economia do sprite simplesmente nao aparecia. Subir este numero e
 # o que diz ao cache que o desenho mudou.
-VISUAL_VERSAO = 7
+VISUAL_VERSAO = 8
 
 
 def aprovado(serie: pd.Series) -> pd.Series:
@@ -997,9 +997,18 @@ def inject_css():
            do config.toml queimadas dentro -- fundo #0a0e1a e texto claro. No
            tema claro isso vira caixa preta com letra branca no meio da tela
            branca. Vale para selectbox, multiselect e campo de texto. */
+        /* O invólucro de cada widget leva o secondaryBackgroundColor do
+           config.toml -- #12172a queimado -- e cada tipo usa um testid
+           diferente: o selectbox é div[role=group], o campo de texto é
+           stTextInputRootElement. Faltando um deles, sobra uma caixa escura no
+           meio da tela clara. */
         [data-testid="stSelectbox"] div[role="group"],
         [data-testid="stMultiSelect"] div[role="group"],
         [data-testid="stTextInput"] div[role="group"],
+        [data-testid="stTextInputRootElement"],
+        [data-testid="stNumberInputContainer"],
+        [data-testid="stTextArea"] textarea,
+        [data-testid="stDateInput"] div[role="group"],
         [data-baseweb="select"] > div, [data-baseweb="input"],
         .stTextInput input, .stNumberInput input, .stTextArea textarea {
           background: var(--dark-card-2) !important; color: var(--text-1) !important;
@@ -3031,6 +3040,12 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
                          if v != "—")
     bloco_campo = (fx_painel("Situação em campo", "pessoas", campo_html)
                    if campo_html else "")
+    # Card proprio, logo depois da situacao em campo -- que e onde o leitor
+    # acabou de ver "On demand" e vai perguntar quando chega. So existe para
+    # quem esta em compra: numa tag calibrada nao quer dizer nada.
+    bloco_fornecimento = painel_previsao_fornecimento(
+        da_base("STATUS_FINAL"),
+        t.get("PREVISAO_FORNECIMENTO") if hasattr(t, "get") else None)
 
     # o que esta segurando o avanco: o documento parado ha mais tempo leva
     # direto para a ficha dele, com o parecer da inspecao
@@ -3086,7 +3101,7 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
                     f'<div class="fx-kpis">{kpis}</div><div class="fx-dados">{dados}</div>')
         + fx_painel("Relatórios da tag", "folha", tabela,
                     conta=f"{br_num(esp)} previstos", classe_corpo="zero")
-        + f'</div><div class="fx-col">{avanco}{bloco_campo}{mov}{acoes}</div></div></div>'
+        + f'</div><div class="fx-col">{avanco}{bloco_campo}{bloco_fornecimento}{mov}{acoes}</div></div></div>'
     )
 
 
@@ -4377,6 +4392,46 @@ STATUS_ANDAMENTO = {"ON DEMAND", "EM COMPRA", "EM REPARO", "CALIBRAR",
                     "NAO PROGRAMADO", "ALMOXARIFADO CONSAG"}
 STATUS_RUINS = {"NAO LOCALIZADO", "NÃO LOCALIZADO", "REPROVADO", "NAO MONTADO",
                 "NÃO MONTADO", "CANCELADO", "REMOVER", "NAO APTO", "NÃO APTO"}
+
+
+# A previsao de fornecimento so existe para o que ainda esta sendo comprado.
+# Nos outros estados a coluna vem vazia na base, e mostrar a linha assim mesmo
+# sugeriria que falta preencher algo -- quando na verdade nao se aplica.
+EM_COMPRA = {"ON DEMAND", "EM COMPRA"}
+
+
+def painel_previsao_fornecimento(status_final: object, previsao: object) -> str:
+    """O card "Previsão de fornecimento" da ficha da TAG.
+
+    Só existe para ON DEMAND e EM COMPRA -- nos outros estados a coluna vem
+    vazia na base, e mostrar o card assim mesmo sugeriria que falta preencher
+    algo, quando na verdade não se aplica.
+
+    Com data, diz se atrasou e de quanto, ou em quantos dias chega. Sem data,
+    diz que não há definição: é diferente de não se aplicar, e por isso o card
+    aparece do mesmo jeito, com o traço.
+    """
+    if str(status_final).strip().upper() not in EM_COMPRA:
+        return ""
+
+    d = pd.to_datetime(previsao, dayfirst=True, errors="coerce")
+    if pd.isna(d):
+        corpo = (fx_linha("Data prevista", '<span class="gtbl-muted">—</span>')
+                 + fx_linha("Situação",
+                            '<span class="gtbl-badge mudo">Sem definição</span>'))
+        return fx_painel("Previsão de fornecimento", "caixa", corpo)
+
+    hoje = pd.Timestamp.now(tz=BR_TZ).tz_localize(None).normalize()
+    dias = (pd.Timestamp(d).normalize() - hoje).days
+    if dias < 0:
+        tom, texto = "crit", f"Atrasado há {br_num(-dias)} dia{'s' if dias != -1 else ''}"
+    elif dias == 0:
+        tom, texto = "warn", "Recebimento hoje"
+    else:
+        tom, texto = "ok", f"No prazo · em {br_num(dias)} dia{'s' if dias != 1 else ''}"
+    corpo = (fx_linha("Data prevista", f"<b>{d:%d/%m/%Y}</b>")
+             + fx_linha("Situação", f'<span class="gtbl-badge {tom}">{texto}</span>'))
+    return fx_painel("Previsão de fornecimento", "caixa", corpo)
 
 
 def status_pill(v: object) -> str:
