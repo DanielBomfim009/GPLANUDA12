@@ -4437,17 +4437,31 @@ function cena(c) {
                  'tronco painel → caixa'));
       p.push(cartaoCaixa(xCx, y, b, aberto));
       if (aberto) {
+        // a calha corre ACIMA dos cartões e cada TAG desce dela. Correndo na
+        // altura deles, o cabo de um atravessava todos os anteriores -- é o
+        // mesmo defeito que a vista da caixa já tinha tido.
+        const yCalha = y + 22, passoFil = 76;
+        for (let f = 0; f < fil; f++) {
+          const fatia = b.tags.slice(f * porLinha, (f + 1) * porLinha);
+          p.push(calha(`M${xInst - 14} ${yCalha + f * passoFil}
+            H${xInst + (fatia.length - 1) * passo + 36}`, fatia, 2.4));
+        }
+        if (fil > 1)
+          p.push(calha(`M${xInst - 14} ${yCalha} V${yCalha + (fil - 1) * passoFil}`,
+                       b.tags, 2.4));
+        p.push(calha(`M${xCx + 150} ${meio} H${xInst - 14} V${yCalha}`, b.tags, 2.4));
         b.tags.forEach((t, k) => {
           const cl = k % porLinha, fl = Math.floor(k / porLinha);
-          const xi = xInst + cl * passo + 36, yi = y + 30 + fl * 66;
-          p.push(`<path d="M${xInst - 14} ${meio} H${xi}" stroke="var(--${
-            t.cabo ? 'ok' : t.pct > 0 ? 'and' : 'nao'})" stroke-width="1.6"
-            stroke-opacity=".5" fill="none"/>`);
+          const xi = xInst + cl * passo + 36, yr = yCalha + fl * passoFil;
+          const yi = yr + 44;
+          p.push(`<path d="M${xi} ${yr} V${yi - 20}" stroke="var(--${
+            t.cabo ? 'ok' : t.pct > 0 ? 'and' : 'nao'})" stroke-width="2"
+            fill="none" stroke-linecap="round"/>`);
           p.push(cartaoMini(xi, yi, t));
           xFim = Math.max(xFim, xi + 46);
         });
       }
-      y += aberto ? Math.max(96, fil * 66 + 30) : 96;
+      y += aberto ? Math.max(96, 22 + fil * 76 + 34) : 96;
     });
     p.push(painel(xPain, 56, c.painel, false));
     if (espinha.length > 1)
