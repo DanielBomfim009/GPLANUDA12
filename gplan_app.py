@@ -3932,6 +3932,84 @@ def cert_circuitos_por_tag(lanc: pd.DataFrame, cache_key: str) -> dict:
     return saida
 
 
+@st.cache_data(show_spinner=False, max_entries=3)
+def cert_paineis(lanc: pd.DataFrame, cache_key: str) -> dict:
+    """Cada painel e as caixas que saem dele, com o que pendura em cada uma.
+
+    Só a caixa de primeiro nível vira cartão. O que vem pendurado nela conta na
+    subárvore dela: desenhar tudo faria da tela um mapa de fios, e o detalhe já
+    é o que a vista da caixa mostra.
+    """
+    if lanc.empty:
+        return {}
+    saida: dict[str, list] = {}
+    for r in lanc.to_dict("records"):
+        org = str(r["ORIGEM"]).strip()
+        if org not in ("", "nan"):
+            saida.setdefault(org, []).append(r)
+
+    def sobe(no):
+        """O caminho de um nó até o painel, do primeiro passo ao último."""
+        caminho, atual = [], no
+        for _ in range(6):
+            prox = saida.get(atual)
+            if not prox:
+                return caminho, None
+            destino = str(prox[0]["DESTINO"]).strip()
+            caminho.append((atual, prox[0]))
+            if cert_nivel(destino) == 2:
+                return caminho, destino
+            atual = destino
+        return caminho, None
+
+    paineis: dict[str, dict] = {}
+    for ponta in saida:
+        if cert_nivel(ponta) != 1:
+            continue
+        caminho, painel = sobe(ponta)
+        if not painel:
+            continue
+        raiz, circ = caminho[-1]      # a caixa que fala direto com o painel
+        p = paineis.setdefault(painel, {})
+        b = p.setdefault(raiz, {"nome": raiz, "tronco": _cert_circuito(circ, {}),
+                                "caixas": set(), "inst": 0, "cabo_ok": 0, "tags": []})
+        b["caixas"].add(ponta)
+    # cada instrumento entra na conta da caixa de primeiro nível que o alimenta
+    for ponta, circuitos in saida.items():
+        if cert_nivel(ponta) != 0:
+            continue
+        caminho, painel = sobe(ponta)
+        if not painel or painel not in paineis:
+            continue
+        raiz = caminho[-1][0]
+        b = paineis[painel].get(raiz)
+        if b is None:
+            continue
+        b["inst"] += 1
+        pronto = all(cert_num(c["PCT"]) >= 99.5 for _, c in caminho)
+        if pronto:
+            b["cabo_ok"] += 1
+        b["tags"].append({"org": ponta, "cabo": pronto,
+                          "status": str(circuitos[0]["STATUS"]).strip(),
+                          "pct": round(cert_num(circuitos[0]["PCT"]), 1)})
+    return {p: sorted((dict(v, caixas=len(v["caixas"]),
+                            tags=sorted(v["tags"], key=lambda t: t["org"]))
+                       for v in cs.values()), key=lambda x: x["nome"])
+            for p, cs in paineis.items()}
+
+
+def cert_cadeia_painel(painel: str, blocos: list, mont: dict) -> dict:
+    """A cena do painel: ele e as caixas de primeiro nível dele."""
+    return {"tipo": "painel", "caixa": painel, "painel": painel,
+            "painel_indef": False, "mont": mont.get(painel, {}).get("mont", ""),
+            "eletrica": [], "tronco": [], "segmentos": [], "ligacoes": [],
+            "ramais": [], "blocos": [
+                {**b, "mont": mont.get(b["nome"], {}).get("mont", ""),
+                 "tags": [{**t, "mont": mont.get(t["org"], {}).get("mont", "")}
+                          for t in b["tags"]]}
+                for b in blocos]}
+
+
 def cert_cadeia(alvo: str, lanc: pd.DataFrame, mont: dict) -> dict:
     """A cadeia de um alvo, nas duas topologias que a planilha guarda.
 
@@ -4041,6 +4119,9 @@ CERT_CLASSE = {"ok": "ok", "warn": "warn", "crit": "crit", "desc": "roxo"}
 CERT_JS = r"""
 const D = __DADOS__;
 let zoom = 1;
+// quais caixas estao abertas na vista do painel. Vive aqui dentro: abrir uma
+// caixa nao e pergunta para o servidor.
+const abertos = new Set();
 
 const br = (n, c) => Number(n).toLocaleString('pt-BR',
   {minimumFractionDigits: c || 0, maximumFractionDigits: c || 0});
@@ -4222,6 +4303,62 @@ function transmissor(x, y, mont) {
     <rect x="${x - 5}" y="${y - 14.5}" width="10" height="4.5" rx="1.5" fill="var(--metal3)"/></g>`;
 }
 
+// O cartão de uma caixa na vista do painel: o corpo pintado pela montagem
+// dela, e embaixo quanto do que pendura já tem cabo pronto.
+function cartaoCaixa(x, y, b, aberto) {
+  const w = 150, h = 74;
+  const pct = b.inst ? b.cabo_ok / b.inst * 100 : 0;
+  const tom = !b.inst ? 'roxo' : pct >= 99.5 ? 'ok' : pct > 0 ? 'and' : 'nao';
+  const dica = cab('caixa de junção', b.nome) +
+    dl('montagem', nomeMont(b.mont), corMont(b.mont)) +
+    dl('instrumentos', b.inst) +
+    dl('com cabo pronto', b.inst ? `${b.cabo_ok} · ${br(pct, 0)}%` : '—', tom) +
+    (b.caixas > 1 ? dl('caixas em série', b.caixas) : '') +
+    dl('tronco', b.tronco.status + ' · ' + br(b.tronco.m) + ' m', cls(b.tronco.status)) +
+    (b.inst ? `<div class='solta'>${aberto ? 'clique no − para fechar'
+      : 'clique no + para ver os instrumentos'}</div>` : '');
+  // o + fica no proprio cartao: e nele que a pergunta "o que tem aqui dentro"
+  // nasce, e nao numa lista ao lado
+  const sinal = b.inst ? `<g class="abre" data-abre="${esc(b.nome)}">
+      <rect x="${x + w - 30}" y="${y + 12}" width="22" height="22" rx="7"
+        fill="rgba(var(--rgb-tinta),.08)" stroke="var(--linha2)"/>
+      <path d="M${x + w - 24} ${y + 23} h10 ${aberto ? '' : `M${x + w - 19} ${y + 18} v10`}"
+        stroke="var(--t2)" stroke-width="2" stroke-linecap="round"/></g>` : '';
+  return `<g class="bloco" ${dd(dica)}>
+    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10"
+      fill="var(--metal2)" stroke="var(--${corMont(b.mont)})" stroke-width="1.6"
+      stroke-opacity="${aberto ? 1 : .7}"/>
+    <rect x="${x}" y="${y}" width="${w}" height="4" rx="2" fill="var(--${corMont(b.mont)})"/>
+    <text x="${x + 11}" y="${y + 26}" fill="var(--t1)" font-size="11.5" font-weight="700"
+      font-family="ui-monospace,Consolas,monospace">${esc(b.nome).slice(0, 16)}</text>
+    <text x="${x + 11}" y="${y + 44}" fill="var(--t3)" font-size="9.5">${b.inst}
+      ${b.inst === 1 ? 'instrumento' : 'instrumentos'}${b.caixas > 1 ? ' · ' + b.caixas + ' caixas' : ''}</text>
+    <rect x="${x + 11}" y="${y + 52}" width="${w - 22}" height="5" rx="2.5"
+      fill="rgba(var(--rgb-tinta),.10)"/>
+    <rect x="${x + 11}" y="${y + 52}" width="${(w - 22) * pct / 100}" height="5" rx="2.5"
+      fill="var(--${tom})"/>
+    <text x="${x + 11}" y="${y + 68}" fill="var(--${tom})" font-size="9"
+      font-weight="700">${b.cabo_ok} de ${b.inst} com cabo pronto</text>${sinal}</g>`;
+}
+
+// Na vista do painel o instrumento é um selo: a cor da montagem, a do cabo e a
+// tag. O detalhe é da vista da caixa -- aqui o que importa é enxergar o conjunto.
+function cartaoMini(x, y, t) {
+  const cm = corMont(t.mont), cc = t.cabo ? 'ok' : t.pct > 0 ? 'and' : 'nao';
+  const dica = cab('instrumento', t.org) +
+    dl('cabo', t.status + (t.pct > 0 && t.pct < 100 ? ' · ' + br(t.pct, 1) + '%' : ''), cc) +
+    dl('montagem', nomeMont(t.mont), cm) +
+    "<div class='solta'>clique para abrir a ficha da TAG</div>";
+  return `<g class="inst" data-ficha="${esc(t.ancora || '')}" ${dd(dica)}>
+    <rect x="${x - 34}" y="${y - 20}" width="68" height="40" rx="7"
+      fill="var(--metal2)" stroke="rgba(var(--rgb-tinta),.12)"/>
+    <rect x="${x - 34}" y="${y - 20}" width="68" height="3.5" rx="1.75" fill="var(--${cc})"/>
+    <circle cx="${x - 22}" cy="${y + 3}" r="5" fill="var(--${cm})" fill-opacity=".35"
+      stroke="var(--${cm})" stroke-width="2"/>
+    <text x="${x - 12}" y="${y + 6.5}" fill="var(--t2)" font-size="7"
+      font-family="ui-monospace,Consolas,monospace">${esc(t.org).slice(0, 12)}</text></g>`;
+}
+
 function cartao(xi, yi, r) {
   const sel = D.tag === r.org ? ' sel' : '';
   return `<g class="inst${sel}" data-ficha="${esc(r.ancora || '')}" ${dd(dicaTag(r))}>
@@ -4282,6 +4419,44 @@ function cena(c) {
   const base = ff ? 150 : 190;
   const p = [], nos = [], xPain = 150, xPrim = 400;
   let xFim = xPrim + 200;
+
+  if (c.tipo === 'painel') {
+    // uma faixa por caixa: o cartao dela e, na mesma linha, os instrumentos que
+    // penduram nela. Em grade, descobrir de qual caixa um instrumento vinha
+    // exigia seguir o fio com o olho.
+    const B = c.blocos, xCx = xPain + 240, xInst = xCx + 200, passo = 84;
+    const porLinha = 12;
+    let y = 56;
+    const espinha = [];
+    B.forEach(b => {
+      const aberto = abertos.has(b.nome);
+      const fil = aberto ? Math.max(1, Math.ceil(b.tags.length / porLinha)) : 0;
+      const meio = y + 37;
+      espinha.push(meio);
+      p.push(fio(zigue(xPain + 106, meio, xCx, meio, 6), b.tronco, 2.6,
+                 'tronco painel → caixa'));
+      p.push(cartaoCaixa(xCx, y, b, aberto));
+      if (aberto) {
+        b.tags.forEach((t, k) => {
+          const cl = k % porLinha, fl = Math.floor(k / porLinha);
+          const xi = xInst + cl * passo + 36, yi = y + 30 + fl * 66;
+          p.push(`<path d="M${xInst - 14} ${meio} H${xi}" stroke="var(--${
+            t.cabo ? 'ok' : t.pct > 0 ? 'and' : 'nao'})" stroke-width="1.6"
+            stroke-opacity=".5" fill="none"/>`);
+          p.push(cartaoMini(xi, yi, t));
+          xFim = Math.max(xFim, xi + 46);
+        });
+      }
+      y += aberto ? Math.max(96, fil * 66 + 30) : 96;
+    });
+    p.push(painel(xPain, 56, c.painel, false));
+    if (espinha.length > 1)
+      p.push(`<path d="M${xPain + 106} ${espinha[0]} V${espinha[espinha.length - 1]}"
+        stroke="rgba(var(--rgb-tinta),.16)" stroke-width="3" fill="none"/>`);
+    return `<svg class="cena" viewBox="0 0 ${Math.max(xFim + 40, 1100)} ${y + 30}" role="img"
+      aria-label="Segmento do painel ${esc(String(c.painel))}: ${B.length} caixas e
+      ${B.reduce((a, b) => a + b.inst, 0)} instrumentos">${p.join('')}</svg>`;
+  }
 
   if (E.length) {
     E.forEach((e, i) => p.push(fio(`M40 ${34 + i * 16} H${xPain + 48} V${base - 34}`,
@@ -4417,8 +4592,11 @@ function focar(fator) {
               behavior: 'smooth'});
 }
 
-document.getElementById('cena').innerHTML = cena(D.cadeia);
-aplicarZoom();
+function redesenhar() {
+  document.getElementById('cena').innerHTML = cena(D.cadeia);
+  aplicarZoom();
+}
+redesenhar();
 if (D.tag) requestAnimationFrame(() => focar(1.6));
 
 // A ficha da TAG e um modal da pagina de fora. Trocar a ancora seria o caminho
@@ -4502,7 +4680,8 @@ function abrirFicha(id) {
     // o alvo tem de ser lido agora: com setPointerCapture, o pointerup passa a
     // chegar na moldura e o cartao sob o dedo se perde
     a = {x: e.clientX, y: e.clientY, l: z.scrollLeft, t: z.scrollTop, andou: false,
-         alvo: e.target.closest && e.target.closest('[data-d]')};
+         alvo: e.target.closest
+               && (e.target.closest('[data-abre]') || e.target.closest('[data-d]'))};
     z.classList.add('arrasta'); z.setPointerCapture(e.pointerId);
   });
   z.addEventListener('pointermove', e => {
@@ -4517,6 +4696,11 @@ function abrirFicha(id) {
     a = null; z.classList.remove('arrasta');
     if (!clicou) return;
     if (!alvo) { soltar(); return; }
+    const abre = alvo.getAttribute && alvo.getAttribute('data-abre');
+    if (abre) {
+      abertos.has(abre) ? abertos.delete(abre) : abertos.add(abre);
+      soltar(); redesenhar(); return;
+    }
     const ficha = alvo.getAttribute('data-ficha');
     if (ficha && abrirFicha(ficha)) { soltar(); return; }
     if (alvo === fixado) { soltar(); return; }
@@ -4578,7 +4762,8 @@ svg.cena{{width:100%;height:auto;display:block}}
 .inst.sel .chip-bg{{stroke:var(--azul);stroke-width:2.5}}
 .inst:hover .chip-bg{{stroke:var(--t2)}}
 .hit{{stroke:transparent;fill:none}}
-.inst{{cursor:pointer}}
+.inst,.abre{{cursor:pointer}}
+.abre:hover rect{{stroke:var(--azul)}}
 .inst.fixo .chip-bg{{stroke:var(--t2);stroke-width:2;stroke-dasharray:4 3}}
 .dica.fixo{{border-color:var(--t3)}}
 .dica .solta{{font-size:9.5px;color:var(--t3);margin-top:7px;padding-top:6px;
@@ -4602,8 +4787,8 @@ svg.cena{{width:100%;height:auto;display:block}}
 </style></head><body>
 <div class="dica" id="dica"></div>
 <div class="barra">
-  <span class="tt">passe o mouse para ver a situação · clique na TAG para abrir a
-    ficha · arraste para deslocar · Ctrl + roda amplia</span>
+  <span class="tt">passe o mouse para ver a situação · <b>+</b> abre a caixa ·
+    clique na TAG para abrir a ficha · arraste para deslocar · Ctrl + roda amplia</span>
   <button class="zb" onclick="focar(1/1.3)" title="Afastar">−</button>
   <span class="zn" id="zn">100%</span>
   <button class="zb" onclick="focar(1.3)" title="Aproximar">+</button>
@@ -4840,7 +5025,11 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     # aba inteira sumia junto. A busca cai de volta para todas, e quem explica
     # o vazio é a tabela, no lugar dela.
     base_busca = tags_no_filtro or sorted(indice)
-    opcoes = ([f"{t}  ·  TAG" for t in base_busca]
+    # O painel entra na busca como alvo: e a unica forma de ver o segmento
+    # inteiro sem abrir uma caixa por vez.
+    paineis = cert_paineis(lanc, cache_key)
+    opcoes = ([f"{p}  ·  painel · {len(b)} caixas" for p, b in sorted(paineis.items())]
+              + [f"{t}  ·  TAG" for t in base_busca]
               + ([f"{a}  ·  {'fieldbus' if a.startswith('CFF') else 'caixa'}"
                   for a in alvos] if not tags_no_filtro or alvo_recorte == "Todos" else []))
     padrao = st.session_state.get("cert_escolha")
@@ -4855,10 +5044,76 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         alvo, tag_sel = nome, ""
 
     com_ficha = set(resumo["TAG"].astype(str))
+    def render_tabela():
+        """A tabela é do universo inteiro, e não da cena: ela vale igual na
+        vista da caixa e na do painel."""
+        # A tabela é do universo inteiro, não só da cadeia aberta: a pergunta
+        # "quais das minhas TAGs estão aptas" não se responde uma caixa por vez.
+        linhas = []
+        for tag in tags_no_filtro:
+            v = por_tag[tag]
+            marca = CERT_CLASSE[v["tom"]]
+            mt = "ok" if v["montada"] else "crit"
+            atual = " sel" if tag == tag_sel else ""
+            linhas.append(
+                f'<tr class="ct-lin{atual}"><td class="gtbl-mono">{tag}</td>'
+                f'<td class="gtbl-mono gtbl-muted">{v["caixa"]}</td>'
+                f'<td><span class="gtbl-badge {"ok" if v["cabo"] else marca}">'
+                f'{"apto" if v["cabo"] else CERT_ROTULO[v["tom"]]}</span></td>'
+                f'<td><span class="gtbl-badge {mt}">'
+                f'{"montada" if v["montada"] else "não montada"}</span></td>'
+                f'<td class="gtbl-muted" style="font-size:11px">{v["onde"]}</td></tr>')
+        cabecalho = (f'<div class="gplan-panel-title" style="margin:20px 0 8px">'
+                     f'{alvo_recorte} <span class="gtbl-muted" style="font-weight:500">'
+                     f'{br_num(len(linhas))} {"TAG" if len(linhas) == 1 else "TAGs"}'
+                     f'</span></div>')
+        if not linhas:
+            render_html(cabecalho + '<div class="gplan-panel"><div class="gtbl-empty">'
+                        f"Nenhuma TAG neste recorte hoje. O desenho continua na TAG "
+                        f"escolhida acima.</div></div>")
+        else:
+            render_html(
+                cabecalho +
+                f'<div class="ct-rolo"><table class="gtbl"><thead><tr><th>TAG</th>'
+                f'<th>Caixa</th><th>Cabo</th><th>Montagem</th><th>Trava em</th></tr></thead>'
+                f'<tbody>{"".join(linhas)}</tbody></table></div>')
+
+    if alvo in paineis:
+        cad = cert_cadeia_painel(alvo, paineis[alvo], mont)
+        titulo = (f"{alvo} → {len(cad['blocos'])} caixas → "
+                  f"{sum(b['inst'] for b in cad['blocos'])} instrumentos")
+        render_html(f'<div class="gplan-panel-title" style="margin:4px 0 10px">'
+                    f'Segmento do painel <span class="gtbl-muted" '
+                    f'style="font-weight:500">{titulo}</span></div>')
+        for bl in cad["blocos"]:
+            for t in bl["tags"]:
+                t["ancora"] = ficha_anchor(t["org"]) if t["org"] in com_ficha else ""
+        # A moldura nasce do tamanho da vista fechada -- uma faixa de 96 px por
+        # caixa. Abrir cresce por dentro, e a moldura rola: dimensionar pelo
+        # pior caso deixaria meia tela vazia enquanto tudo estivesse fechado.
+        alt_cena = 56 + 96 * len(cad["blocos"]) + 30
+        larg = max(1100, 240 + 200 + 12 * 84 + 190)
+        altura_p = int(min(700, max(360, 1320 * alt_cena / larg + 46)))
+        st.components.v1.html(cert_cena_html(cad, "", tema_ativo(), altura_p),
+                              height=altura_p, scrolling=False)
+        render_html('<div class="ct-leg"><span style="color:var(--text-3)">'
+                    "uma faixa por caixa: o cartão dela e, na mesma linha, os "
+                    "instrumentos que penduram nela · clique numa TAG para abrir a ficha "
+                    "· a barra do cartão é quanto da caixa já tem cabo pronto</span></div>")
+        do_painel_tags = [t["org"] for bl in cad["blocos"] for t in bl["tags"]
+                          if t["org"] in com_ficha]
+        if do_painel_tags:
+            render_html(fichas_modais_html(do_painel_tags, resumo, esperados, tags,
+                                           espera_por_doc=espera_por_documento(
+                                               _revisoes_por_doc(cache_key, sigem))))
+        render_tabela()
+        return
+
     cad = cert_cadeia(alvo, lanc, mont)
     if not cad["ramais"]:
         render_html('<div class="gplan-panel"><div class="gtbl-empty">'
                     f"Nenhum instrumento chega em {alvo} nesta base.</div></div>")
+        render_tabela()
         return
     if not tag_sel:
         tag_sel = cad["ramais"][0]["org"]
@@ -4911,36 +5166,7 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         <span><b style="background:var(--accent-purple)"></b>sem par na base de TAGs</span>
       </div>""")
 
-    # A tabela é do universo inteiro, não só da cadeia aberta: a pergunta
-    # "quais das minhas TAGs estão aptas" não se responde uma caixa por vez.
-    linhas = []
-    for tag in tags_no_filtro:
-        v = por_tag[tag]
-        marca = CERT_CLASSE[v["tom"]]
-        mt = "ok" if v["montada"] else "crit"
-        atual = " sel" if tag == tag_sel else ""
-        linhas.append(
-            f'<tr class="ct-lin{atual}"><td class="gtbl-mono">{tag}</td>'
-            f'<td class="gtbl-mono gtbl-muted">{v["caixa"]}</td>'
-            f'<td><span class="gtbl-badge {"ok" if v["cabo"] else marca}">'
-            f'{"apto" if v["cabo"] else CERT_ROTULO[v["tom"]]}</span></td>'
-            f'<td><span class="gtbl-badge {mt}">'
-            f'{"montada" if v["montada"] else "não montada"}</span></td>'
-            f'<td class="gtbl-muted" style="font-size:11px">{v["onde"]}</td></tr>')
-    cabecalho = (f'<div class="gplan-panel-title" style="margin:20px 0 8px">'
-                 f'{alvo_recorte} <span class="gtbl-muted" style="font-weight:500">'
-                 f'{br_num(len(linhas))} {"TAG" if len(linhas) == 1 else "TAGs"}'
-                 f'</span></div>')
-    if not linhas:
-        render_html(cabecalho + '<div class="gplan-panel"><div class="gtbl-empty">'
-                    f"Nenhuma TAG neste recorte hoje. O desenho continua na TAG "
-                    f"escolhida acima.</div></div>")
-    else:
-        render_html(
-            cabecalho +
-            f'<div class="ct-rolo"><table class="gtbl"><thead><tr><th>TAG</th>'
-            f'<th>Caixa</th><th>Cabo</th><th>Montagem</th><th>Trava em</th></tr></thead>'
-            f'<tbody>{"".join(linhas)}</tbody></table></div>')
+    render_tabela()
 
     # As fichas ficam no fim da página, fechadas: o :target abre só a que o
     # clique no desenho pedir, e nenhuma ida ao servidor acontece.
