@@ -4165,8 +4165,8 @@ function cena(c) {
   // O ramal cresce quando sobra tela e encolhe quando não sobra: numa caixa de
   // três instrumentos o cabo é o que há para olhar; numa de sessenta, cada
   // pixel gasto na descida vira fileira a mais de rolagem.
-  const queda = maiorGrupo <= 2 ? 168 : maiorGrupo <= 4 ? 140
-              : maiorGrupo <= 8 ? 116 : maiorGrupo <= 16 ? 96 : 78;
+  const queda = maiorGrupo <= 2 ? 138 : maiorGrupo <= 4 ? 124
+              : maiorGrupo <= 8 ? 110 : maiorGrupo <= 16 ? 94 : 78;
   const passoX = maiorGrupo <= 4 ? 104 : maiorGrupo <= 8 ? 94 : 82;
   const fila = queda + 40, yRail = 146;
   const ALT = ff ? 150 + yRail + queda + (filMax - 1) * fila + 76
@@ -4211,13 +4211,18 @@ function cena(c) {
       const lista = grupos[sg.nome] || [];
       if (!lista.length) return;
       const cols = Math.min(3, lista.length), fil = Math.ceil(lista.length / cols);
-      const xIni = x + 4, yBar = base + yRail, px = passoX + 6;
-      p.push(calha(`M${x + 48} ${base + 98} V${yBar}`, lista, 3.4));
+      const px = passoX + 6, yBar = base + yRail, xDesce = x + 48;
+      // a grade nasce centrada sob a caixa: com uma coluna só, o cartão fica
+      // embaixo da descida em vez de 44 px ao lado dela
+      const xIni = xDesce - (cols - 1) * px / 2;
+      p.push(calha(`M${xDesce} ${base + 98} V${yBar}`, lista, 3.4));
       if (fil > 1) p.push(calha(`M${xIni} ${yBar} V${yBar + (fil - 1) * fila}`, lista, 2.8));
       for (let f = 0; f < fil; f++) {
         const fatia = lista.slice(f * cols, (f + 1) * cols);
-        p.push(calha(`M${xIni} ${yBar + f * fila} H${xIni + (fatia.length - 1) * px}`,
-                     fatia, 2.8));
+        // a calha vai da descida ate a ultima coluna: quando os dois coincidem
+        // ela some, e era esse o buraco entre a caixa e o cabo
+        const a = Math.min(xIni, xDesce), z2 = Math.max(xIni + (fatia.length - 1) * px, xDesce);
+        p.push(calha(`M${a} ${yBar + f * fila} H${z2}`, fatia, 2.8));
       }
       lista.forEach((r, k) => {
         const fl = Math.floor(k / cols);
@@ -4260,7 +4265,8 @@ function cena(c) {
       p.push(calha(`M${xBar} ${y0} V${y0 + (fileiras - 1) * fila}`, lista, 2.8));
       for (let f = 0; f < fileiras; f++) {
         const fatia = lista.slice(f * colunas, (f + 1) * colunas);
-        p.push(calha(`M${xBar} ${y0 + f * fila} H${x0 + (fatia.length - 1) * passoX + 26}`,
+        p.push(calha(`M${xBar} ${y0 + f * fila}
+                      H${Math.max(x0 + (fatia.length - 1) * passoX + 26, xBar + 30)}`,
                      fatia, 2.8));
       }
       lista.forEach((r, i) => {
@@ -4309,19 +4315,37 @@ if (D.tag) requestAnimationFrame(() => focar(1.6));
 
 (function () {
   const b = document.getElementById('dica'), z = document.getElementById('zona');
+  let fixado = null;
+
+  function posicionar(cx, cy) {
+    // a dica vira de lado quando encosta na borda, em vez de sair da tela
+    const x = cx + 18 + b.offsetWidth > innerWidth - 10
+            ? Math.max(8, cx - b.offsetWidth - 18) : cx + 18;
+    const y = cy + 18 + b.offsetHeight > innerHeight - 10
+            ? Math.max(8, cy - b.offsetHeight - 18) : cy + 18;
+    b.style.transform = `translate(${x}px,${y}px)`;
+  }
+  function mostrar(alvo, cx, cy, preso) {
+    b.innerHTML = alvo.getAttribute('data-d')
+      + (preso ? "<div class='solta'>clique fora para soltar</div>" : '');
+    b.classList.add('ver');
+    b.classList.toggle('fixo', !!preso);
+    posicionar(cx, cy);
+  }
+  function soltar() {
+    if (fixado) fixado.classList.remove('fixo');
+    fixado = null;
+    b.classList.remove('ver', 'fixo');
+  }
+
   addEventListener('mousemove', e => {
+    if (fixado) return;               // com a dica presa, ela não persegue o mouse
     const alvo = e.target.closest && e.target.closest('[data-d]');
     if (!alvo) { b.classList.remove('ver'); return; }
-    b.innerHTML = alvo.getAttribute('data-d');
-    b.classList.add('ver');
-    // a dica vira de lado quando encosta na borda, em vez de sair da tela
-    const x = e.clientX + 18 + b.offsetWidth > innerWidth - 10
-            ? e.clientX - b.offsetWidth - 18 : e.clientX + 18;
-    const y = e.clientY + 18 + b.offsetHeight > innerHeight - 10
-            ? Math.max(8, e.clientY - b.offsetHeight - 18) : e.clientY + 18;
-    b.style.transform = `translate(${x}px,${y}px)`;
+    mostrar(alvo, e.clientX, e.clientY, false);
   }, {passive: true});
-  addEventListener('mouseleave', () => b.classList.remove('ver'));
+  addEventListener('mouseleave', () => { if (!fixado) b.classList.remove('ver'); });
+  addEventListener('keydown', e => { if (e.key === 'Escape') soltar(); });
   // Ctrl+roda amplia; sem o Ctrl a roda continua rolando, que é o que se espera
   z.addEventListener('wheel', e => {
     if (!e.ctrlKey && !e.metaKey) return;
@@ -4330,17 +4354,30 @@ if (D.tag) requestAnimationFrame(() => focar(1.6));
   }, {passive: false});
   let a = null;
   z.addEventListener('pointerdown', e => {
-    a = {x: e.clientX, y: e.clientY, l: z.scrollLeft, t: z.scrollTop};
+    // o alvo tem de ser lido agora: com setPointerCapture, o pointerup passa a
+    // chegar na moldura e o cartao sob o dedo se perde
+    a = {x: e.clientX, y: e.clientY, l: z.scrollLeft, t: z.scrollTop, andou: false,
+         alvo: e.target.closest && e.target.closest('[data-d]')};
     z.classList.add('arrasta'); z.setPointerCapture(e.pointerId);
   });
   z.addEventListener('pointermove', e => {
     if (!a) return;
+    // 4 px de folga: sem isso o tremor da mão vira arrasto e engole o clique
+    if (Math.abs(e.clientX - a.x) > 4 || Math.abs(e.clientY - a.y) > 4) a.andou = true;
     z.scrollLeft = a.l - (e.clientX - a.x);
     z.scrollTop = a.t - (e.clientY - a.y);
   });
-  const solta = () => { a = null; z.classList.remove('arrasta'); };
-  z.addEventListener('pointerup', solta);
-  z.addEventListener('pointercancel', solta);
+  z.addEventListener('pointerup', e => {
+    const clicou = a && !a.andou, alvo = a && a.alvo;
+    a = null; z.classList.remove('arrasta');
+    if (!clicou) return;
+    if (!alvo || alvo === fixado) { soltar(); return; }
+    soltar();
+    fixado = alvo;
+    if (alvo.classList.contains('inst')) alvo.classList.add('fixo');
+    mostrar(alvo, e.clientX, e.clientY, true);
+  });
+  z.addEventListener('pointercancel', () => { a = null; z.classList.remove('arrasta'); });
 })();
 """
 
@@ -4394,6 +4431,11 @@ svg.cena{{width:100%;height:auto;display:block}}
 .inst.sel .chip-bg{{stroke:var(--azul);stroke-width:2.5}}
 .inst:hover .chip-bg{{stroke:var(--t2)}}
 .hit{{stroke:transparent;fill:none}}
+.inst,.hit{{cursor:pointer}}
+.inst.fixo .chip-bg{{stroke:var(--t2);stroke-width:2;stroke-dasharray:4 3}}
+.dica.fixo{{border-color:var(--t3)}}
+.dica .solta{{font-size:9.5px;color:var(--t3);margin-top:7px;padding-top:6px;
+  border-top:1px solid var(--linha);letter-spacing:.3px}}
 .andando{{animation:corre 1.05s linear infinite}}
 @keyframes corre{{to{{stroke-dashoffset:-16}}}}
 @media (prefers-reduced-motion:reduce){{.andando{{animation:none}}}}
@@ -4413,8 +4455,8 @@ svg.cena{{width:100%;height:auto;display:block}}
 </style></head><body>
 <div class="dica" id="dica"></div>
 <div class="barra">
-  <span class="tt">Ctrl + roda amplia · arraste para deslocar · passe o mouse para ver
-    a situação</span>
+  <span class="tt">passe o mouse para ver a situação · clique para prender a dica ·
+    arraste para deslocar · Ctrl + roda amplia</span>
   <button class="zb" onclick="focar(1/1.3)" title="Afastar">−</button>
   <span class="zn" id="zn">100%</span>
   <button class="zb" onclick="focar(1.3)" title="Aproximar">+</button>
@@ -4555,8 +4597,8 @@ def cert_altura(cad: dict, largura_px: int = 1320) -> int:
     ff = cad["tipo"] == "cff"
     cols = 3 if ff else min(12, max(2, math.ceil(math.sqrt(maior * 1.9))))
     fileiras = math.ceil(maior / cols)
-    queda = (168 if maior <= 2 else 140 if maior <= 4 else 116 if maior <= 8
-             else 96 if maior <= 16 else 78)
+    queda = (138 if maior <= 2 else 124 if maior <= 4 else 110 if maior <= 8
+             else 94 if maior <= 16 else 78)
     passo_x = 104 if maior <= 4 else 94 if maior <= 8 else 82
     fila = queda + 40
     alt = ((150 + 146 + queda + (fileiras - 1) * fila + 76) if ff
