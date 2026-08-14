@@ -3707,6 +3707,18 @@ PAINEL_PREFIXOS = ("PN", "PL", "PCC")
 CAIXA_PREFIXOS = ("CJ", "CFF")
 
 
+def cert_txt(serie: pd.Series) -> pd.Series:
+    """Coluna de texto sem nulo, em qualquer versão do pandas.
+
+    Até o pandas 2, `astype(str)` transformava NaN na string "nan". No pandas 3
+    o nulo sobrevive à conversão, e a linha seguinte quebra com
+    "'float' object has no attribute 'startswith'" -- que foi exatamente o que
+    derrubou esta aba em produção, rodando num Python mais novo que o daqui.
+    O fillna antes tira a diferença entre as duas versões.
+    """
+    return serie.fillna("").astype(str).str.strip()
+
+
 def cert_nivel(ponta: str) -> int:
     """0 campo, 1 caixa, 2 painel. Decide o sentido de leitura do trecho."""
     p = str(ponta).upper()
@@ -3728,12 +3740,14 @@ def cert_montagem(tags: pd.DataFrame, depara: pd.DataFrame, cache_key: str) -> d
     """
     if tags.empty or depara.empty:
         return {}
-    por_tag = dict(zip(tags["TAG"].astype(str).str.strip(),
-                       tags.get("STATUS_MONTAGEM", pd.Series(dtype=str)).astype(str).str.strip()))
+    por_tag = dict(zip(cert_txt(tags["TAG"]),
+                       cert_txt(tags.get("STATUS_MONTAGEM", pd.Series(dtype=str)))))
     ordem = ["Montado", "Em Programação", "Não Programado", "Não Montado"]
     saida: dict[str, dict] = {}
-    for ponta, grupo in depara.groupby(depara["PONTA"].astype(str).str.strip()):
-        alvos = [t for t in grupo["TAG"].astype(str).str.strip() if t]
+    for ponta, grupo in depara.groupby(cert_txt(depara["PONTA"])):
+        if not ponta or ponta == "nan":
+            continue
+        alvos = [t for t in cert_txt(grupo["TAG"]) if t and t != "nan"]
         estados = [por_tag.get(t, "") for t in alvos]
         pior = sorted(estados, key=lambda x: ordem.index(x) if x in ordem else 9)
         saida[ponta] = {"mont": pior[-1] if pior else "",
@@ -3742,12 +3756,23 @@ def cert_montagem(tags: pd.DataFrame, depara: pd.DataFrame, cache_key: str) -> d
     return saida
 
 
+def cert_num(valor) -> float:
+    """Número de célula, sem nulo. `valor or 0` não serve: NaN é verdadeiro, e
+    passaria adiante -- viraria NaN no JSON do desenho, que o navegador recusa."""
+    try:
+        v = float(valor)
+    except (TypeError, ValueError):
+        return 0.0
+    return 0.0 if v != v else v
+
+
 def _cert_circuito(linha, mont: dict) -> dict:
     ponta = str(linha["ORIGEM"]).strip()
     m = mont.get(ponta, {})
     return {"id": str(linha["CIRCUITO"]).strip(), "disc": str(linha["DISCIPLINA"]).strip(),
-            "status": str(linha["STATUS"]).strip(), "pct": round(float(linha["PCT"] or 0), 1),
-            "m": float(linha["METROS"] or 0), "org": ponta,
+            "status": str(linha["STATUS"]).strip(),
+            "pct": round(cert_num(linha["PCT"]), 1),
+            "m": cert_num(linha["METROS"]), "org": ponta,
             "dst": str(linha["DESTINO"]).strip(),
             "mont": m.get("mont", ""), "como": m.get("como", ""), "tags": m.get("tags", [])}
 
@@ -3761,7 +3786,7 @@ def cert_alvos(lanc: pd.DataFrame, cache_key: str) -> list:
     """
     if lanc.empty:
         return []
-    pontas = pd.concat([lanc["ORIGEM"], lanc["DESTINO"]]).astype(str).str.strip()
+    pontas = cert_txt(pd.concat([lanc["ORIGEM"], lanc["DESTINO"]]))
     caixas = {p for p in pontas if p.startswith("CJ")}
     troncos = {re.sub(r"[A-Z]$", "", p) for p in pontas if p.startswith("CFF")}
     return sorted(caixas | troncos)
@@ -3775,6 +3800,10 @@ def cert_indice(lanc: pd.DataFrame, cache_key: str) -> dict:
     saida: dict[str, str] = {}
     for _, r in lanc.iterrows():
         org, dst = str(r["ORIGEM"]).strip(), str(r["DESTINO"]).strip()
+        # ponta em branco vira um instrumento fantasma na busca; ela ja aparece
+        # na aba Correções, que e onde alguem trata
+        if org in ("", "nan"):
+            continue
         if cert_nivel(org) == 0 and cert_nivel(dst) == 1:
             saida[org] = re.sub(r"[A-Z]$", "", dst) if dst.startswith("CFF") else dst
     return saida
@@ -3790,13 +3819,12 @@ def cert_cadeia(alvo: str, lanc: pd.DataFrame, mont: dict) -> dict:
     tronco B→C, e é isso que decide se a TAG pode ser certificada.
     """
     d = lanc
-    org = d["ORIGEM"].astype(str).str.strip()
-    dst = d["DESTINO"].astype(str).str.strip()
+    org, dst = cert_txt(d["ORIGEM"]), cert_txt(d["DESTINO"])
 
     def eletrica(painel):
         if not painel:
             return []
-        e = d[(d["DISCIPLINA"].astype(str).str.strip() == "ELÉTRICA") & (dst == painel)]
+        e = d[(cert_txt(d["DISCIPLINA"]) == "ELÉTRICA") & (dst == painel)]
         return [_cert_circuito(r, mont) for _, r in e.iterrows()]
 
     segs = sorted({v for v in pd.concat([org, dst])
@@ -4421,7 +4449,7 @@ def cert_panorama(lanc: pd.DataFrame, cache_key: str) -> dict:
     instrumentos = 0
     for r in linhas:
         org, dst = str(r["ORIGEM"]).strip(), str(r["DESTINO"]).strip()
-        if cert_nivel(org) != 0 or cert_nivel(dst) != 1:
+        if org in ("", "nan") or cert_nivel(org) != 0 or cert_nivel(dst) != 1:
             continue
         instrumentos += 1
         cadeia, aberto, atual = [r], False, dst
@@ -4442,7 +4470,7 @@ def cert_panorama(lanc: pd.DataFrame, cache_key: str) -> dict:
                 cadeia.extend(alim)
             else:
                 aberto = True
-        trava = next((c for c in cadeia if float(c["PCT"] or 0) < 99.5), None)
+        trava = next((c for c in cadeia if cert_num(c["PCT"]) < 99.5), None)
         if trava is None:
             conta["desc" if aberto else "ok"] += 1
         elif str(trava["STATUS"]).strip() == "Em Andamento":
@@ -4452,7 +4480,7 @@ def cert_panorama(lanc: pd.DataFrame, cache_key: str) -> dict:
 
     metros = float(lanc["METROS"].fillna(0).sum())
     lancado = float((lanc["METROS"].fillna(0) * lanc["PCT"].fillna(0) / 100).sum())
-    pontas = pd.concat([lanc["ORIGEM"], lanc["DESTINO"]]).astype(str).str.strip()
+    pontas = cert_txt(pd.concat([lanc["ORIGEM"], lanc["DESTINO"]]))
     caixas = {p for p in pontas if p.startswith(CAIXA_PREFIXOS)}
     return {"circuitos": int(len(lanc)), "metros": metros, "lancado": lancado,
             "instrumentos": instrumentos, "caixas": len(caixas), **conta}
