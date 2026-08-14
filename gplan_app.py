@@ -1804,53 +1804,16 @@ def inject_css():
         /* ---------------------------------------------------- aba Planta */
 
         /* ---- Certificação ---- */
-        .ct-vered { border-radius:14px; padding:15px 17px; border:1px solid; margin-bottom:14px; }
-        .ct-vered .q { font-size:9.5px; letter-spacing:.8px; text-transform:uppercase;
-          font-weight:800; }
-        .ct-vered .f { font-size:15.5px; font-weight:700; margin-top:6px; line-height:1.4;
-          letter-spacing:-.2px; color:var(--text-1); }
-        .ct-vered .d { font-size:12.5px; color:var(--text-2); margin-top:7px; line-height:1.55; }
-        .ct-vered.crit { background:rgba(var(--rgb-vermelho),0.09);
-          border-color:rgba(var(--rgb-vermelho),0.32); }
-        .ct-vered.crit .q { color:var(--txt-vermelho); }
-        .ct-vered.warn { background:rgba(var(--rgb-ambar),0.09);
-          border-color:rgba(var(--rgb-ambar),0.32); }
-        .ct-vered.warn .q { color:var(--txt-ambar); }
-        .ct-vered.ok { background:rgba(var(--rgb-teal),0.09);
-          border-color:rgba(var(--rgb-teal),0.32); }
-        .ct-vered.ok .q { color:var(--txt-teal); }
-        .ct-vered.desc { background:rgba(var(--rgb-roxo),0.09);
-          border-color:rgba(var(--rgb-roxo),0.32); }
-        .ct-vered.desc .q { color:var(--txt-roxo); }
-        /* a cadeia é uma sequência, não uma lista solta: a linha entre as
-           marcas é o que faz a leitura descer de um passo para o próximo */
-        .ct-pd { display:flex; gap:12px; padding:11px 4px; position:relative;
-          border-bottom:1px solid var(--border-color); }
-        .ct-pd:last-child { border-bottom:0; }
-        .ct-pd:not(:last-child)::after { content:""; position:absolute; left:14px;
-          top:34px; bottom:-1px; width:1.5px; background:var(--border-strong); }
-        .ct-pd .mk { width:22px; height:22px; border-radius:50%; flex:none; display:grid;
-          place-items:center; font-size:12px; font-weight:800; margin-top:1px; }
-        .ct-pd.ok .mk { background:rgba(var(--rgb-teal),0.18); color:var(--txt-teal); }
-        .ct-pd.and .mk { background:rgba(var(--rgb-ambar),0.18); color:var(--txt-ambar); }
-        .ct-pd.nao .mk { background:rgba(var(--rgb-vermelho),0.18); color:var(--txt-vermelho); }
-        .ct-pd.desc .mk { background:rgba(var(--rgb-roxo),0.18); color:var(--txt-roxo); }
-        .ct-pd .cp { flex:1; min-width:0; }
-        .ct-pd .nm { font-size:12.5px; font-weight:650; line-height:1.35; color:var(--text-1); }
-        .ct-pd .ds { font-size:10.5px; color:var(--text-3); margin-top:3px;
-          font-family:ui-monospace,Consolas,monospace; overflow:hidden;
-          text-overflow:ellipsis; white-space:nowrap; }
-        .ct-pd .pc { font-size:14px; font-weight:800; flex:none; align-self:center; }
-        .ct-pd.ok .pc { color:var(--txt-teal); }
-        .ct-pd.and .pc { color:var(--txt-ambar); }
-        .ct-pd.nao .pc { color:var(--txt-vermelho); }
-        .ct-pd.desc .pc { color:var(--txt-roxo); font-size:11px; font-weight:700; }
         .ct-leg { display:flex; gap:16px; flex-wrap:wrap; font-size:11px;
           color:var(--text-3); padding:10px 14px; background:var(--dark-card-2);
           border-radius:10px; margin-top:12px; }
         .ct-leg span { display:flex; align-items:center; gap:7px; }
         .ct-leg i { width:22px; height:3px; border-radius:2px; display:block; }
         .ct-leg b { width:11px; height:11px; border-radius:50%; display:block; }
+        /* a TAG que esta no desenho fica marcada na tabela: sem isso, com 1.700
+           linhas, nao da para saber qual delas o desenho esta mostrando */
+        .ct-lin.sel td { background:rgba(var(--rgb-azul),0.12); }
+        .ct-lin.sel td:first-child { box-shadow:inset 3px 0 0 var(--accent-blue); }
         .pl-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:16px; }
         .pl-kpi { background:var(--dark-card); border:1px solid var(--border-color);
                   border-radius:14px; padding:15px 18px; }
@@ -4423,6 +4386,23 @@ svg.cena{{width:100%;height:auto;display:block}}
 </body></html>"""
 
 
+def cert_onde(trava, aberto: bool) -> str:
+    """Onde a cadeia para, escrito do mesmo jeito que a lista de predecessoras.
+
+    O texto vem do papel do trecho, não do nome da coluna: quem lê quer saber
+    se falta a alimentação, o tronco ou o ramal.
+    """
+    if trava is None:
+        return "predecessora sem circuito cadastrado"
+    org, dst = str(trava["ORIGEM"]).strip(), str(trava["DESTINO"]).strip()
+    if str(trava["DISCIPLINA"]).strip() == "ELÉTRICA":
+        return f"alimentação do painel {dst}"
+    if cert_nivel(org) == 0:
+        return "ramal até o instrumento"
+    a, b = (dst, org) if cert_nivel(org) < cert_nivel(dst) else (org, dst)
+    return f"tronco {a} → {b}".lower()
+
+
 @st.cache_data(show_spinner=False, max_entries=3)
 def cert_panorama(lanc: pd.DataFrame, cache_key: str) -> dict:
     """Quantas TAGs estão aptas, sem montar cadeia por cadeia.
@@ -4445,13 +4425,16 @@ def cert_panorama(lanc: pd.DataFrame, cache_key: str) -> dict:
         if str(r["DISCIPLINA"]).strip() == "ELÉTRICA":
             eletrica.setdefault(dst, []).append(r)
 
-    conta = {"ok": 0, "warn": 0, "crit": 0, "desc": 0}
-    instrumentos = 0
+    # A conta é por TAG, não por circuito: um instrumento com dois ramais
+    # aparecia duas vezes no cartão do topo e uma só na tabela, e os dois
+    # números brigavam na tela. Com dois ramais, vale a pior das duas cadeias --
+    # certificar exige que todas fechem, não uma delas.
+    PIOR = {"ok": 0, "desc": 1, "warn": 2, "crit": 3}
+    por_tag: dict[str, dict] = {}
     for r in linhas:
         org, dst = str(r["ORIGEM"]).strip(), str(r["DESTINO"]).strip()
         if org in ("", "nan") or cert_nivel(org) != 0 or cert_nivel(dst) != 1:
             continue
-        instrumentos += 1
         cadeia, aberto, atual = [r], False, dst
         # a caixa puxa a seguinte ate chegar no painel; seis saltos e folga de
         # sobra para a maior cadeia da base, e corta ciclo de dado sujo
@@ -4464,6 +4447,7 @@ def cert_panorama(lanc: pd.DataFrame, cache_key: str) -> dict:
                 break
             cadeia.extend(prox)
             atual = str(prox[0]["DESTINO"]).strip()
+        painel_da_cadeia = atual
         if cert_nivel(atual) == 2:
             alim = eletrica.get(atual)
             if alim:
@@ -4472,18 +4456,28 @@ def cert_panorama(lanc: pd.DataFrame, cache_key: str) -> dict:
                 aberto = True
         trava = next((c for c in cadeia if cert_num(c["PCT"]) < 99.5), None)
         if trava is None:
-            conta["desc" if aberto else "ok"] += 1
+            tom = "desc" if aberto else "ok"
         elif str(trava["STATUS"]).strip() == "Em Andamento":
-            conta["warn"] += 1
+            tom = "warn"
         else:
-            conta["crit"] += 1
+            tom = "crit"
+        onde = ("—" if tom == "ok"
+                else f"alimentação do painel {painel_da_cadeia}" if trava is None
+                else cert_onde(trava, aberto))
+        antes = por_tag.get(org)
+        if antes is None or PIOR[tom] > PIOR[antes["tom"]]:
+            por_tag[org] = {"tom": tom, "caixa": dst, "onde": onde}
 
     metros = float(lanc["METROS"].fillna(0).sum())
     lancado = float((lanc["METROS"].fillna(0) * lanc["PCT"].fillna(0) / 100).sum())
     pontas = cert_txt(pd.concat([lanc["ORIGEM"], lanc["DESTINO"]]))
     caixas = {p for p in pontas if p.startswith(CAIXA_PREFIXOS)}
+    conta = {t: 0 for t in PIOR}
+    for v in por_tag.values():
+        conta[v["tom"]] += 1
     return {"circuitos": int(len(lanc)), "metros": metros, "lancado": lancado,
-            "instrumentos": instrumentos, "caixas": len(caixas), **conta}
+            "instrumentos": len(por_tag), "caixas": len(caixas),
+            "por_tag": por_tag, **conta}
 
 
 def cert_altura(cad: dict, largura_px: int = 1320) -> int:
@@ -4516,50 +4510,6 @@ def cert_altura(cad: dict, largura_px: int = 1320) -> int:
     # aberta. Em tela menor a cena encolhe e sobra folga; em tela muito maior
     # ela passa do quadro e a moldura rola, que é o defeito mais barato dos dois.
     return int(min(860, max(360, largura_px * alt / larg + 46)))
-
-
-def cert_veredito_html(cad: dict, tag: str, sit: dict) -> str:
-    tom, passos, trava = sit["tom"], sit["passos"], sit["trava"]
-    abertas, prontas = sit["abertas"], sit["prontas"]
-    if tom == "desc":
-        titulo = "NÃO DÁ PARA AFIRMAR"
-        frase = (f"Os circuitos conhecidos de {tag} estão lançados, mas "
-                 f"{len(abertas)} predecessora não tem circuito cadastrado.")
-        det = (f"Falta na planilha a <b>{abertas[0]['nm'].lower()}</b>. Certificar assim "
-               f"é assinar por algo que ninguém verificou.")
-    elif tom == "ok":
-        titulo = "APTO PARA CERTIFICAÇÃO"
-        frase = f"As {len(passos)} predecessoras de {tag} estão concluídas."
-        det = ("O caminho fecha da alimentação do painel até o instrumento. O que falta "
-               "para certificar é ensaio e documento, não cabo.")
-    else:
-        anda = tom == "warn"
-        titulo = "PREDECESSORA EM ANDAMENTO" if anda else "BLOQUEADO"
-        frase = (f"{prontas} de {len(passos)} predecessoras prontas. "
-                 f"Para em: {trava['nm'].lower()}."
-                 + (f" E {len(abertas)} não tem circuito cadastrado." if abertas else ""))
-        det = (f"O circuito <b>{trava['c']['id']}</b> está {trava['c']['status'].lower()}"
-               + (f" ({br_pct(trava['c']['pct'])})" if anda else "")
-               + f" e são {br_num(int(trava['c']['m']))} m. Enquanto ele não fechar, "
-                 f"{tag} não tem como ser certificada — mesmo com o ramal dela pronto.")
-    linhas = []
-    for p in passos:
-        if p.get("desc"):
-            linhas.append(f'<div class="ct-pd desc"><span class="mk">?</span>'
-                          f'<span class="cp"><div class="nm">{p["nm"]}</div>'
-                          f'<div class="ds">{p["ds"]}</div></span>'
-                          f'<span class="pc">sem dado</span></div>')
-            continue
-        c = p["c"]
-        t = "ok" if cert_feito(c) else ("and" if c["pct"] > 0 else "nao")
-        marca = "✓" if t == "ok" else ("◐" if t == "and" else "✕")
-        linhas.append(f'<div class="ct-pd {t}"><span class="mk">{marca}</span>'
-                      f'<span class="cp"><div class="nm">{p["nm"]}</div>'
-                      f'<div class="ds">{p["ds"]}</div></span>'
-                      f'<span class="pc">{c["pct"]:.0f}%</span></div>')
-    return (f'<div class="ct-vered {tom}"><div class="q">{titulo}</div>'
-            f'<div class="f">{frase}</div><div class="d">{det}</div></div>'
-            f'<div>{"".join(linhas)}</div>')
 
 
 def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataFrame,
@@ -4613,10 +4563,33 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
           <div class="s">a cadeia fecha, mas falta circuito cadastrado antes</div></div>
       </div>""")
 
-    # A busca é uma só: instrumento e caixa na mesma lista. Escolher um
-    # instrumento abre a cadeia da caixa dele, que é onde a resposta mora.
-    opcoes = ([f"{t}  ·  instrumento" for t in sorted(indice)]
-              + [f"{a}  ·  {'fieldbus' if a.startswith('CFF') else 'caixa'}" for a in alvos])
+    # Duas perguntas diferentes, dois controles: o status recorta o universo,
+    # a busca escolhe dentro dele. Juntos num campo só, escolher "Apto" e depois
+    # digitar uma TAG bloqueada devolveria lista vazia sem dizer por quê.
+    por_tag = pan["por_tag"]
+    SITUACOES = ["Todos", "Apto", "Inapto"]
+    n_apto = sum(1 for v in por_tag.values() if v["tom"] == "ok")
+    rotulos = {"Todos": f"Todos · {br_num(len(por_tag))}",
+               "Apto": f"Apto · {br_num(n_apto)}",
+               "Inapto": f"Inapto · {br_num(len(por_tag) - n_apto)}"}
+    situacao_alvo = st.segmented_control(
+        "Status de certificação", SITUACOES, format_func=lambda x: rotulos[x],
+        default="Todos", key="cert_situacao_filtro") or "Todos"
+
+    def no_filtro(tag: str) -> bool:
+        v = por_tag.get(tag)
+        if situacao_alvo == "Todos" or v is None:
+            return situacao_alvo == "Todos"
+        return (v["tom"] == "ok") == (situacao_alvo == "Apto")
+
+    tags_no_filtro = sorted(t for t in indice if no_filtro(t))
+    opcoes = ([f"{t}  ·  instrumento" for t in tags_no_filtro]
+              + ([f"{a}  ·  {'fieldbus' if a.startswith('CFF') else 'caixa'}"
+                  for a in alvos] if situacao_alvo == "Todos" else []))
+    if not opcoes:
+        render_html('<div class="gplan-panel"><div class="gtbl-empty">'
+                    f"Nenhuma TAG {situacao_alvo.lower()} nesta base.</div></div>")
+        return
     padrao = st.session_state.get("cert_escolha")
     idx = opcoes.index(padrao) if padrao in opcoes else 0
     escolha = st.selectbox(
@@ -4638,13 +4611,9 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     if not tag_sel:
         tag_sel = cad["ramais"][0]["org"]
 
-    # A situacao entra no proprio ramal: o desenho precisa dela para a dica, e a
-    # lista ao lado usa a mesma conta. Calcular duas vezes e o caminho curto
-    # para as duas divergirem no primeiro ajuste.
-    situacoes = {}
+    # A situação entra no próprio ramal: o desenho precisa dela para a dica.
     for r in cad["ramais"]:
         sit = cert_situacao(cad, r["org"])
-        situacoes[r["org"]] = sit
         r["tom"] = sit["tom"]
         r["rot"] = CERT_ROTULO[sit["tom"]]
         r["onde"] = sit["onde"]
@@ -4674,40 +4643,31 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         <span><b style="background:var(--accent-amber)"></b>em programação</span>
         <span><b style="background:var(--accent-red)"></b>não montado ou não programado</span>
         <span><b style="background:var(--accent-purple)"></b>sem par na base de TAGs</span>
-        <span style="width:100%;color:var(--text-3);padding-top:2px">a caixa também é TAG:
-          o volume dela recebe a mesma cor &nbsp;·&nbsp; o painel não tem controle de
-          montagem &nbsp;·&nbsp; no fieldbus, o instrumento só espera as caixas
-          <b style="color:var(--text-2);width:auto;height:auto;border-radius:0;
-          display:inline">antes</b> da dele</span>
       </div>""")
 
-    esq, dir_ = st.columns([1, 1], gap="medium")
-    with esq:
-        render_html('<div class="gplan-panel-title" style="margin:18px 0 6px">'
-                    f'Predecessoras de {tag_sel}</div>')
-        render_html(cert_veredito_html(cad, tag_sel, situacoes[tag_sel]))
-    with dir_:
-        render_html('<div class="gplan-panel-title" style="margin:18px 0 6px">'
-                    f'Instrumentos da cadeia <span class="gtbl-muted" '
-                    f'style="font-weight:500">{len(cad["ramais"])}</span></div>')
-        linhas = []
-        for r in cad["ramais"]:
-            sit = situacoes[r["org"]]
-            classe = CERT_CLASSE[sit["tom"]]
-            marca = "ok" if classe == "ok" else "warn" if classe == "warn" else \
-                    "crit" if classe == "crit" else "roxo"
-            linhas.append(
-                f'<tr><td class="gtbl-mono">{r["org"]}</td>'
-                + (f'<td class="gtbl-mono">{r.get("seg", "")[-1:]}</td>'
-                   if cad["segmentos"] else "")
-                + f'<td><span class="gtbl-badge {marca}">{CERT_ROTULO[sit["tom"]]}</span></td>'
-                  f'<td class="gtbl-muted" style="font-size:11px">'
-                  f'{"—" if sit["tom"] == "ok" else sit["onde"]}</td></tr>')
-        cab_seg = "<th>Caixa</th>" if cad["segmentos"] else ""
-        render_html(f'<div class="gtbl-scroll" style="max-height:420px;overflow-y:auto">'
-                    f'<table class="gtbl"><thead><tr><th>TAG</th>{cab_seg}'
-                    f'<th>Situação</th><th>Trava em</th></tr></thead>'
-                    f'<tbody>{"".join(linhas)}</tbody></table></div>')
+    # A tabela é do universo inteiro, não só da cadeia aberta: a pergunta
+    # "quais das minhas TAGs estão aptas" não se responde uma caixa por vez.
+    linhas = []
+    for tag in tags_no_filtro:
+        v = por_tag[tag]
+        classe = CERT_CLASSE[v["tom"]]
+        marca = {"ok": "ok", "warn": "warn", "crit": "crit", "roxo": "roxo"}[classe]
+        atual = " sel" if tag == tag_sel else ""
+        linhas.append(
+            f'<tr class="ct-lin{atual}"><td class="gtbl-mono">{tag}</td>'
+            f'<td class="gtbl-mono gtbl-muted">{v["caixa"]}</td>'
+            f'<td><span class="gtbl-badge {marca}">{CERT_ROTULO[v["tom"]]}</span></td>'
+            f'<td class="gtbl-muted" style="font-size:11px">{v["onde"]}</td></tr>')
+    faixa = ("Aptos para certificação" if situacao_alvo == "Apto"
+             else "Inaptos — o que trava cada um" if situacao_alvo == "Inapto"
+             else "TAGs e situação de certificação")
+    render_html(
+        f'<div class="gplan-panel-title" style="margin:20px 0 8px">{faixa} '
+        f'<span class="gtbl-muted" style="font-weight:500">{br_num(len(linhas))} '
+        f'{"TAG" if len(linhas) == 1 else "TAGs"}</span></div>'
+        f'<div class="rolo" style="max-height:420px"><table class="gtbl">'
+        f'<thead><tr><th>TAG</th><th>Caixa</th><th>Situação</th><th>Trava em</th></tr>'
+        f'</thead><tbody>{"".join(linhas)}</tbody></table></div>')
 
 
 def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFrame,
