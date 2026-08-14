@@ -3,6 +3,7 @@ import io
 import json
 import math
 import os
+import re
 import time
 from contextlib import contextmanager
 from urllib.parse import quote
@@ -287,6 +288,16 @@ def load_data(cache_key: str):
     esperados = pd.read_excel(excel_file, sheet_name="08_RELATORIOS_ESPERADOS")
     # A medicao de campo so existe em planilha gerada pelo pipeline novo; a
     # antiga que estiver no Supabase continua abrindo, com a aba vazia.
+    # O controle de lancamento de circuitos e o de-para de TAG so existem em
+    # planilha gerada pelo pipeline novo. Sem eles a aba Certificacao abre
+    # explicando o que rodar, em vez de quebrar.
+    lancamento = (pd.read_excel(excel_file, sheet_name="02_CABOS_LANCAMENTO")
+                  if "02_CABOS_LANCAMENTO" in excel_file.sheet_names
+                  else pd.DataFrame(columns=["CIRCUITO", "ORIGEM", "DESTINO", "DISCIPLINA",
+                                             "TIPO", "STATUS", "PCT", "METROS"]))
+    depara = (pd.read_excel(excel_file, sheet_name="02_CABOS_DEPARA")
+              if "02_CABOS_DEPARA" in excel_file.sheet_names
+              else pd.DataFrame(columns=["PONTA", "TAG", "COMO"]))
     if "06_BASE_GITEC" in excel_file.sheet_names:
         gitec = pd.read_excel(excel_file, sheet_name="06_BASE_GITEC")
     else:
@@ -305,7 +316,8 @@ def load_data(cache_key: str):
                  else pd.DataFrame(columns=["AREA", "NOME_AREA", "DESENHO",
                                             "DESENHO_GERAL"]))
     resumo = aplicar_regra_aprovados(resumo, esperados)
-    return tags, cabos, tubing, sigem, resumo, esperados, gitec, locacao, aux_areas
+    return (tags, cabos, tubing, sigem, resumo, esperados, gitec, locacao,
+            aux_areas, lancamento, depara)
 
 
 # Um relatorio so conta como avanco depois de aprovado pela fiscalizacao.
@@ -499,6 +511,8 @@ TEMAS = {
         # o desenho da planta vem preto sobre branco: invertido, o traço fica
         # claro sobre o escuro e a prancha para de ser um retângulo branco
         "rgb_chapa": "8,12,22",
+        # o metal do equipamento no desenho da Certificação
+        "metal": "#2a3350", "metal2": "#212942", "metal3": "#39456b",
         "planta_filtro": "invert(1) brightness(.86) contrast(1.22)",
         "planta_opacidade": ".52",
         "esquema": "dark",
@@ -521,6 +535,7 @@ TEMAS = {
         # no claro o desenho já é escuro sobre branco: inverter deixaria a
         # prancha preta no meio de uma tela clara
         "rgb_chapa": "255,255,255",
+        "metal": "#c4cdde", "metal2": "#b2bcd2", "metal3": "#dbe1ee",
         "planta_filtro": "grayscale(1) contrast(1.35) brightness(.82)",
         "planta_opacidade": ".55",
         "esquema": "light",
@@ -1787,6 +1802,55 @@ def inject_css():
         div[data-testid="stMetric"] { background: var(--dark-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px 16px; }
 
         /* ---------------------------------------------------- aba Planta */
+
+        /* ---- Certificação ---- */
+        .ct-vered { border-radius:14px; padding:15px 17px; border:1px solid; margin-bottom:14px; }
+        .ct-vered .q { font-size:9.5px; letter-spacing:.8px; text-transform:uppercase;
+          font-weight:800; }
+        .ct-vered .f { font-size:15.5px; font-weight:700; margin-top:6px; line-height:1.4;
+          letter-spacing:-.2px; color:var(--text-1); }
+        .ct-vered .d { font-size:12.5px; color:var(--text-2); margin-top:7px; line-height:1.55; }
+        .ct-vered.crit { background:rgba(var(--rgb-vermelho),0.09);
+          border-color:rgba(var(--rgb-vermelho),0.32); }
+        .ct-vered.crit .q { color:var(--txt-vermelho); }
+        .ct-vered.warn { background:rgba(var(--rgb-ambar),0.09);
+          border-color:rgba(var(--rgb-ambar),0.32); }
+        .ct-vered.warn .q { color:var(--txt-ambar); }
+        .ct-vered.ok { background:rgba(var(--rgb-teal),0.09);
+          border-color:rgba(var(--rgb-teal),0.32); }
+        .ct-vered.ok .q { color:var(--txt-teal); }
+        .ct-vered.desc { background:rgba(var(--rgb-roxo),0.09);
+          border-color:rgba(var(--rgb-roxo),0.32); }
+        .ct-vered.desc .q { color:var(--txt-roxo); }
+        /* a cadeia é uma sequência, não uma lista solta: a linha entre as
+           marcas é o que faz a leitura descer de um passo para o próximo */
+        .ct-pd { display:flex; gap:12px; padding:11px 4px; position:relative;
+          border-bottom:1px solid var(--border-color); }
+        .ct-pd:last-child { border-bottom:0; }
+        .ct-pd:not(:last-child)::after { content:""; position:absolute; left:14px;
+          top:34px; bottom:-1px; width:1.5px; background:var(--border-strong); }
+        .ct-pd .mk { width:22px; height:22px; border-radius:50%; flex:none; display:grid;
+          place-items:center; font-size:12px; font-weight:800; margin-top:1px; }
+        .ct-pd.ok .mk { background:rgba(var(--rgb-teal),0.18); color:var(--txt-teal); }
+        .ct-pd.and .mk { background:rgba(var(--rgb-ambar),0.18); color:var(--txt-ambar); }
+        .ct-pd.nao .mk { background:rgba(var(--rgb-vermelho),0.18); color:var(--txt-vermelho); }
+        .ct-pd.desc .mk { background:rgba(var(--rgb-roxo),0.18); color:var(--txt-roxo); }
+        .ct-pd .cp { flex:1; min-width:0; }
+        .ct-pd .nm { font-size:12.5px; font-weight:650; line-height:1.35; color:var(--text-1); }
+        .ct-pd .ds { font-size:10.5px; color:var(--text-3); margin-top:3px;
+          font-family:ui-monospace,Consolas,monospace; overflow:hidden;
+          text-overflow:ellipsis; white-space:nowrap; }
+        .ct-pd .pc { font-size:14px; font-weight:800; flex:none; align-self:center; }
+        .ct-pd.ok .pc { color:var(--txt-teal); }
+        .ct-pd.and .pc { color:var(--txt-ambar); }
+        .ct-pd.nao .pc { color:var(--txt-vermelho); }
+        .ct-pd.desc .pc { color:var(--txt-roxo); font-size:11px; font-weight:700; }
+        .ct-leg { display:flex; gap:16px; flex-wrap:wrap; font-size:11px;
+          color:var(--text-3); padding:10px 14px; background:var(--dark-card-2);
+          border-radius:10px; margin-top:12px; }
+        .ct-leg span { display:flex; align-items:center; gap:7px; }
+        .ct-leg i { width:22px; height:3px; border-radius:2px; display:block; }
+        .ct-leg b { width:11px; height:11px; border-radius:50%; display:block; }
         .pl-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:16px; }
         .pl-kpi { background:var(--dark-card); border:1px solid var(--border-color);
                   border-radius:14px; padding:15px 18px; }
@@ -3629,6 +3693,995 @@ def planta_prancha_html(prancha: dict, areas: dict, area_do_desenho: dict) -> st
         + "</div></div>")
 
 
+
+
+# ===================================================================== #
+# Certificação: a cadeia física de um instrumento                        #
+# ===================================================================== #
+# Certificar uma TAG é assinar que tudo antes dela está pronto. O que vem
+# antes é físico e está em duas bases: o circuito, na 02_CABOS_LANCAMENTO, e
+# a montagem, na 01_BASE_TAGS. A aba junta as duas e responde uma pergunta
+# só -- esta TAG pode ser certificada, e se não, onde para.
+
+PAINEL_PREFIXOS = ("PN", "PL", "PCC")
+CAIXA_PREFIXOS = ("CJ", "CFF")
+
+
+def cert_nivel(ponta: str) -> int:
+    """0 campo, 1 caixa, 2 painel. Decide o sentido de leitura do trecho."""
+    p = str(ponta).upper()
+    if p.startswith(PAINEL_PREFIXOS):
+        return 2
+    if p.startswith(CAIXA_PREFIXOS):
+        return 1
+    return 0
+
+
+@st.cache_data(show_spinner=False, max_entries=3)
+def cert_montagem(tags: pd.DataFrame, depara: pd.DataFrame, cache_key: str) -> dict:
+    """Status de montagem por ponta da planilha de cabos.
+
+    Passa pelo de-para porque as duas bases escrevem a mesma TAG de formas
+    diferentes -- ZSH/L-120001 aqui, ZSH-120001 e ZSL-120001 lá. Quando uma
+    ponta cobre duas TAGs vale a pior: não dá para dar por montada uma ponta
+    em que só metade do par está.
+    """
+    if tags.empty or depara.empty:
+        return {}
+    por_tag = dict(zip(tags["TAG"].astype(str).str.strip(),
+                       tags.get("STATUS_MONTAGEM", pd.Series(dtype=str)).astype(str).str.strip()))
+    ordem = ["Montado", "Em Programação", "Não Programado", "Não Montado"]
+    saida: dict[str, dict] = {}
+    for ponta, grupo in depara.groupby(depara["PONTA"].astype(str).str.strip()):
+        alvos = [t for t in grupo["TAG"].astype(str).str.strip() if t]
+        estados = [por_tag.get(t, "") for t in alvos]
+        pior = sorted(estados, key=lambda x: ordem.index(x) if x in ordem else 9)
+        saida[ponta] = {"mont": pior[-1] if pior else "",
+                        "como": str(grupo["COMO"].iloc[0]),
+                        "tags": alvos}
+    return saida
+
+
+def _cert_circuito(linha, mont: dict) -> dict:
+    ponta = str(linha["ORIGEM"]).strip()
+    m = mont.get(ponta, {})
+    return {"id": str(linha["CIRCUITO"]).strip(), "disc": str(linha["DISCIPLINA"]).strip(),
+            "status": str(linha["STATUS"]).strip(), "pct": round(float(linha["PCT"] or 0), 1),
+            "m": float(linha["METROS"] or 0), "org": ponta,
+            "dst": str(linha["DESTINO"]).strip(),
+            "mont": m.get("mont", ""), "como": m.get("como", ""), "tags": m.get("tags", [])}
+
+
+@st.cache_data(show_spinner=False, max_entries=3)
+def cert_alvos(lanc: pd.DataFrame, cache_key: str) -> list:
+    """O que dá para abrir: cada caixa de junção e cada tronco de fieldbus.
+
+    O instrumento não é alvo -- ele é folha. Escolher um instrumento abre a
+    cadeia da caixa dele, que é onde a resposta mora.
+    """
+    if lanc.empty:
+        return []
+    pontas = pd.concat([lanc["ORIGEM"], lanc["DESTINO"]]).astype(str).str.strip()
+    caixas = {p for p in pontas if p.startswith("CJ")}
+    troncos = {re.sub(r"[A-Z]$", "", p) for p in pontas if p.startswith("CFF")}
+    return sorted(caixas | troncos)
+
+
+@st.cache_data(show_spinner=False, max_entries=3)
+def cert_indice(lanc: pd.DataFrame, cache_key: str) -> dict:
+    """De cada instrumento para a cadeia dele. É o que a busca consulta."""
+    if lanc.empty:
+        return {}
+    saida: dict[str, str] = {}
+    for _, r in lanc.iterrows():
+        org, dst = str(r["ORIGEM"]).strip(), str(r["DESTINO"]).strip()
+        if cert_nivel(org) == 0 and cert_nivel(dst) == 1:
+            saida[org] = re.sub(r"[A-Z]$", "", dst) if dst.startswith("CFF") else dst
+    return saida
+
+
+def cert_cadeia(alvo: str, lanc: pd.DataFrame, mont: dict) -> dict:
+    """A cadeia de um alvo, nas duas topologias que a planilha guarda.
+
+    convencional  painel — caixa — instrumentos
+    fieldbus      painel — CFF-A — CFF-B — CFF-C, com instrumentos em cada caixa
+
+    A diferença não é enfeite: no fieldbus, quem deriva da caixa A não espera o
+    tronco B→C, e é isso que decide se a TAG pode ser certificada.
+    """
+    d = lanc
+    org = d["ORIGEM"].astype(str).str.strip()
+    dst = d["DESTINO"].astype(str).str.strip()
+
+    def eletrica(painel):
+        if not painel:
+            return []
+        e = d[(d["DISCIPLINA"].astype(str).str.strip() == "ELÉTRICA") & (dst == painel)]
+        return [_cert_circuito(r, mont) for _, r in e.iterrows()]
+
+    segs = sorted({v for v in pd.concat([org, dst])
+                   if re.fullmatch(re.escape(alvo) + r"[A-Z]", v)})
+    if segs:
+        ao_painel = d[org.isin(segs) & dst.str.startswith(PAINEL_PREFIXOS)]
+        painel = str(ao_painel["DESTINO"].iloc[0]).strip() if len(ao_painel) else None
+        entre = d[org.isin(segs) & dst.isin(segs)]
+        elos = {tuple(sorted([str(r["ORIGEM"]).strip(), str(r["DESTINO"]).strip()])):
+                _cert_circuito(r, mont) for _, r in entre.iterrows()}
+        ligacoes = []
+        for a, b in zip(segs, segs[1:]):
+            c = elos.get(tuple(sorted([a, b])))
+            if c:
+                ligacoes.append({**c, "de": a, "para": b})
+        # a ponta da cadeia e a caixa que nenhum tronco tem como destino: e nela
+        # que o terminador fecha o segmento
+        destinos = {str(v).strip() for v in entre["DESTINO"]}
+        fim = [x for x in segs if x not in destinos]
+        ins = d[dst.isin(segs) & ~org.str.startswith("CFF")]
+        return {
+            "tipo": "cff", "caixa": alvo, "painel": painel, "painel_indef": painel is None,
+            "terminador": fim[-1] if fim else segs[-1],
+            "mont": mont.get(alvo, {}).get("mont", ""),
+            "eletrica": eletrica(painel),
+            "tronco": [_cert_circuito(r, mont) for _, r in ao_painel.iterrows()],
+            "segmentos": [{"nome": x, "ordem": i,
+                           "mont": mont.get(x, {}).get("mont", "")}
+                          for i, x in enumerate(segs)],
+            "ligacoes": ligacoes,
+            "ramais": [{**_cert_circuito(r, mont), "seg": str(r["DESTINO"]).strip()}
+                       for _, r in ins.sort_values("ORIGEM").iterrows()],
+        }
+
+    sai = d[org == alvo]
+    # caixa sem circuito de saida: nao da para saber a que painel ela chega. O
+    # painel nao some do desenho por isso -- aparece sem tag, com a observacao,
+    # e a etapa fica inconclusiva.
+    painel = str(sai["DESTINO"].iloc[0]).strip() if len(sai) else None
+    ent = d[(dst == alvo) & ~org.str.startswith("CJ")]
+    return {
+        "tipo": "caixa", "caixa": alvo, "painel": painel, "painel_indef": painel is None,
+        "mont": mont.get(alvo, {}).get("mont", ""),
+        "eletrica": eletrica(painel),
+        "tronco": [_cert_circuito(r, mont) for _, r in sai.iterrows()],
+        "segmentos": [], "ligacoes": [],
+        "ramais": [_cert_circuito(r, mont) for _, r in ent.sort_values("ORIGEM").iterrows()],
+    }
+
+
+def cert_feito(c: dict) -> bool:
+    return c["pct"] >= 99.5
+
+
+def cert_predecessoras(cad: dict, tag: str) -> list:
+    """O que precede este instrumento. No fieldbus depende de onde ele está."""
+    r = next((x for x in cad["ramais"] if x["org"] == tag), None)
+    passos = []
+    if cad["eletrica"]:
+        for e in cad["eletrica"]:
+            passos.append({"nm": f"Alimentação do painel {cad['painel']}",
+                           "ds": f"{e['id']} · {br_num(int(e['m']))} m · Elétrica", "c": e})
+    else:
+        passos.append({
+            "nm": f"Alimentação do painel {cad['painel'] or '(indefinido)'}", "desc": True,
+            "ds": ("nenhum circuito de Elétrica com destino neste painel" if cad["painel"]
+                   else f"o painel é desconhecido: nenhum circuito sai de {cad['caixa']}")})
+    if cad["tronco"]:
+        destino = cad["segmentos"][0]["nome"] if cad["segmentos"] else cad["caixa"]
+        for t in cad["tronco"]:
+            passos.append({"nm": f"Tronco painel → {destino}",
+                           "ds": f"{t['id']} · {br_num(int(t['m']))} m", "c": t})
+    else:
+        passos.append({"nm": f"Tronco painel → {cad['caixa']}", "desc": True,
+                       "ds": f"nenhum circuito sai de {cad['caixa']}: o painel é desconhecido"})
+    if cad["tipo"] == "cff" and r:
+        alvo = next((i for i, x in enumerate(cad["segmentos"]) if x["nome"] == r.get("seg")), 0)
+        for i, l in enumerate(cad["ligacoes"][:max(alvo, 0)]):
+            passos.append({"nm": f"Tronco caixa {cad['segmentos'][i]['nome'][-1]} → "
+                                 f"caixa {cad['segmentos'][i + 1]['nome'][-1]}",
+                           "ds": f"{l['id']} · {br_num(int(l['m']))} m", "c": l})
+    if r:
+        passos.append({"nm": "Ramal até o instrumento",
+                       "ds": f"{r['id']} · {br_num(int(r['m']))} m", "c": r})
+    return passos
+
+
+CERT_ROTULO = {"ok": "Apto", "warn": "Predecessora em andamento",
+               "crit": "Bloqueado", "desc": "Não dá para afirmar"}
+CERT_CLASSE = {"ok": "ok", "warn": "warn", "crit": "crit", "desc": "roxo"}
+
+
+def cert_situacao(cad: dict, tag: str) -> dict:
+    """A situação sem HTML nenhum: é o que a lista conta e o veredito escreve.
+
+    Duas leituras da mesma regra divergiriam no primeiro ajuste.
+    """
+    passos = cert_predecessoras(cad, tag)
+    trava = next((p for p in passos if not p.get("desc") and not cert_feito(p["c"])), None)
+    abertas = [p for p in passos if p.get("desc")]
+    prontas = sum(1 for p in passos if not p.get("desc") and cert_feito(p["c"]))
+    if not trava and abertas:
+        tom = "desc"
+    elif not trava:
+        tom = "ok"
+    elif trava["c"]["status"] == "Em Andamento":
+        tom = "warn"
+    else:
+        tom = "crit"
+    onde = (trava["nm"].lower() if trava else abertas[0]["nm"].lower() if abertas else "—")
+    return {"passos": passos, "trava": trava, "abertas": abertas,
+            "prontas": prontas, "tom": tom, "onde": onde}
+
+
+# --------------------------------------------------------------- o desenho
+# O equipamento é desenhado em 2,5D -- face, topo e lateral -- porque quem lê a
+# tela reconhece o objeto antes de ler o rótulo. Com retângulo chapado o
+# desenho vira fluxograma, e fluxograma não mostra onde o cabo parou.
+CERT_JS = r"""
+const D = __DADOS__;
+let zoom = 1;
+
+const br = (n, c) => Number(n).toLocaleString('pt-BR',
+  {minimumFractionDigits: c || 0, maximumFractionDigits: c || 0});
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const feito = c => c.pct >= 99.5;
+const cls = s => s === 'Concluído' ? 'ok' : s === 'Em Andamento' ? 'and' : 'nao';
+const corMont = m => m === 'Montado' ? 'ok' : m === 'Em Programação' ? 'and'
+                   : m ? 'nao' : 'roxo';
+const nomeMont = m => m || 'sem correspondente na base de TAGs';
+
+// A dica viaja num atributo do próprio elemento: um ouvinte só, no documento,
+// em vez de um por cartão.
+const dd = h => `data-d="${h.replace(/"/g, '&quot;')}"`;
+const dl = (k, v, tom) => `<div class='l'><i>${k}</i><b${
+  tom ? ` style='color:var(--${tom})'` : ''}>${v}</b></div>`;
+const cab = (h, n) => `<div class='h'>${h}</div><div class='n'>${esc(n)}</div>`;
+
+// A planilha grava ORIGEM na ponta de campo e DESTINO no lado de montante: o
+// tronco entra lá como CFF-12-0024A → PN-12-201, que é o inverso de como o
+// cabo corre. A dica mostra o percurso físico e repete as colunas cruas.
+const nivel = v => /^(PN|PL|PCC)/.test(v) ? 2 : /^(CJ|CFF)/.test(v) ? 1 : 0;
+const percurso = c => c.de && c.para ? [c.de, c.para]
+  : nivel(c.org) < nivel(c.dst) ? [c.dst, c.org] : [c.org, c.dst];
+
+function dicaCabo(c, papel) {
+  const t = cls(c.status), [a, b] = percurso(c);
+  return cab(papel || 'cabo', c.id) + dl('situação', c.status, t) +
+    (c.pct > 0 && c.pct < 100 ? dl('lançado', br(c.pct, 1) + '%', t) : '') +
+    dl('comprimento', br(c.m) + ' m') + dl('disciplina', c.disc) +
+    dl('percurso', esc(a) + ' → ' + esc(b)) +
+    (a !== c.org ? `<div class='obs'>na planilha: <b>ORIGEM</b> ${esc(c.org)} ·
+      <b>DESTINO</b> ${esc(c.dst)} — a base grava a partir da ponta de campo,
+      que é o inverso de como o cabo corre</div>` : '');
+}
+
+function dicaTag(r) {
+  return cab('instrumento', r.org) +
+    dl('certificação', r.rot, r.tom === 'ok' ? 'ok' : r.tom === 'warn' ? 'and'
+       : r.tom === 'crit' ? 'nao' : 'roxo') +
+    (r.tom === 'ok' ? '' : dl('trava em', r.onde)) +
+    dl('montagem', nomeMont(r.mont), corMont(r.mont)) +
+    dl('cabo', r.status + (r.pct > 0 && r.pct < 100 ? ' · ' + br(r.pct, 1) + '%' : ''),
+       cls(r.status)) +
+    dl('ramal', esc(r.id) + ' · ' + br(r.m) + ' m') +
+    (r.seg ? dl('caixa', esc(r.seg)) : '') +
+    (r.como && r.como !== 'exato'
+      ? `<div class='obs'>de-para ${r.como}: a base de TAGs grava
+         <b>${esc((r.tags || []).join(' + '))}</b></div>` : '');
+}
+
+const dicaCaixa = (nome, mont, extra) => cab('caixa de junção', nome) +
+  dl('montagem', nomeMont(mont), corMont(mont)) + (extra || '');
+
+// A calha não é um circuito da planilha, mas carrega os ramais que descem
+// dela -- então a cor é o consolidado deles. Cinza diria "não se sabe".
+function tomGrupo(l) {
+  if (!l.length) return 'roxo';
+  if (l.every(feito)) return 'ok';
+  if (l.some(r => r.pct > 0)) return 'and';
+  return 'nao';
+}
+function calha(d, l, w) {
+  const n = l.filter(feito).length, t = tomGrupo(l);
+  const dica = `<div class='h'>calha de derivação</div>
+    <div class='n'>${n} de ${l.length} lançados</div>
+    <div class='obs'>a calha não é um circuito da planilha: a cor dela é o
+      consolidado dos ramais que descem daqui</div>`;
+  return `<path d="${d}" stroke="var(--${t})" stroke-width="${w}" fill="none"
+      stroke-opacity=".62" stroke-linecap="round"/>
+    <path class="hit" d="${d}" stroke-width="${w + 11}" ${dd(dica)}/>`;
+}
+
+function bloco(x, y, w, h, p, extra, tom) {
+  const dx = p * 0.62, dy = p * 0.4;
+  const topo = `${x},${y} ${x + dx},${y - dy} ${x + w + dx},${y - dy} ${x + w},${y}`;
+  const lado = `${x + w},${y} ${x + w + dx},${y - dy} ${x + w + dx},${y + h - dy} ${x + w},${y + h}`;
+  // a cor entra como véu sobre as três faces, e só: quem define o estado é o
+  // corpo da caixa. Cada face leva uma dose diferente para o relevo sobreviver.
+  const veu = tom ? `<g fill="var(--${tom})">
+      <polygon points="${topo}" opacity=".5"/><polygon points="${lado}" opacity=".26"/>
+      <rect x="${x}" y="${y}" width="${w}" height="${h}" opacity=".38"/></g>` : '';
+  return `<g><polygon class="eq-topo" points="${topo}"/>
+    <polygon class="eq-lado" points="${lado}"/>
+    <rect class="eq-face" x="${x}" y="${y}" width="${w}" height="${h}"/>${veu}
+    <rect class="eq-l" x="${x}" y="${y}" width="${w}" height="${h}"/>${extra || ''}</g>`;
+}
+
+function painel(x, y, nome, indef) {
+  const w = 96, h = 150, p = 26;
+  let det = `<line class="eq-l" x1="${x + w / 2}" y1="${y}" x2="${x + w / 2}" y2="${y + h}"/>`;
+  for (let i = 0; i < 5; i++)
+    det += `<line class="eq-l" x1="${x + 8}" y1="${y + 16 + i * 7}" x2="${x + w / 2 - 8}" y2="${y + 16 + i * 7}"/>`;
+  det += `<rect class="eq-l" x="${x + w / 2 + 9}" y="${y + 18}" width="${w / 2 - 18}" height="26" rx="2"/>`;
+  det += `<circle cx="${x + w / 2 - 6}" cy="${y + h / 2}" r="2.5" fill="var(--t3)"/>`;
+  det += `<circle cx="${x + w / 2 + 6}" cy="${y + h / 2}" r="2.5" fill="var(--t3)"/>`;
+  det += `<rect class="eq-lado" x="${x - 4}" y="${y + h}" width="${w + 8}" height="7"/>`;
+  const dica = indef
+    ? cab('painel', 'sem tag') + dl('origem', 'desconhecida', 'roxo') +
+      `<div class='obs'>nenhum circuito sai da caixa: não dá para saber a que painel
+       ela chega. O painel continua no desenho, e a etapa fica inconclusiva.</div>`
+    : cab('painel', nome) + dl('montagem', 'sem esse controle') +
+      `<div class='obs'>painel não está na base de TAGs — é o controle que não
+       existe, não um dado faltando</div>`;
+  const corpo = `<g class="${indef ? 'indef' : ''}" ${dd(dica)}>${bloco(x, y, w, h, p, det)}</g>`;
+  const rot = `<text class="eq-rot" x="${x + w / 2}" y="${y - 20}" text-anchor="middle">PAINEL</text>`;
+  if (!indef)
+    return corpo + rot +
+      `<text class="eq-nm" x="${x + w / 2}" y="${y + h + 26}" text-anchor="middle">${esc(nome)}</text>`;
+  return corpo + rot +
+    `<text class="eq-int" x="${x + w / 2}" y="${y + h / 2 + 8}" text-anchor="middle">?</text>` +
+    `<text class="eq-nm" x="${x + w / 2}" y="${y + h + 26}" text-anchor="middle"
+      fill="var(--roxo)">sem tag</text>` +
+    `<text class="eq-obs" x="${x + w / 2}" y="${y + h + 42}" text-anchor="middle">
+      nenhum circuito sai da caixa</text>`;
+}
+
+// A caixa de junção de um segmento fieldbus: o tronco entra de um lado e sai
+// do outro, e a última caixa da fila leva o terminador que fecha o segmento.
+function caixaFF(x, y, nome, rot, fim, mont) {
+  const w = 96, h = 66, p = 22;
+  let det = `<rect class="eq-l" x="${x + 8}" y="${y + 8}" width="${w - 16}" height="${h - 24}" rx="2"/>`;
+  det += `<circle cx="${x + 6}" cy="${y + 6}" r="1.6" fill="var(--t3)"/>
+          <circle cx="${x + w - 6}" cy="${y + 6}" r="1.6" fill="var(--t3)"/>`;
+  for (let i = 0; i < 4; i++)
+    det += `<rect class="eq-lado" x="${x + 12 + i * 20}" y="${y + h}" width="8" height="6" rx="2"/>`;
+  const t = fim ? `<g>
+      <path d="M${x + w} ${y + 17.5} H${x + w + 13}" stroke="var(--ok)" stroke-width="2.4"/>
+      <rect x="${x + w + 13}" y="${y + 6}" width="21" height="23" rx="3"
+        fill="rgba(45,212,191,.15)" stroke="var(--ok)" stroke-width="1.5"/>
+      <path d="M${x + w + 18} ${y + 12} h11 M${x + w + 18} ${y + 17.5} h11
+               M${x + w + 20} ${y + 23} h7" stroke="var(--ok)" stroke-width="1.6"/>
+      <text x="${x + w + 23}" y="${y + 41}" text-anchor="middle" fill="var(--ok)"
+        font-size="6.5" font-weight="800">TERMINADOR</text></g>` : '';
+  const dica = dicaCaixa(nome, mont,
+    dl('papel', fim ? 'ponta do segmento, com terminador' : 'passagem do tronco'));
+  return `<g ${dd(dica)}>${bloco(x, y, w, h, p, det, corMont(mont))}${t}</g>` +
+    `<text class="eq-rot" x="${x + w / 2}" y="${y - 16}" text-anchor="middle">${rot}</text>` +
+    `<text class="eq-nm" x="${x + w / 2}" y="${y + h + 24}" text-anchor="middle">${esc(nome)}</text>`;
+}
+
+function caixaJ(x, y, nome, rot, mont) {
+  const w = 76, h = 62, p = 20;
+  let det = `<rect class="eq-l" x="${x + 7}" y="${y + 8}" width="${w - 14}" height="${h - 24}" rx="2"/>`;
+  for (let i = 0; i < 4; i++)
+    det += `<rect class="eq-lado" x="${x + 9 + i * 16}" y="${y + h}" width="8" height="6" rx="2"/>`;
+  det += `<circle cx="${x + 5}" cy="${y + 5}" r="1.6" fill="var(--t3)"/>
+          <circle cx="${x + w - 5}" cy="${y + 5}" r="1.6" fill="var(--t3)"/>`;
+  return `<g ${dd(dicaCaixa(nome, mont))}>${bloco(x, y, w, h, p, det, corMont(mont))}</g>` +
+    `<text class="eq-rot" x="${x + w / 2}" y="${y - 16}" text-anchor="middle">${rot}</text>` +
+    `<text class="eq-nm" x="${x + w / 2}" y="${y + h + 24}" text-anchor="middle">${esc(nome)}</text>`;
+}
+
+// anel e miolo na mesma cor: verde montado, vermelho não. Pintar só o miolo
+// deixava a informação pequena demais numa grade de 60 símbolos.
+function transmissor(x, y, mont) {
+  const c = corMont(mont);
+  return `<g><rect class="eq-lado" x="${x - 2}" y="${y + 11}" width="4" height="10"/>
+    <circle cx="${x}" cy="${y}" r="10" fill="var(--${c})" fill-opacity=".2"
+      stroke="var(--${c})" stroke-width="3"/>
+    ${mont ? `<circle cx="${x}" cy="${y}" r="4.8" fill="var(--${c})"/>`
+           : `<text x="${x}" y="${y + 3.8}" text-anchor="middle" font-size="10"
+              font-weight="800" fill="var(--roxo)">?</text>`}
+    <rect x="${x - 5}" y="${y - 14.5}" width="10" height="4.5" rx="1.5" fill="var(--metal3)"/></g>`;
+}
+
+function cartao(xi, yi, r) {
+  const sel = D.tag === r.org ? ' sel' : '';
+  return `<g class="inst${sel}" ${dd(dicaTag(r))}>
+    <rect class="chip-bg" x="${xi - 36}" y="${yi - 30}" width="72" height="52" rx="9"/>
+    ${transmissor(xi, yi - 8, r.mont)}
+    <text x="${xi}" y="${yi + 16}" text-anchor="middle" fill="var(--t2)" font-size="7.5"
+      font-family="ui-monospace,Consolas,monospace">${esc(r.org).slice(0, 13)}</text></g>`;
+}
+
+// O cabo não corre reto: sobra comprimento e ele acompanha a bandeja. A onda
+// sai perpendicular ao percurso -- deslocar só o Y sumia no trecho vertical.
+function zigue(x1, y1, x2, y2, amp) {
+  const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1;
+  const n = Math.max(2, Math.min(7, Math.round(len / 70)));
+  const a = amp === undefined ? Math.min(14, len / 12) : amp;
+  const px = -dy / len, py = dx / len;
+  let d = `M${x1} ${y1}`;
+  for (let i = 1; i <= n; i++) {
+    const t = i / n, tm = t - 0.5 / n, o = (i % 2 ? -a : a);
+    d += ` Q${x1 + dx * tm + px * o} ${y1 + dy * tm + py * o} ${x1 + dx * t} ${y1 + dy * t}`;
+  }
+  return d;
+}
+
+// Todo trecho desenha o percurso inteiro apagado e por cima o estado: o não
+// iniciado fica vermelho, e não cinza -- cinza lia como "não existe".
+function fio(d, c, w, papel) {
+  const alvo = `<path class="hit" d="${d}" stroke-width="${Math.max(w + 12, 15)}"
+    ${dd(dicaCabo(c, papel))}/>`;
+  const fundo = `<path d="${d}" stroke="rgba(var(--rgb-tinta),.10)" stroke-width="${w}"
+    fill="none" stroke-dasharray="3 6" stroke-linecap="round"/>`;
+  if (c.pct <= 0) return fundo + `<path d="${d}" stroke="var(--nao)" stroke-width="${w}"
+    fill="none" stroke-dasharray="9 7" stroke-opacity=".8" stroke-linecap="round"/>` + alvo;
+  const anda = c.status === 'Em Andamento';
+  return fundo + `<path d="${d}" stroke="var(--${cls(c.status)})" stroke-width="${w}"
+    fill="none" stroke-linecap="round" pathLength="100"
+    stroke-dasharray="${anda ? '7 5' : c.pct + ' 100'}"
+    class="${anda ? 'andando' : ''}"/>` + alvo;
+}
+
+function cena(c) {
+  const R = c.ramais, T = c.tronco, E = c.eletrica, S = c.segmentos;
+  const grupos = R.reduce((a, r) => {
+    const k = r.seg || c.caixa; (a[k] = a[k] || []).push(r); return a; }, {});
+  const maiorGrupo = Math.max(1, ...Object.values(grupos).map(l => l.length));
+  const ff = c.tipo === 'cff';
+  const colsMax = ff ? 3 : Math.min(12, Math.max(2, Math.ceil(Math.sqrt(maiorGrupo * 1.9))));
+  const filMax = Math.ceil(maiorGrupo / colsMax);
+  // O ramal cresce quando sobra tela e encolhe quando não sobra: numa caixa de
+  // três instrumentos o cabo é o que há para olhar; numa de sessenta, cada
+  // pixel gasto na descida vira fileira a mais de rolagem.
+  const queda = maiorGrupo <= 2 ? 168 : maiorGrupo <= 4 ? 140
+              : maiorGrupo <= 8 ? 116 : maiorGrupo <= 16 ? 96 : 78;
+  const passoX = maiorGrupo <= 4 ? 104 : maiorGrupo <= 8 ? 94 : 82;
+  const fila = queda + 40, yRail = 146;
+  const ALT = ff ? 150 + yRail + queda + (filMax - 1) * fila + 76
+                 : Math.max(460, 190 + 28 + queda + (filMax - 1) * fila + 76);
+  const base = ff ? 150 : 190;
+  const p = [], nos = [], xPain = 150, xPrim = 400;
+  let xFim = xPrim + 200;
+
+  if (E.length) {
+    E.forEach((e, i) => p.push(fio(`M40 ${34 + i * 16} H${xPain + 48} V${base - 34}`,
+                                   e, 2.4, 'alimentação da Elétrica')));
+    p.push(`<text x="40" y="22" fill="var(--and)" font-size="9" font-weight="800"
+      letter-spacing=".7">ELÉTRICA · ALIMENTAÇÃO</text>`);
+  } else {
+    // sem circuito cadastrado não há o que desenhar, e calar seria pior: a
+    // etapa existe no campo mesmo faltando na planilha
+    p.push(`<path d="M40 40 H${xPain + 48} V${base - 34}" stroke="var(--roxo)"
+      stroke-width="2" fill="none" stroke-dasharray="2 6" opacity=".55"/>`);
+    p.push(`<text x="40" y="28" fill="var(--roxo)" font-size="9" font-weight="800"
+      letter-spacing=".7">ELÉTRICA · SEM CIRCUITO CADASTRADO</text>`);
+  }
+  p.push(painel(xPain, base - 34, c.painel, c.painel_indef));
+
+  if (ff) {
+    // UM segmento, e as caixas de junção dele em série: o tronco sai do cartão
+    // H1 no painel, atravessa cada caixa e morre no terminador.
+    const passo = 430, largura = 96, yTk = base + 17;
+    p.push(`<text x="${xPain + 48}" y="${base + 130}" text-anchor="middle"
+      class="rot-tk" font-size="7.5">CARTÃO H1 · SEGMENTO ${esc(c.caixa)}</text>`);
+    S.forEach((sg, i) => {
+      const x = xPrim + i * passo;
+      p.push(caixaFF(x, base, sg.nome, 'CAIXA ' + sg.nome.slice(-1),
+                     sg.nome === c.terminador, sg.mont));
+      const de = i === 0 ? xPain + 96 : xPrim + (i - 1) * passo + largura + 4;
+      const cabo = i === 0 ? T[0] : c.ligacoes[i - 1];
+      if (cabo) {
+        p.push(fio(zigue(de, yTk, x, yTk), cabo, 5,
+                   i === 0 ? 'tronco · painel → caixa A' : 'tronco entre caixas'));
+        p.push(`<text x="${(de + x) / 2}" y="${base - 4}" text-anchor="middle"
+          class="rot-tk" font-size="7.5">TRONCO · ${br(cabo.m)} m</text>`);
+      }
+      const lista = grupos[sg.nome] || [];
+      if (!lista.length) return;
+      const cols = Math.min(3, lista.length), fil = Math.ceil(lista.length / cols);
+      const xIni = x + 4, yBar = base + yRail, px = passoX + 6;
+      p.push(calha(`M${x + 48} ${base + 98} V${yBar}`, lista, 3.4));
+      if (fil > 1) p.push(calha(`M${xIni} ${yBar} V${yBar + (fil - 1) * fila}`, lista, 2.8));
+      for (let f = 0; f < fil; f++) {
+        const fatia = lista.slice(f * cols, (f + 1) * cols);
+        p.push(calha(`M${xIni} ${yBar + f * fila} H${xIni + (fatia.length - 1) * px}`,
+                     fatia, 2.8));
+      }
+      lista.forEach((r, k) => {
+        const fl = Math.floor(k / cols);
+        const xi = xIni + (k % cols) * px, yi = yBar + fl * fila + queda;
+        p.push(fio(zigue(xi, yBar + fl * fila, xi, yi - 25, Math.min(9, queda / 12)),
+                   r, 2, 'ramal até o instrumento'));
+        p.push(cartao(xi, yi, r));
+        xFim = Math.max(xFim, xi + 60);
+      });
+    });
+    xFim = Math.max(xFim, xPrim + (S.length - 1) * 430 + 195);
+  } else {
+    const x = xPrim + 120;
+    p.push(caixaJ(x, base, c.caixa, 'CAIXA DE JUNÇÃO', c.mont));
+    nos.push({nome: c.caixa, x: x + 38, y: base});
+    if (!T.length) {
+      p.push(`<path d="M${xPain + 96} ${base + 30} H${x}" stroke="var(--roxo)"
+        stroke-width="4" fill="none" stroke-dasharray="2 7" opacity=".6"/>`);
+      p.push(`<text x="${(xPain + 96 + x) / 2}" y="${base + 18}" text-anchor="middle"
+        class="eq-obs">tronco não cadastrado</text>`);
+    } else {
+      // vários cabos no mesmo tronco: a onda tem de caber no vão entre eles,
+      // senão os traços se cruzam e o feixe vira uma escada
+      const passo = Math.min(17, 68 / Math.max(T.length, 1));
+      T.forEach((t, i) => {
+        const y = base + 30 - (T.length - 1) * passo / 2 + i * passo;
+        p.push(fio(zigue(xPain + 96, y, x, y, Math.min(7, passo * 0.32)),
+                   t, T.length > 6 ? 3 : 5, 'tronco · painel → caixa'));
+      });
+    }
+    nos.forEach(no => {
+      const lista = grupos[no.nome] || [];
+      if (!lista.length) return;
+      const colunas = Math.min(12, Math.max(2, Math.ceil(Math.sqrt(lista.length * 1.9))));
+      const fileiras = Math.ceil(lista.length / colunas);
+      const x0 = no.x + 96, y0 = no.y + 28, xBar = x0 - 40;
+      // a bandeja sai da caixa, desce por trás das fileiras e serve uma calha
+      // para cada uma. O ramal colorido é só o trecho do instrumento.
+      p.push(calha(`M${no.x + 40} ${no.y + 28} H${xBar}`, lista, 3.4));
+      p.push(calha(`M${xBar} ${y0} V${y0 + (fileiras - 1) * fila}`, lista, 2.8));
+      for (let f = 0; f < fileiras; f++) {
+        const fatia = lista.slice(f * colunas, (f + 1) * colunas);
+        p.push(calha(`M${xBar} ${y0 + f * fila} H${x0 + (fatia.length - 1) * passoX + 26}`,
+                     fatia, 2.8));
+      }
+      lista.forEach((r, i) => {
+        const xi = x0 + (i % colunas) * passoX + 26;
+        const yi = y0 + Math.floor(i / colunas) * fila + queda;
+        p.push(fio(zigue(xi, y0 + Math.floor(i / colunas) * fila, xi, yi - 25,
+                         Math.min(9, queda / 12)), r, 2, 'ramal até o instrumento'));
+        p.push(cartao(xi, yi, r));
+        xFim = Math.max(xFim, xi + 50);
+      });
+    });
+  }
+  return `<svg class="cena" viewBox="0 0 ${Math.max(xFim + 40, 1100)} ${ALT}" role="img"
+    aria-label="Trajeto físico: a elétrica alimenta o painel ${esc(String(c.painel))},
+    o tronco segue até ${esc(c.caixa)} e os instrumentos derivam das caixas">
+    ${p.join('')}</svg>`;
+}
+
+function aplicarZoom() {
+  const sv = document.querySelector('#cena svg');
+  if (sv) sv.style.width = (zoom * 100) + '%';
+  document.getElementById('zn').textContent = Math.round(zoom * 100) + '%';
+}
+function zoomar(f) { zoom = Math.min(6, Math.max(0.4, zoom * f)); aplicarZoom(); }
+function zoomAjuste() { zoom = 1; aplicarZoom(); document.getElementById('zona').scrollTo(0, 0); }
+
+// Levar a TAG escolhida para o centro da tela: é o que faz "pesquisei, achei"
+// virar "estou olhando de perto", sem procurar o cartão no meio de sessenta.
+function focar(fator) {
+  const alvo = document.querySelector('.inst.sel');
+  const z = document.getElementById('zona');
+  if (!alvo) { zoomar(fator); return; }
+  const antes = alvo.getBoundingClientRect(), zr = z.getBoundingClientRect();
+  const cx = z.scrollLeft + antes.left - zr.left + antes.width / 2;
+  const cy = z.scrollTop + antes.top - zr.top + antes.height / 2;
+  const z0 = zoom;
+  zoomar(fator);
+  const k = zoom / z0;
+  z.scrollTo({left: cx * k - z.clientWidth / 2, top: cy * k - z.clientHeight / 2,
+              behavior: 'smooth'});
+}
+
+document.getElementById('cena').innerHTML = cena(D.cadeia);
+aplicarZoom();
+if (D.tag) requestAnimationFrame(() => focar(1.6));
+
+(function () {
+  const b = document.getElementById('dica'), z = document.getElementById('zona');
+  addEventListener('mousemove', e => {
+    const alvo = e.target.closest && e.target.closest('[data-d]');
+    if (!alvo) { b.classList.remove('ver'); return; }
+    b.innerHTML = alvo.getAttribute('data-d');
+    b.classList.add('ver');
+    // a dica vira de lado quando encosta na borda, em vez de sair da tela
+    const x = e.clientX + 18 + b.offsetWidth > innerWidth - 10
+            ? e.clientX - b.offsetWidth - 18 : e.clientX + 18;
+    const y = e.clientY + 18 + b.offsetHeight > innerHeight - 10
+            ? Math.max(8, e.clientY - b.offsetHeight - 18) : e.clientY + 18;
+    b.style.transform = `translate(${x}px,${y}px)`;
+  }, {passive: true});
+  addEventListener('mouseleave', () => b.classList.remove('ver'));
+  // Ctrl+roda amplia; sem o Ctrl a roda continua rolando, que é o que se espera
+  z.addEventListener('wheel', e => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    zoomar(e.deltaY < 0 ? 1.14 : 1 / 1.14);
+  }, {passive: false});
+  let a = null;
+  z.addEventListener('pointerdown', e => {
+    a = {x: e.clientX, y: e.clientY, l: z.scrollLeft, t: z.scrollTop};
+    z.classList.add('arrasta'); z.setPointerCapture(e.pointerId);
+  });
+  z.addEventListener('pointermove', e => {
+    if (!a) return;
+    z.scrollLeft = a.l - (e.clientX - a.x);
+    z.scrollTop = a.t - (e.clientY - a.y);
+  });
+  const solta = () => { a = null; z.classList.remove('arrasta'); };
+  z.addEventListener('pointerup', solta);
+  z.addEventListener('pointercancel', solta);
+})();
+"""
+
+
+def cert_cena_html(cadeia: dict, tag: str, tema: str, altura: int) -> str:
+    """O documento do iframe: tokens do tema, o desenho e os controles.
+
+    O iframe não herda o CSS do app, então os tokens entram copiados do mesmo
+    dicionário TEMAS -- uma fonte só, duas superfícies.
+    """
+    t = TEMAS.get(tema, TEMAS[TEMA_PADRAO])
+    dados = json.dumps({"cadeia": cadeia, "tag": tag}, ensure_ascii=False)
+    return f"""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+:root{{--bg:{t['card']};--card2:{t['card2']};--fundo3:{t['fundo3']};
+  --linha:{t['borda']};--linha2:{t['borda_forte']};--rgb-tinta:{t['rgb_tinta']};
+  --t1:{t['texto1']};--t2:{t['texto2']};--t3:{t['texto3']};
+  --ok:{t['teal']};--and:{t['ambar']};--nao:{t['vermelho']};
+  --azul:{t['azul']};--roxo:{t['roxo']};
+  --metal:{t['metal']};--metal2:{t['metal2']};--metal3:{t['metal3']};
+  color-scheme:{t['esquema']}}}
+body{{background:var(--bg);color:var(--t1);overflow:hidden;
+  font:400 13px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}}
+.barra{{display:flex;align-items:center;gap:6px;padding:8px 12px;
+  border-bottom:1px solid var(--linha)}}
+.tt{{font-size:11.5px;color:var(--t2);font-weight:600;margin-right:auto}}
+.tt b{{color:var(--t1);font-family:ui-monospace,Consolas,monospace}}
+.zb{{height:26px;min-width:27px;padding:0 7px;border-radius:8px;background:var(--card2);
+  border:1px solid var(--linha2);color:var(--t2);font:inherit;font-size:13px;
+  font-weight:700;cursor:pointer;display:grid;place-items:center;line-height:1}}
+.zb:hover{{border-color:var(--azul);color:var(--t1)}}
+.zb.tx{{font-size:10px;letter-spacing:.4px}}
+.zn{{font-size:11px;color:var(--t3);min-width:42px;text-align:center;font-weight:600}}
+/* a cena rola dentro da moldura; sem isso o zoom empurraria a página inteira */
+.zona{{overflow:auto;height:calc(100vh - 43px);cursor:grab;overscroll-behavior:contain}}
+.zona.arrasta{{cursor:grabbing}}
+svg.cena{{width:100%;height:auto;display:block}}
+.eq-face{{fill:var(--metal)}}.eq-topo{{fill:var(--metal3)}}.eq-lado{{fill:var(--metal2)}}
+.indef .eq-face,.indef .eq-topo,.indef .eq-lado{{opacity:.42}}
+.indef .eq-l{{stroke:rgba(var(--rgb-roxo,157,107,255),.5);stroke-dasharray:4 4}}
+.eq-obs{{fill:var(--roxo);font-size:9px;font-weight:700}}
+.eq-int{{fill:var(--roxo);font-size:20px;font-weight:800}}
+.eq-l{{stroke:rgba(var(--rgb-tinta),.18);stroke-width:1;fill:none}}
+.eq-nm{{fill:var(--t1);font-size:11.5px;font-weight:700;
+  font-family:ui-monospace,Consolas,monospace}}
+.eq-rot{{fill:var(--t3);font-size:8.5px;letter-spacing:.7px;font-weight:700}}
+.rot-tk{{fill:var(--and);font-weight:800;letter-spacing:.5px}}
+.chip-bg{{fill:var(--metal2);stroke:rgba(var(--rgb-tinta),.14)}}
+.inst.sel .chip-bg{{stroke:var(--azul);stroke-width:2.5}}
+.inst:hover .chip-bg{{stroke:var(--t2)}}
+.hit{{stroke:transparent;fill:none}}
+.andando{{animation:corre 1.05s linear infinite}}
+@keyframes corre{{to{{stroke-dashoffset:-16}}}}
+@media (prefers-reduced-motion:reduce){{.andando{{animation:none}}}}
+.dica{{position:fixed;z-index:60;pointer-events:none;opacity:0;transition:opacity .09s;
+  background:var(--fundo3);border:1px solid var(--linha2);border-radius:11px;
+  padding:10px 13px;max-width:310px;box-shadow:0 12px 34px rgba(0,0,0,.4);left:0;top:0}}
+.dica.ver{{opacity:1}}
+.dica .h{{font-size:9px;letter-spacing:.8px;text-transform:uppercase;font-weight:800;
+  color:var(--t3)}}
+.dica .n{{font-family:ui-monospace,Consolas,monospace;font-size:13px;font-weight:700;
+  margin:3px 0 7px;color:var(--t1)}}
+.dica .l{{display:flex;gap:14px;justify-content:space-between;font-size:11.5px;padding:2.5px 0}}
+.dica .l i{{font-style:normal;color:var(--t3)}}
+.dica .l b{{font-weight:700;text-align:right}}
+.dica .obs{{font-size:10.5px;color:var(--t3);margin-top:6px;padding-top:6px;
+  border-top:1px solid var(--linha);line-height:1.45}}
+</style></head><body>
+<div class="dica" id="dica"></div>
+<div class="barra">
+  <span class="tt">Ctrl + roda amplia · arraste para deslocar · passe o mouse para ver
+    a situação</span>
+  <button class="zb" onclick="focar(1/1.3)" title="Afastar">−</button>
+  <span class="zn" id="zn">100%</span>
+  <button class="zb" onclick="focar(1.3)" title="Aproximar">+</button>
+  <button class="zb tx" onclick="focar(2.2)" title="Aproximar na TAG selecionada">NA TAG</button>
+  <button class="zb tx" onclick="zoomAjuste()" title="Voltar à largura da tela">AJUSTAR</button>
+</div>
+<div class="zona" id="zona"><div id="cena"></div></div>
+<script>{CERT_JS.replace('__DADOS__', dados)}</script>
+</body></html>"""
+
+
+@st.cache_data(show_spinner=False, max_entries=3)
+def cert_panorama(lanc: pd.DataFrame, cache_key: str) -> dict:
+    """Quantas TAGs estão aptas, sem montar cadeia por cadeia.
+
+    Percorrer as 480 caixas para responder um número do topo custaria mais que
+    desenhar a tela. Aqui a leitura é de uma passada só: cada instrumento sobe
+    pela própria origem até achar o painel, somando o que encontra pelo
+    caminho, e a alimentação do painel entra no fim.
+    """
+    vazio = {"circuitos": 0, "metros": 0.0, "lancado": 0.0, "instrumentos": 0,
+             "ok": 0, "warn": 0, "crit": 0, "desc": 0, "caixas": 0}
+    if lanc.empty:
+        return vazio
+    linhas = lanc.to_dict("records")
+    saida: dict[str, list] = {}
+    eletrica: dict[str, list] = {}
+    for r in linhas:
+        org, dst = str(r["ORIGEM"]).strip(), str(r["DESTINO"]).strip()
+        saida.setdefault(org, []).append(r)
+        if str(r["DISCIPLINA"]).strip() == "ELÉTRICA":
+            eletrica.setdefault(dst, []).append(r)
+
+    conta = {"ok": 0, "warn": 0, "crit": 0, "desc": 0}
+    instrumentos = 0
+    for r in linhas:
+        org, dst = str(r["ORIGEM"]).strip(), str(r["DESTINO"]).strip()
+        if cert_nivel(org) != 0 or cert_nivel(dst) != 1:
+            continue
+        instrumentos += 1
+        cadeia, aberto, atual = [r], False, dst
+        # a caixa puxa a seguinte ate chegar no painel; seis saltos e folga de
+        # sobra para a maior cadeia da base, e corta ciclo de dado sujo
+        for _ in range(6):
+            if cert_nivel(atual) == 2:
+                break
+            prox = saida.get(atual)
+            if not prox:
+                aberto = True
+                break
+            cadeia.extend(prox)
+            atual = str(prox[0]["DESTINO"]).strip()
+        if cert_nivel(atual) == 2:
+            alim = eletrica.get(atual)
+            if alim:
+                cadeia.extend(alim)
+            else:
+                aberto = True
+        trava = next((c for c in cadeia if float(c["PCT"] or 0) < 99.5), None)
+        if trava is None:
+            conta["desc" if aberto else "ok"] += 1
+        elif str(trava["STATUS"]).strip() == "Em Andamento":
+            conta["warn"] += 1
+        else:
+            conta["crit"] += 1
+
+    metros = float(lanc["METROS"].fillna(0).sum())
+    lancado = float((lanc["METROS"].fillna(0) * lanc["PCT"].fillna(0) / 100).sum())
+    pontas = pd.concat([lanc["ORIGEM"], lanc["DESTINO"]]).astype(str).str.strip()
+    caixas = {p for p in pontas if p.startswith(CAIXA_PREFIXOS)}
+    return {"circuitos": int(len(lanc)), "metros": metros, "lancado": lancado,
+            "instrumentos": instrumentos, "caixas": len(caixas), **conta}
+
+
+def cert_altura(cad: dict, largura_px: int = 1320) -> int:
+    """A altura da moldura, tirada da própria cena.
+
+    O iframe tem altura fixa: com um valor único, uma cadeia de 3 instrumentos
+    deixava meia tela de vazio e uma de 60 nascia cortada. As contas aqui são
+    as mesmas do desenho -- se mudarem lá, mudam aqui, e é por isso que os
+    números estão nomeados dos dois lados.
+    """
+    grupos: dict[str, list] = {}
+    for r in cad["ramais"]:
+        grupos.setdefault(r.get("seg") or cad["caixa"], []).append(r)
+    maior = max((len(v) for v in grupos.values()), default=1)
+    ff = cad["tipo"] == "cff"
+    cols = 3 if ff else min(12, max(2, math.ceil(math.sqrt(maior * 1.9))))
+    fileiras = math.ceil(maior / cols)
+    queda = (168 if maior <= 2 else 140 if maior <= 4 else 116 if maior <= 8
+             else 96 if maior <= 16 else 78)
+    passo_x = 104 if maior <= 4 else 94 if maior <= 8 else 82
+    fila = queda + 40
+    alt = ((150 + 146 + queda + (fileiras - 1) * fila + 76) if ff
+           else max(460, 190 + 28 + queda + (fileiras - 1) * fila + 76))
+    if ff:
+        larg = max(400 + (len(cad["segmentos"]) - 1) * 430 + 195,
+                   400 + (min(3, maior) - 1) * (passo_x + 6) + 64, 1100)
+    else:
+        larg = max(400 + 120 + 38 + 96 + (cols - 1) * passo_x + 76, 1100)
+    # 1.320 px é a largura medida do painel numa janela de 1.600 com a lateral
+    # aberta. Em tela menor a cena encolhe e sobra folga; em tela muito maior
+    # ela passa do quadro e a moldura rola, que é o defeito mais barato dos dois.
+    return int(min(860, max(360, largura_px * alt / larg + 46)))
+
+
+def cert_veredito_html(cad: dict, tag: str, sit: dict) -> str:
+    tom, passos, trava = sit["tom"], sit["passos"], sit["trava"]
+    abertas, prontas = sit["abertas"], sit["prontas"]
+    if tom == "desc":
+        titulo = "NÃO DÁ PARA AFIRMAR"
+        frase = (f"Os circuitos conhecidos de {tag} estão lançados, mas "
+                 f"{len(abertas)} predecessora não tem circuito cadastrado.")
+        det = (f"Falta na planilha a <b>{abertas[0]['nm'].lower()}</b>. Certificar assim "
+               f"é assinar por algo que ninguém verificou.")
+    elif tom == "ok":
+        titulo = "APTO PARA CERTIFICAÇÃO"
+        frase = f"As {len(passos)} predecessoras de {tag} estão concluídas."
+        det = ("O caminho fecha da alimentação do painel até o instrumento. O que falta "
+               "para certificar é ensaio e documento, não cabo.")
+    else:
+        anda = tom == "warn"
+        titulo = "PREDECESSORA EM ANDAMENTO" if anda else "BLOQUEADO"
+        frase = (f"{prontas} de {len(passos)} predecessoras prontas. "
+                 f"Para em: {trava['nm'].lower()}."
+                 + (f" E {len(abertas)} não tem circuito cadastrado." if abertas else ""))
+        det = (f"O circuito <b>{trava['c']['id']}</b> está {trava['c']['status'].lower()}"
+               + (f" ({br_pct(trava['c']['pct'])})" if anda else "")
+               + f" e são {br_num(int(trava['c']['m']))} m. Enquanto ele não fechar, "
+                 f"{tag} não tem como ser certificada — mesmo com o ramal dela pronto.")
+    linhas = []
+    for p in passos:
+        if p.get("desc"):
+            linhas.append(f'<div class="ct-pd desc"><span class="mk">?</span>'
+                          f'<span class="cp"><div class="nm">{p["nm"]}</div>'
+                          f'<div class="ds">{p["ds"]}</div></span>'
+                          f'<span class="pc">sem dado</span></div>')
+            continue
+        c = p["c"]
+        t = "ok" if cert_feito(c) else ("and" if c["pct"] > 0 else "nao")
+        marca = "✓" if t == "ok" else ("◐" if t == "and" else "✕")
+        linhas.append(f'<div class="ct-pd {t}"><span class="mk">{marca}</span>'
+                      f'<span class="cp"><div class="nm">{p["nm"]}</div>'
+                      f'<div class="ds">{p["ds"]}</div></span>'
+                      f'<span class="pc">{c["pct"]:.0f}%</span></div>')
+    return (f'<div class="ct-vered {tom}"><div class="q">{titulo}</div>'
+            f'<div class="f">{frase}</div><div class="d">{det}</div></div>'
+            f'<div>{"".join(linhas)}</div>')
+
+
+def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataFrame,
+                        cache_key: str):
+    """Se esta TAG pode ser certificada, e onde a cadeia dela para.
+
+    A aba é visual: o resumo em cima, o trajeto no meio e a lista de
+    predecessoras ao lado. Certificar é assinar que tudo antes está pronto --
+    então o que a tela precisa mostrar é o "tudo antes", inteiro, de uma vez.
+    """
+    render_header("Certificação")
+
+    if lanc.empty:
+        render_html('<div class="gplan-panel"><div class="gtbl-empty">'
+                    "Esta planilha ainda não tem o controle de lançamento de circuitos. "
+                    "Rode o pipeline com a <code>07_BASE_CABOS_COMPLETO.xlsx</code> na "
+                    "pasta de bases — ela traz status, percentual e metragem de cada "
+                    "circuito, que é o que responde a certificação.</div></div>")
+        return
+
+    mont = cert_montagem(tags, depara, cache_key)
+    pan = cert_panorama(lanc, cache_key)
+    alvos = cert_alvos(lanc, cache_key)
+    indice = cert_indice(lanc, cache_key)
+    if not alvos:
+        render_html('<div class="gplan-panel"><div class="gtbl-empty">'
+                    "Nenhuma caixa de junção nesta base de circuitos.</div></div>")
+        return
+
+    pct_m = pan["lancado"] / pan["metros"] * 100 if pan["metros"] else 0.0
+    pct_ok = pan["ok"] / pan["instrumentos"] * 100 if pan["instrumentos"] else 0.0
+    trava = pan["crit"] + pan["warn"]
+    render_html(f"""
+      <div class="pl-kpis">
+        <div class="pl-kpi"><div class="r">Cabo lançado</div>
+          <div class="v andando">{br_pct(pct_m)}</div>
+          <div class="s">{br_num(int(pan['lancado']))} de {br_num(int(pan['metros']))} m
+            em {br_num(pan['circuitos'])} circuitos</div>
+          <div class="pl-barra"><i class="andando" style="width:{pct_m:.1f}%"></i></div></div>
+        <div class="pl-kpi"><div class="r">Aptos para certificação</div>
+          <div class="v">{br_num(pan['ok'])}</div>
+          <div class="s">{br_pct(pct_ok)} dos {br_num(pan['instrumentos'])} instrumentos
+            com cadeia</div>
+          <div class="pl-barra"><i class="feito" style="width:{pct_ok:.1f}%"></i></div></div>
+        <div class="pl-kpi"><div class="r">Travados por cabo</div>
+          <div class="v">{br_num(trava)}</div>
+          <div class="s">{br_num(pan['crit'])} bloqueados ·
+            {br_num(pan['warn'])} com predecessora em andamento</div></div>
+        <div class="pl-kpi"><div class="r">Sem como afirmar</div>
+          <div class="v">{br_num(pan['desc'])}</div>
+          <div class="s">a cadeia fecha, mas falta circuito cadastrado antes</div></div>
+      </div>""")
+
+    # A busca é uma só: instrumento e caixa na mesma lista. Escolher um
+    # instrumento abre a cadeia da caixa dele, que é onde a resposta mora.
+    opcoes = ([f"{t}  ·  instrumento" for t in sorted(indice)]
+              + [f"{a}  ·  {'fieldbus' if a.startswith('CFF') else 'caixa'}" for a in alvos])
+    padrao = st.session_state.get("cert_escolha")
+    idx = opcoes.index(padrao) if padrao in opcoes else 0
+    escolha = st.selectbox(
+        "Pesquisar TAG, caixa de junção ou tronco de fieldbus",
+        opcoes, index=idx, key="cert_escolha",
+        help="Digite para filtrar. Escolhendo um instrumento, a cadeia dele abre com "
+             "a TAG já destacada no desenho.")
+    nome = escolha.split("  ·  ")[0]
+    if nome in indice:
+        alvo, tag_sel = indice[nome], nome
+    else:
+        alvo, tag_sel = nome, ""
+
+    cad = cert_cadeia(alvo, lanc, mont)
+    if not cad["ramais"]:
+        render_html('<div class="gplan-panel"><div class="gtbl-empty">'
+                    f"Nenhum instrumento chega em {alvo} nesta base.</div></div>")
+        return
+    if not tag_sel:
+        tag_sel = cad["ramais"][0]["org"]
+
+    # A situacao entra no proprio ramal: o desenho precisa dela para a dica, e a
+    # lista ao lado usa a mesma conta. Calcular duas vezes e o caminho curto
+    # para as duas divergirem no primeiro ajuste.
+    situacoes = {}
+    for r in cad["ramais"]:
+        sit = cert_situacao(cad, r["org"])
+        situacoes[r["org"]] = sit
+        r["tom"] = sit["tom"]
+        r["rot"] = CERT_ROTULO[sit["tom"]]
+        r["onde"] = sit["onde"]
+
+    titulo = (f"{cad['painel'] or 'painel indefinido'} → {cad['caixa']}"
+              + (f" ({len(cad['segmentos'])} caixas em série)" if cad["segmentos"] else "")
+              + f" → {len(cad['ramais'])} instrumentos")
+    render_html(f'<div class="gplan-panel-title" style="margin:4px 0 10px">'
+                f'Trajeto físico <span class="gtbl-muted" '
+                f'style="font-weight:500">{titulo}</span></div>')
+
+    altura = cert_altura(cad)
+    st.components.v1.html(cert_cena_html(cad, tag_sel, tema_ativo(), altura),
+                          height=altura, scrolling=False)
+
+    render_html("""
+      <div class="ct-leg">
+        <span style="font-weight:800;color:var(--text-2);letter-spacing:.3px">CABO</span>
+        <span><i style="background:var(--accent-teal)"></i>lançado</span>
+        <span><i style="background:var(--accent-amber)"></i>em lançamento</span>
+        <span><i style="background:repeating-linear-gradient(90deg,
+          var(--accent-red) 0 6px,transparent 6px 11px)"></i>não iniciado</span>
+        <span><i style="background:var(--accent-purple)"></i>sem circuito cadastrado</span>
+        <span style="width:100%;height:1px;background:var(--border-color);margin:2px 0"></span>
+        <span style="font-weight:800;color:var(--text-2);letter-spacing:.3px">MONTAGEM</span>
+        <span><b style="background:var(--accent-teal)"></b>montado</span>
+        <span><b style="background:var(--accent-amber)"></b>em programação</span>
+        <span><b style="background:var(--accent-red)"></b>não montado ou não programado</span>
+        <span><b style="background:var(--accent-purple)"></b>sem par na base de TAGs</span>
+        <span style="width:100%;color:var(--text-3);padding-top:2px">a caixa também é TAG:
+          o volume dela recebe a mesma cor &nbsp;·&nbsp; o painel não tem controle de
+          montagem &nbsp;·&nbsp; no fieldbus, o instrumento só espera as caixas
+          <b style="color:var(--text-2);width:auto;height:auto;border-radius:0;
+          display:inline">antes</b> da dele</span>
+      </div>""")
+
+    esq, dir_ = st.columns([1, 1], gap="medium")
+    with esq:
+        render_html('<div class="gplan-panel-title" style="margin:18px 0 6px">'
+                    f'Predecessoras de {tag_sel}</div>')
+        render_html(cert_veredito_html(cad, tag_sel, situacoes[tag_sel]))
+    with dir_:
+        render_html('<div class="gplan-panel-title" style="margin:18px 0 6px">'
+                    f'Instrumentos da cadeia <span class="gtbl-muted" '
+                    f'style="font-weight:500">{len(cad["ramais"])}</span></div>')
+        linhas = []
+        for r in cad["ramais"]:
+            sit = situacoes[r["org"]]
+            classe = CERT_CLASSE[sit["tom"]]
+            marca = "ok" if classe == "ok" else "warn" if classe == "warn" else \
+                    "crit" if classe == "crit" else "roxo"
+            linhas.append(
+                f'<tr><td class="gtbl-mono">{r["org"]}</td>'
+                + (f'<td class="gtbl-mono">{r.get("seg", "")[-1:]}</td>'
+                   if cad["segmentos"] else "")
+                + f'<td><span class="gtbl-badge {marca}">{CERT_ROTULO[sit["tom"]]}</span></td>'
+                  f'<td class="gtbl-muted" style="font-size:11px">'
+                  f'{"—" if sit["tom"] == "ok" else sit["onde"]}</td></tr>')
+        cab_seg = "<th>Caixa</th>" if cad["segmentos"] else ""
+        render_html(f'<div class="gtbl-scroll" style="max-height:420px;overflow-y:auto">'
+                    f'<table class="gtbl"><thead><tr><th>TAG</th>{cab_seg}'
+                    f'<th>Situação</th><th>Trava em</th></tr></thead>'
+                    f'<tbody>{"".join(linhas)}</tbody></table></div>')
+
+
 def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFrame,
                   aux: pd.DataFrame):
     """O avanco de montagem por area, desenhado sobre o arranjo da unidade.
@@ -4732,7 +5785,7 @@ def main():
 
     st.session_state["gplan_atualizado_em"] = data_atualizacao(fonte)
     (tags, cabos, tubing, sigem, resumo, esperados,
-     gitec, locacao, aux_areas) = load_data(cache_key)
+     gitec, locacao, aux_areas, lancamento, depara) = load_data(cache_key)
 
     with st.sidebar:
         render_html(
@@ -4757,9 +5810,11 @@ def main():
     sigem_page = st.Page(lambda: _sob_carga("Carregando a base SIGEM", lambda: render_sigem(sigem, esperados, any(escolhas.values()))), title="Base SIGEM", icon=":material/database:", url_path="sigem")
     gitec_page = st.Page(lambda: _sob_carga("Carregando a medição de campo", lambda: render_gitec(gitec_f, resumo, tags, esperados, sigem, cache_key)), title="Gitec", icon=":material/engineering:", url_path="gitec")
     planta_page = st.Page(lambda: _sob_carga("Desenhando o avanço na planta", lambda: render_planta(tags, resumo, locacao, aux_areas)), title="Planta", icon=":material/map:", url_path="planta")
+    certificacao_page = st.Page(lambda: _sob_carga("Montando a cadeia de certificação", lambda: render_certificacao(tags, lancamento, depara, cache_key)), title="Certificação", icon=":material/fact_check:", url_path="certificacao")
 
     nav = st.navigation([dashboard_page, progresso_page, relatorios_page, pesquisa_page,
-                         sigem_page, gitec_page, planta_page], position="sidebar")
+                         sigem_page, gitec_page, planta_page, certificacao_page],
+                        position="sidebar")
     nav.run()
 
 
