@@ -4620,7 +4620,7 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
           <div class="pl-barra"><i class="feito" style="width:{pct_cabo:.1f}%"></i></div></div>
         <div class="pl-kpi"><div class="r">TAG apta</div>
           <div class="v">{br_num(pan['tag_apta'])}</div>
-          <div class="s">{br_pct(pct_apta)} · cabo apto e montada</div>
+          <div class="s">circuitos aptos e instrumento montado · {br_pct(pct_apta)}</div>
           <div class="pl-barra"><i class="feito" style="width:{pct_apta:.1f}%"></i></div></div>
         <div class="pl-kpi"><div class="r">Montadas travadas</div>
           <div class="v">{br_num(pan['montadas_travadas'])}</div>
