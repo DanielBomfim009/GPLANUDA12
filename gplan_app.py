@@ -3167,7 +3167,8 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
 
 
 def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame,
-                        sigem: pd.DataFrame, cache_key: str = ""):
+                        sigem: pd.DataFrame, cache_key: str = "",
+                        lancamento: pd.DataFrame | None = None):
     render_header("Pesquisa tag",
                   extra_pill=f"<strong>{br_num(len(resumo))}</strong> tags"
                   if st.session_state.get("_flt_selo") else None)
@@ -3206,9 +3207,34 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
                                              _revisoes_por_doc(cache_key, sigem)))
         return
 
-    search = lembrado(st.text_input, "pesq_busca", "Pesquisar", placeholder="Digite a tag para ver a ficha completa (ex: AIT-120005)...", label_visibility="collapsed")
+    # O painel sai da planilha de cabos, e nem toda planilha a tem: sem ela o
+    # campo não aparece, em vez de aparecer vazio sem explicação.
+    painel_de = (cert_painel_por_tag(lancamento, cache_key)
+                 if lancamento is not None and not lancamento.empty else {})
+    if painel_de:
+        col_busca, col_painel = st.columns([3, 2], gap="medium")
+    else:
+        col_busca, col_painel = st.container(), None
+    with col_busca:
+        search = lembrado(st.text_input, "pesq_busca", "Pesquisar", placeholder="Digite a tag para ver a ficha completa (ex: AIT-120005)...", label_visibility="collapsed")
 
     list_df = resumo[["TAG", "DESCRICAO", "GRUPO_REGRA", "ITEM_PPU", "RELATORIOS_ESPERADOS", "AVANCO_DOCUMENTAL"]].copy()
+    if painel_de:
+        do_painel: dict[str, list] = {}
+        for t in resumo["TAG"].astype(str):
+            p = painel_de.get(t)
+            if p:
+                do_painel.setdefault(p, []).append(t)
+        with col_painel:
+            escolha_painel = st.selectbox(
+                "Painel", ["Todos os painéis"]
+                + [f"{p}  ·  {len(v)} tags" for p, v in sorted(do_painel.items())],
+                key="pesq_painel", label_visibility="collapsed",
+                help="O painel vem da planilha de cabos: mostra o segmento inteiro "
+                     "que depende dele.")
+        if escolha_painel != "Todos os painéis":
+            alvo_p = escolha_painel.split("  ·  ")[0]
+            list_df = list_df[list_df["TAG"].isin(do_painel.get(alvo_p, []))]
     # o status de campo mora na 01_BASE_TAGS, nao no resumo. Planilha antiga
     # nao tem essas colunas: sem o merge a pill so mostra tracinho.
     campo = [c for c in ("STATUS_LOCALIZACAO", "STATUS_CALIBRACAO", "STATUS_MONTAGEM",
@@ -3822,6 +3848,38 @@ def cert_indice(lanc: pd.DataFrame, cache_key: str) -> dict:
         if cert_nivel(org) == 0 and cert_nivel(dst) == 1:
             saida[org] = re.sub(r"[A-Z]$", "", dst) if dst.startswith("CFF") else dst
     return saida
+
+
+@st.cache_data(show_spinner=False, max_entries=3)
+def cert_painel_por_tag(lanc: pd.DataFrame, cache_key: str) -> dict:
+    """De cada instrumento para o painel que o alimenta.
+
+    O painel não está na base de TAGs: ele sai da planilha de cabos, subindo do
+    instrumento pela caixa até um PN/PL/PCC. Quando a subida não chega em
+    painel nenhum -- caixa sem circuito de saída --, a TAG fica de fora em vez
+    de receber um palpite.
+    """
+    if lanc.empty:
+        return {}
+    saida: dict[str, list] = {}
+    for r in lanc.to_dict("records"):
+        org = str(r["ORIGEM"]).strip()
+        if org not in ("", "nan"):
+            saida.setdefault(org, []).append(str(r["DESTINO"]).strip())
+    por_tag: dict[str, str] = {}
+    for org, destinos in saida.items():
+        if cert_nivel(org) != 0:
+            continue
+        atual = destinos[0]
+        for _ in range(6):
+            if cert_nivel(atual) == 2:
+                por_tag[org] = atual
+                break
+            prox = saida.get(atual)
+            if not prox:
+                break
+            atual = prox[0]
+    return por_tag
 
 
 @st.cache_data(show_spinner=False, max_entries=3)
@@ -5993,7 +6051,7 @@ def main():
     dashboard_page = st.Page(lambda: _sob_carga("Carregando o painel", lambda: render_dashboard(resumo, esperados, tags, sigem, cache_key)), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
     relatorios_page = st.Page(lambda: _sob_carga("Carregando os relatórios", lambda: render_relatorios(esperados, resumo, tags, sigem, cache_key)), title="Relatórios", icon=":material/description:", url_path="relatorios")
     progresso_page = st.Page(lambda: _sob_carga("Abrindo o Progresso", lambda: render_progresso(resumo, esperados, tags, sigem, cache_key)), title="Progresso", icon=":material/insights:", url_path="progresso")
-    pesquisa_page = st.Page(lambda: _sob_carga("Carregando as tags", lambda: render_pesquisa_tag(resumo, esperados, tags, sigem, cache_key)), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
+    pesquisa_page = st.Page(lambda: _sob_carga("Carregando as tags", lambda: render_pesquisa_tag(resumo, esperados, tags, sigem, cache_key, lancamento)), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
     sigem_page = st.Page(lambda: _sob_carga("Carregando a base SIGEM", lambda: render_sigem(sigem, esperados, any(escolhas.values()))), title="Base SIGEM", icon=":material/database:", url_path="sigem")
     gitec_page = st.Page(lambda: _sob_carga("Carregando a medição de campo", lambda: render_gitec(gitec_f, resumo, tags, esperados, sigem, cache_key)), title="Gitec", icon=":material/engineering:", url_path="gitec")
     planta_page = st.Page(lambda: _sob_carga("Desenhando o avanço na planta", lambda: render_planta(tags, resumo, locacao, aux_areas)), title="Planta", icon=":material/map:", url_path="planta")
