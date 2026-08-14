@@ -1814,7 +1814,16 @@ def inject_css():
            linhas, nao da para saber qual delas o desenho esta mostrando */
         .ct-lin.sel td { background:rgba(var(--rgb-azul),0.12); }
         .ct-lin.sel td:first-child { box-shadow:inset 3px 0 0 var(--accent-blue); }
+        /* rolagem propria, com o cabecalho preso: com 1.500 linhas, rolar sem
+           ele e perder de vista qual coluna e qual */
+        .ct-rolo { max-height:440px; overflow-y:auto; border:1px solid var(--border-color);
+          border-radius:12px; }
+        .ct-rolo table { margin:0; }
+        .ct-rolo thead th { position:sticky; top:0; z-index:2;
+          background:var(--dark-card-2); }
         .pl-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:16px; }
+        .pl-kpis.cinco { grid-template-columns:repeat(5,1fr); }
+        .pl-kpis.cinco .pl-kpi .v { font-size:25px; }
         .pl-kpi { background:var(--dark-card); border:1px solid var(--border-color);
                   border-radius:14px; padding:15px 18px; }
         .pl-kpi .r { font-size:10px; letter-spacing:.75px; text-transform:uppercase;
@@ -3735,7 +3744,12 @@ def _cert_circuito(linha, mont: dict) -> dict:
     return {"id": str(linha["CIRCUITO"]).strip(), "disc": str(linha["DISCIPLINA"]).strip(),
             "status": str(linha["STATUS"]).strip(),
             "pct": round(cert_num(linha["PCT"]), 1),
-            "m": cert_num(linha["METROS"]), "org": ponta,
+            "m": cert_num(linha["METROS"]),
+            "m_real": cert_num(linha.get("METROS_REAL")),
+            # o circuito de potência traz -P no fim do código; a coluna TIPO não
+            # separa os dois -- ela diz o sistema, não a função do cabo
+            "pot": bool(re.search(r"-P\d*$", str(linha["CIRCUITO"]).strip(), re.I)),
+            "org": ponta,
             "dst": str(linha["DESTINO"]).strip(),
             "mont": m.get("mont", ""), "como": m.get("como", ""), "tags": m.get("tags", [])}
 
@@ -3769,6 +3783,32 @@ def cert_indice(lanc: pd.DataFrame, cache_key: str) -> dict:
             continue
         if cert_nivel(org) == 0 and cert_nivel(dst) == 1:
             saida[org] = re.sub(r"[A-Z]$", "", dst) if dst.startswith("CFF") else dst
+    return saida
+
+
+@st.cache_data(show_spinner=False, max_entries=3)
+def cert_circuitos_por_tag(lanc: pd.DataFrame, cache_key: str) -> dict:
+    """Todos os circuitos de cada instrumento, esteja onde estiver o destino.
+
+    A cadeia de uma caixa só enxerga o que chega nela. O circuito de potência
+    de uma TAG costuma ir direto ao painel, e ficaria de fora -- mas ele
+    também precisa fechar para a TAG ser certificada.
+    """
+    if lanc.empty:
+        return {}
+    saida: dict[str, list] = {}
+    for r in lanc.to_dict("records"):
+        org = str(r["ORIGEM"]).strip()
+        if org in ("", "nan") or cert_nivel(org) != 0:
+            continue
+        saida.setdefault(org, []).append({
+            "id": str(r["CIRCUITO"]).strip(), "dst": str(r["DESTINO"]).strip(),
+            "status": str(r["STATUS"]).strip(), "pct": round(cert_num(r["PCT"]), 1),
+            "m": cert_num(r["METROS"]), "m_real": cert_num(r.get("METROS_REAL")),
+            "pot": bool(re.search(r"-P\d*$", str(r["CIRCUITO"]).strip(), re.I)),
+            "fibra": str(r["CIRCUITO"]).strip().upper().startswith("CFO")})
+    for cs in saida.values():
+        cs.sort(key=lambda c: c["id"])
     return saida
 
 
@@ -3818,8 +3858,9 @@ def cert_cadeia(alvo: str, lanc: pd.DataFrame, mont: dict) -> dict:
                            "mont": mont.get(x, {}).get("mont", "")}
                           for i, x in enumerate(segs)],
             "ligacoes": ligacoes,
-            "ramais": [{**_cert_circuito(r, mont), "seg": str(r["DESTINO"]).strip()}
-                       for _, r in ins.sort_values("ORIGEM").iterrows()],
+            "ramais": cert_agrupar(
+                [{**_cert_circuito(r, mont), "seg": str(r["DESTINO"]).strip()}
+                 for _, r in ins.sort_values("ORIGEM").iterrows()]),
         }
 
     sai = d[org == alvo]
@@ -3834,45 +3875,42 @@ def cert_cadeia(alvo: str, lanc: pd.DataFrame, mont: dict) -> dict:
         "eletrica": eletrica(painel),
         "tronco": [_cert_circuito(r, mont) for _, r in sai.iterrows()],
         "segmentos": [], "ligacoes": [],
-        "ramais": [_cert_circuito(r, mont) for _, r in ent.sort_values("ORIGEM").iterrows()],
+        "ramais": cert_agrupar([_cert_circuito(r, mont)
+                                for _, r in ent.sort_values("ORIGEM").iterrows()]),
     }
+
+
+def cert_agrupar(circuitos: list) -> list:
+    """Junta os circuitos de cada TAG num cartão só.
+
+    O estado do conjunto é o do pior circuito: a TAG não está pronta porque
+    metade dos cabos dela chegou. O percentual vem do metro lançado sobre o
+    total, que é a conta que o campo reconhece.
+    """
+    por_tag: dict[str, list] = {}
+    for c in circuitos:
+        por_tag.setdefault(c["org"], []).append(c)
+    saida = []
+    for org, cs in por_tag.items():
+        if len(cs) == 1:
+            saida.append({**cs[0], "circuitos": cs})
+            continue
+        total = sum(c["m"] for c in cs)
+        real = sum(c["m_real"] for c in cs)
+        pct = round(real / total * 100, 1) if total else 0.0
+        if all(c["pct"] >= 99.5 for c in cs):
+            status = "Concluído"
+        elif any(c["pct"] > 0 for c in cs):
+            status = "Em Andamento"
+        else:
+            status = cs[0]["status"]
+        saida.append({**cs[0], "id": f"{len(cs)} circuitos", "status": status,
+                      "pct": pct, "m": total, "m_real": real, "circuitos": cs})
+    return sorted(saida, key=lambda c: c["org"])
 
 
 def cert_feito(c: dict) -> bool:
     return c["pct"] >= 99.5
-
-
-def cert_predecessoras(cad: dict, tag: str) -> list:
-    """O que precede este instrumento. No fieldbus depende de onde ele está."""
-    r = next((x for x in cad["ramais"] if x["org"] == tag), None)
-    passos = []
-    if cad["eletrica"]:
-        for e in cad["eletrica"]:
-            passos.append({"nm": f"Alimentação do painel {cad['painel']}",
-                           "ds": f"{e['id']} · {br_num(int(e['m']))} m · Elétrica", "c": e})
-    else:
-        passos.append({
-            "nm": f"Alimentação do painel {cad['painel'] or '(indefinido)'}", "desc": True,
-            "ds": ("nenhum circuito de Elétrica com destino neste painel" if cad["painel"]
-                   else f"o painel é desconhecido: nenhum circuito sai de {cad['caixa']}")})
-    if cad["tronco"]:
-        destino = cad["segmentos"][0]["nome"] if cad["segmentos"] else cad["caixa"]
-        for t in cad["tronco"]:
-            passos.append({"nm": f"Tronco painel → {destino}",
-                           "ds": f"{t['id']} · {br_num(int(t['m']))} m", "c": t})
-    else:
-        passos.append({"nm": f"Tronco painel → {cad['caixa']}", "desc": True,
-                       "ds": f"nenhum circuito sai de {cad['caixa']}: o painel é desconhecido"})
-    if cad["tipo"] == "cff" and r:
-        alvo = next((i for i, x in enumerate(cad["segmentos"]) if x["nome"] == r.get("seg")), 0)
-        for i, l in enumerate(cad["ligacoes"][:max(alvo, 0)]):
-            passos.append({"nm": f"Tronco caixa {cad['segmentos'][i]['nome'][-1]} → "
-                                 f"caixa {cad['segmentos'][i + 1]['nome'][-1]}",
-                           "ds": f"{l['id']} · {br_num(int(l['m']))} m", "c": l})
-    if r:
-        passos.append({"nm": "Ramal até o instrumento",
-                       "ds": f"{r['id']} · {br_num(int(r['m']))} m", "c": r})
-    return passos
 
 
 CERT_ROTULO = {"ok": "Apto", "warn": "Predecessora em andamento",
@@ -3880,32 +3918,6 @@ CERT_ROTULO = {"ok": "Apto", "warn": "Predecessora em andamento",
 CERT_CLASSE = {"ok": "ok", "warn": "warn", "crit": "crit", "desc": "roxo"}
 
 
-def cert_situacao(cad: dict, tag: str) -> dict:
-    """A situação sem HTML nenhum: é o que a lista conta e o veredito escreve.
-
-    Duas leituras da mesma regra divergiriam no primeiro ajuste.
-    """
-    passos = cert_predecessoras(cad, tag)
-    trava = next((p for p in passos if not p.get("desc") and not cert_feito(p["c"])), None)
-    abertas = [p for p in passos if p.get("desc")]
-    prontas = sum(1 for p in passos if not p.get("desc") and cert_feito(p["c"]))
-    if not trava and abertas:
-        tom = "desc"
-    elif not trava:
-        tom = "ok"
-    elif trava["c"]["status"] == "Em Andamento":
-        tom = "warn"
-    else:
-        tom = "crit"
-    onde = (trava["nm"].lower() if trava else abertas[0]["nm"].lower() if abertas else "—")
-    return {"passos": passos, "trava": trava, "abertas": abertas,
-            "prontas": prontas, "tom": tom, "onde": onde}
-
-
-# --------------------------------------------------------------- o desenho
-# O equipamento é desenhado em 2,5D -- face, topo e lateral -- porque quem lê a
-# tela reconhece o objeto antes de ler o rótulo. Com retângulo chapado o
-# desenho vira fluxograma, e fluxograma não mostra onde o cabo parou.
 CERT_JS = r"""
 const D = __DADOS__;
 let zoom = 1;
@@ -3937,7 +3949,8 @@ function dicaCabo(c, papel) {
   const t = cls(c.status), [a, b] = percurso(c);
   return cab(papel || 'cabo', c.id) + dl('situação', c.status, t) +
     (c.pct > 0 && c.pct < 100 ? dl('lançado', br(c.pct, 1) + '%', t) : '') +
-    dl('comprimento', br(c.m) + ' m') + dl('disciplina', c.disc) +
+    dl('lançado', br(c.m_real === undefined ? c.m * c.pct / 100 : c.m_real) +
+       ' de ' + br(c.m) + ' m') + dl('disciplina', c.disc) +
     dl('percurso', esc(a) + ' → ' + esc(b)) +
     (a !== c.org ? `<div class='obs'>na planilha: <b>ORIGEM</b> ${esc(c.org)} ·
       <b>DESTINO</b> ${esc(c.dst)} — a base grava a partir da ponta de campo,
@@ -3945,6 +3958,20 @@ function dicaCabo(c, papel) {
 }
 
 function dicaTag(r) {
+  const cs = r.circuitos || [r];
+  // com mais de um circuito, a linha do cabo é o conjunto e a lista abre a
+  // conta: é a diferença entre "em andamento" e saber qual dos dois falta
+  const papel = c => c.fibra ? 'fibra' : c.pot ? 'potência' : 'sinal';
+  const lista = `<div class='obs'>
+    <div style='color:var(--t2);font-weight:700;margin-bottom:5px'>${cs.length}
+      ${cs.length === 1 ? 'circuito' : 'circuitos'} desta TAG</div>` + cs.map(c => `
+    <div class='l' style='padding:3px 0'>
+      <i>${esc(c.id)} <b style='color:var(--t3);font-weight:600'>${papel(c)}</b>
+        <b style='color:var(--t3);font-weight:400;display:block;font-size:9.5px'>
+          → ${esc(c.dst || '')}</b></i>
+      <b style='color:var(--${cls(c.status)})'>${c.status}<b
+        style='color:var(--t2);font-weight:600;display:block;font-size:10px'>
+        ${br(c.m_real)} de ${br(c.m)} m</b></b></div>`).join('') + '</div>';
   return cab('instrumento', r.org) +
     dl('certificação', r.rot, r.tom === 'ok' ? 'ok' : r.tom === 'warn' ? 'and'
        : r.tom === 'crit' ? 'nao' : 'roxo') +
@@ -3952,8 +3979,8 @@ function dicaTag(r) {
     dl('montagem', nomeMont(r.mont), corMont(r.mont)) +
     dl('cabo', r.status + (r.pct > 0 && r.pct < 100 ? ' · ' + br(r.pct, 1) + '%' : ''),
        cls(r.status)) +
-    dl('ramal', esc(r.id) + ' · ' + br(r.m) + ' m') +
-    (r.seg ? dl('caixa', esc(r.seg)) : '') +
+    dl('lançado', br(r.m_real) + ' de ' + br(r.m) + ' m') +
+    (r.seg ? dl('caixa', esc(r.seg)) : '') + lista +
     (r.como && r.como !== 'exato'
       ? `<div class='obs'>de-para ${r.como}: a base de TAGs grava
          <b>${esc((r.tags || []).join(' + '))}</b></div>` : '');
@@ -4404,7 +4431,7 @@ def cert_onde(trava, aberto: bool) -> str:
 
 
 @st.cache_data(show_spinner=False, max_entries=3)
-def cert_panorama(lanc: pd.DataFrame, cache_key: str) -> dict:
+def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
     """Quantas TAGs estão aptas, sem montar cadeia por cadeia.
 
     Percorrer as 480 caixas para responder um número do topo custaria mais que
@@ -4412,8 +4439,8 @@ def cert_panorama(lanc: pd.DataFrame, cache_key: str) -> dict:
     pela própria origem até achar o painel, somando o que encontra pelo
     caminho, e a alimentação do painel entra no fim.
     """
-    vazio = {"circuitos": 0, "metros": 0.0, "lancado": 0.0, "instrumentos": 0,
-             "ok": 0, "warn": 0, "crit": 0, "desc": 0, "caixas": 0}
+    vazio = {"circuitos": 0, "metros": 0.0, "lancado": 0.0, "tags": 0, "caixas": 0,
+             "cabo_apto": 0, "tag_apta": 0, "montadas_travadas": 0, "por_tag": {}}
     if lanc.empty:
         return vazio
     linhas = lanc.to_dict("records")
@@ -4474,18 +4501,28 @@ def cert_panorama(lanc: pd.DataFrame, cache_key: str) -> dict:
             onde = f"nenhum circuito sai de {painel_da_cadeia}: o painel é desconhecido"
         antes = por_tag.get(org)
         if antes is None or PIOR[tom] > PIOR[antes["tom"]]:
-            por_tag[org] = {"tom": tom, "caixa": dst, "onde": onde}
+            montada = mont.get(org, {}).get("mont", "") == "Montado"
+            por_tag[org] = {"tom": tom, "caixa": dst, "onde": onde,
+                            "montada": montada,
+                            # cabo apto e a cadeia inteira lancada; TAG apta e
+                            # isso mais o instrumento no lugar
+                            "cabo": tom == "ok", "apta": tom == "ok" and montada}
 
     metros = float(lanc["METROS"].fillna(0).sum())
-    lancado = float((lanc["METROS"].fillna(0) * lanc["PCT"].fillna(0) / 100).sum())
+    # o metro que o campo mediu, e não o proporcional do percentual: quando a
+    # coluna existe ela é o número que vale
+    lancado = (float(lanc["METROS_REAL"].fillna(0).sum()) if "METROS_REAL" in lanc
+               else float((lanc["METROS"].fillna(0) * lanc["PCT"].fillna(0) / 100).sum()))
     pontas = cert_txt(pd.concat([lanc["ORIGEM"], lanc["DESTINO"]]))
     caixas = {p for p in pontas if p.startswith(CAIXA_PREFIXOS)}
-    conta = {t: 0 for t in PIOR}
-    for v in por_tag.values():
-        conta[v["tom"]] += 1
     return {"circuitos": int(len(lanc)), "metros": metros, "lancado": lancado,
-            "instrumentos": len(por_tag), "caixas": len(caixas),
-            "por_tag": por_tag, **conta}
+            "tags": len(por_tag), "caixas": len(caixas), "por_tag": por_tag,
+            "cabo_apto": sum(1 for v in por_tag.values() if v["cabo"]),
+            "tag_apta": sum(1 for v in por_tag.values() if v["apta"]),
+            # o que espera cabo estando montado: e a fila que a obra consegue
+            # destravar, ao contrario da que espera montagem
+            "montadas_travadas": sum(1 for v in por_tag.values()
+                                     if v["montada"] and not v["cabo"])}
 
 
 def cert_altura(cad: dict, largura_px: int = 1320) -> int:
@@ -4539,7 +4576,7 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         return
 
     mont = cert_montagem(tags, depara, cache_key)
-    pan = cert_panorama(lanc, cache_key)
+    pan = cert_panorama(lanc, mont, cache_key)
     alvos = cert_alvos(lanc, cache_key)
     indice = cert_indice(lanc, cache_key)
     if not alvos:
@@ -4547,64 +4584,65 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                     "Nenhuma caixa de junção nesta base de circuitos.</div></div>")
         return
 
-    pct_m = pan["lancado"] / pan["metros"] * 100 if pan["metros"] else 0.0
-    pct_ok = pan["ok"] / pan["instrumentos"] * 100 if pan["instrumentos"] else 0.0
-    trava = pan["crit"] + pan["warn"]
+    # Tudo em TAG. Metro e circuito são a unidade da planilha de cabos, não a
+    # do controle: o que se certifica é o instrumento.
+    total = pan["tags"]
+    pct_cabo = pan["cabo_apto"] / total * 100 if total else 0.0
+    pct_apta = pan["tag_apta"] / total * 100 if total else 0.0
+    pct_lanc = pan["lancado"] / pan["metros"] * 100 if pan["metros"] else 0.0
     render_html(f"""
-      <div class="pl-kpis">
-        <div class="pl-kpi"><div class="r">Cabo lançado</div>
-          <div class="v andando">{br_pct(pct_m)}</div>
-          <div class="s">{br_num(int(pan['lancado']))} de {br_num(int(pan['metros']))} m
-            em {br_num(pan['circuitos'])} circuitos</div>
-          <div class="pl-barra"><i class="andando" style="width:{pct_m:.1f}%"></i></div></div>
-        <div class="pl-kpi"><div class="r">Aptos para certificação</div>
-          <div class="v">{br_num(pan['ok'])}</div>
-          <div class="s">{br_pct(pct_ok)} dos {br_num(pan['instrumentos'])} instrumentos
-            com cadeia</div>
-          <div class="pl-barra"><i class="feito" style="width:{pct_ok:.1f}%"></i></div></div>
-        <div class="pl-kpi"><div class="r">Travados por cabo</div>
-          <div class="v">{br_num(trava)}</div>
-          <div class="s">{br_num(pan['crit'])} bloqueados ·
-            {br_num(pan['warn'])} com predecessora em andamento</div></div>
-        <div class="pl-kpi"><div class="r">Sem como afirmar</div>
-          <div class="v">{br_num(pan['desc'])}</div>
-          <div class="s">a cadeia fecha, mas falta circuito cadastrado antes</div></div>
+      <div class="pl-kpis cinco">
+        <div class="pl-kpi"><div class="r">TAGs mapeadas</div>
+          <div class="v">{br_num(total)}</div>
+          <div class="s">com cadeia de cabo na base</div></div>
+        <div class="pl-kpi"><div class="r">Avanço do cabo</div>
+          <div class="v andando">{br_pct(pct_lanc)}</div>
+          <div class="s">{br_num(int(pan['lancado']))} de {br_num(int(pan['metros']))} m</div>
+          <div class="pl-barra"><i class="andando" style="width:{pct_lanc:.1f}%"></i></div></div>
+        <div class="pl-kpi"><div class="r">Cabo apto</div>
+          <div class="v">{br_num(pan['cabo_apto'])}</div>
+          <div class="s">{br_pct(pct_cabo)} · cadeia lançada</div>
+          <div class="pl-barra"><i class="feito" style="width:{pct_cabo:.1f}%"></i></div></div>
+        <div class="pl-kpi"><div class="r">TAG apta</div>
+          <div class="v">{br_num(pan['tag_apta'])}</div>
+          <div class="s">{br_pct(pct_apta)} · cabo apto e montada</div>
+          <div class="pl-barra"><i class="feito" style="width:{pct_apta:.1f}%"></i></div></div>
+        <div class="pl-kpi"><div class="r">Montadas travadas</div>
+          <div class="v">{br_num(pan['montadas_travadas'])}</div>
+          <div class="s">montadas, esperando cabo</div></div>
       </div>""")
 
     # Duas perguntas diferentes, dois controles: o status recorta o universo,
-    # a busca escolhe dentro dele. Juntos num campo só, escolher "Apto" e depois
-    # digitar uma TAG bloqueada devolveria lista vazia sem dizer por quê.
+    # a busca escolhe dentro dele. Num campo só, escolher "TAG apta" e depois
+    # digitar uma travada devolveria lista vazia sem dizer por quê.
     por_tag = pan["por_tag"]
-    SITUACOES = ["Todos", "Apto", "Inapto"]
-    n_apto = sum(1 for v in por_tag.values() if v["tom"] == "ok")
-    rotulos = {"Todos": f"Todos · {br_num(len(por_tag))}",
-               "Apto": f"Apto · {br_num(n_apto)}",
-               "Inapto": f"Inapto · {br_num(len(por_tag) - n_apto)}"}
-    situacao_alvo = st.segmented_control(
-        "Status de certificação", SITUACOES, format_func=lambda x: rotulos[x],
+    RECORTES = {
+        "Todos": (lambda v: True, total),
+        "Cabo apto": (lambda v: v["cabo"], pan["cabo_apto"]),
+        "TAG apta": (lambda v: v["apta"], pan["tag_apta"]),
+        "Montadas travadas": (lambda v: v["montada"] and not v["cabo"],
+                              pan["montadas_travadas"]),
+        "Inaptas": (lambda v: not v["cabo"], total - pan["cabo_apto"]),
+    }
+    alvo_recorte = st.segmented_control(
+        "Status de certificação", list(RECORTES),
+        format_func=lambda x: f"{x} · {br_num(RECORTES[x][1])}",
         default="Todos", key="cert_situacao_filtro") or "Todos"
+    cabe = RECORTES[alvo_recorte][0]
 
-    def no_filtro(tag: str) -> bool:
-        v = por_tag.get(tag)
-        if situacao_alvo == "Todos" or v is None:
-            return situacao_alvo == "Todos"
-        return (v["tom"] == "ok") == (situacao_alvo == "Apto")
-
-    tags_no_filtro = sorted(t for t in indice if no_filtro(t))
-    opcoes = ([f"{t}  ·  instrumento" for t in tags_no_filtro]
+    tags_no_filtro = sorted(t for t in indice if t in por_tag and cabe(por_tag[t]))
+    opcoes = ([f"{t}  ·  TAG" for t in tags_no_filtro]
               + ([f"{a}  ·  {'fieldbus' if a.startswith('CFF') else 'caixa'}"
-                  for a in alvos] if situacao_alvo == "Todos" else []))
+                  for a in alvos] if alvo_recorte == "Todos" else []))
     if not opcoes:
         render_html('<div class="gplan-panel"><div class="gtbl-empty">'
-                    f"Nenhuma TAG {situacao_alvo.lower()} nesta base.</div></div>")
+                    f"Nenhuma TAG em {alvo_recorte.lower()}.</div></div>")
         return
     padrao = st.session_state.get("cert_escolha")
     idx = opcoes.index(padrao) if padrao in opcoes else 0
-    escolha = st.selectbox(
-        "Pesquisar TAG, caixa de junção ou tronco de fieldbus",
-        opcoes, index=idx, key="cert_escolha",
-        help="Digite para filtrar. Escolhendo um instrumento, a cadeia dele abre com "
-             "a TAG já destacada no desenho.")
+    escolha = st.selectbox("Pesquisar TAG, caixa ou tronco de fieldbus", opcoes,
+                           index=idx, key="cert_escolha",
+                           help="Digite para filtrar. A TAG escolhida abre destacada.")
     nome = escolha.split("  ·  ")[0]
     if nome in indice:
         alvo, tag_sel = indice[nome], nome
@@ -4619,12 +4657,23 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     if not tag_sel:
         tag_sel = cad["ramais"][0]["org"]
 
-    # A situação entra no próprio ramal: o desenho precisa dela para a dica.
+    # A situação vem do panorama, que é quem enxerga todos os circuitos da TAG
+    # -- inclusive os que não chegam nesta caixa. Recalcular aqui pela cadeia
+    # daria uma segunda resposta para a mesma pergunta, na mesma tela.
+    circuitos = cert_circuitos_por_tag(lanc, cache_key)
     for r in cad["ramais"]:
-        sit = cert_situacao(cad, r["org"])
-        r["tom"] = sit["tom"]
-        r["rot"] = CERT_ROTULO[sit["tom"]]
-        r["onde"] = sit["onde"]
+        v = por_tag.get(r["org"], {})
+        r["tom"] = v.get("tom", "desc")
+        r["rot"] = CERT_ROTULO[r["tom"]]
+        r["onde"] = v.get("onde", "—")
+        cs = circuitos.get(r["org"], r.get("circuitos") or [r])
+        r["circuitos"] = cs
+        r["m"] = sum(c["m"] for c in cs)
+        r["m_real"] = sum(c["m_real"] for c in cs)
+        r["pct"] = round(r["m_real"] / r["m"] * 100, 1) if r["m"] else 0.0
+        r["status"] = ("Concluído" if all(c["pct"] >= 99.5 for c in cs)
+                       else "Em Andamento" if any(c["pct"] > 0 for c in cs)
+                       else cs[0]["status"])
 
     titulo = (f"{cad['painel'] or 'painel indefinido'} → {cad['caixa']}"
               + (f" ({len(cad['segmentos'])} caixas em série)" if cad["segmentos"] else "")
@@ -4658,24 +4707,24 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     linhas = []
     for tag in tags_no_filtro:
         v = por_tag[tag]
-        classe = CERT_CLASSE[v["tom"]]
-        marca = {"ok": "ok", "warn": "warn", "crit": "crit", "roxo": "roxo"}[classe]
+        marca = CERT_CLASSE[v["tom"]]
+        mt = "ok" if v["montada"] else "crit"
         atual = " sel" if tag == tag_sel else ""
         linhas.append(
             f'<tr class="ct-lin{atual}"><td class="gtbl-mono">{tag}</td>'
             f'<td class="gtbl-mono gtbl-muted">{v["caixa"]}</td>'
-            f'<td><span class="gtbl-badge {marca}">{CERT_ROTULO[v["tom"]]}</span></td>'
+            f'<td><span class="gtbl-badge {"ok" if v["cabo"] else marca}">'
+            f'{"apto" if v["cabo"] else CERT_ROTULO[v["tom"]]}</span></td>'
+            f'<td><span class="gtbl-badge {mt}">'
+            f'{"montada" if v["montada"] else "não montada"}</span></td>'
             f'<td class="gtbl-muted" style="font-size:11px">{v["onde"]}</td></tr>')
-    faixa = ("Aptos para certificação" if situacao_alvo == "Apto"
-             else "Inaptos — o que trava cada um" if situacao_alvo == "Inapto"
-             else "TAGs e situação de certificação")
     render_html(
-        f'<div class="gplan-panel-title" style="margin:20px 0 8px">{faixa} '
+        f'<div class="gplan-panel-title" style="margin:20px 0 8px">{alvo_recorte} '
         f'<span class="gtbl-muted" style="font-weight:500">{br_num(len(linhas))} '
         f'{"TAG" if len(linhas) == 1 else "TAGs"}</span></div>'
-        f'<div class="rolo" style="max-height:420px"><table class="gtbl">'
-        f'<thead><tr><th>TAG</th><th>Caixa</th><th>Situação</th><th>Trava em</th></tr>'
-        f'</thead><tbody>{"".join(linhas)}</tbody></table></div>')
+        f'<div class="ct-rolo"><table class="gtbl"><thead><tr><th>TAG</th>'
+        f'<th>Caixa</th><th>Cabo</th><th>Montagem</th><th>Trava em</th></tr></thead>'
+        f'<tbody>{"".join(linhas)}</tbody></table></div>')
 
 
 def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFrame,
