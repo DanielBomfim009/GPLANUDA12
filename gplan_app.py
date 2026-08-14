@@ -4461,9 +4461,17 @@ def cert_panorama(lanc: pd.DataFrame, cache_key: str) -> dict:
             tom = "warn"
         else:
             tom = "crit"
-        onde = ("—" if tom == "ok"
-                else f"alimentação do painel {painel_da_cadeia}" if trava is None
-                else cert_onde(trava, aberto))
+        # quando a caminhada para antes do painel, o ultimo no e uma caixa --
+        # chamar isso de "alimentação do painel CJD-12-0702" era mentira, e a
+        # tabela repetia a mentira 1.500 vezes
+        if tom == "ok":
+            onde = "—"
+        elif trava is not None:
+            onde = cert_onde(trava, aberto)
+        elif cert_nivel(painel_da_cadeia) == 2:
+            onde = f"alimentação do painel {painel_da_cadeia}"
+        else:
+            onde = f"nenhum circuito sai de {painel_da_cadeia}: o painel é desconhecido"
         antes = por_tag.get(org)
         if antes is None or PIOR[tom] > PIOR[antes["tom"]]:
             por_tag[org] = {"tom": tom, "caixa": dst, "onde": onde}
