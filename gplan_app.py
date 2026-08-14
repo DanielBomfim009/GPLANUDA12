@@ -3679,6 +3679,19 @@ PAINEL_PREFIXOS = ("PN", "PL", "PCC")
 CAIXA_PREFIXOS = ("CJ", "CFF")
 
 
+def cert_metro_real(linha) -> float:
+    """O metro lançado: o que o campo mediu, ou o proporcional do total.
+
+    A coluna COMPR.(M) CAMPO REALIZADO só existe na base nova. Sem ela -- e nas
+    linhas em que ela está vazia -- o proporcional do percentual é a melhor
+    conta que há. Zerar seria dizer que nada foi lançado, o que é falso.
+    """
+    real = cert_num(linha.get("METROS_REAL"))
+    if real > 0:
+        return real
+    return round(cert_num(linha.get("METROS")) * cert_num(linha.get("PCT")) / 100, 1)
+
+
 def cert_txt(serie: pd.Series) -> pd.Series:
     """Coluna de texto sem nulo, em qualquer versão do pandas.
 
@@ -3745,7 +3758,7 @@ def _cert_circuito(linha, mont: dict) -> dict:
             "status": str(linha["STATUS"]).strip(),
             "pct": round(cert_num(linha["PCT"]), 1),
             "m": cert_num(linha["METROS"]),
-            "m_real": cert_num(linha.get("METROS_REAL")),
+            "m_real": cert_metro_real(linha),
             # o circuito de potência traz -P no fim do código; a coluna TIPO não
             # separa os dois -- ela diz o sistema, não a função do cabo
             "pot": bool(re.search(r"-P\d*$", str(linha["CIRCUITO"]).strip(), re.I)),
@@ -3804,7 +3817,7 @@ def cert_circuitos_por_tag(lanc: pd.DataFrame, cache_key: str) -> dict:
         saida.setdefault(org, []).append({
             "id": str(r["CIRCUITO"]).strip(), "dst": str(r["DESTINO"]).strip(),
             "status": str(r["STATUS"]).strip(), "pct": round(cert_num(r["PCT"]), 1),
-            "m": cert_num(r["METROS"]), "m_real": cert_num(r.get("METROS_REAL")),
+            "m": cert_num(r["METROS"]), "m_real": cert_metro_real(r),
             "pot": bool(re.search(r"-P\d*$", str(r["CIRCUITO"]).strip(), re.I)),
             "fibra": str(r["CIRCUITO"]).strip().upper().startswith("CFO")})
     for cs in saida.values():
@@ -4511,8 +4524,10 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
     metros = float(lanc["METROS"].fillna(0).sum())
     # o metro que o campo mediu, e não o proporcional do percentual: quando a
     # coluna existe ela é o número que vale
-    lancado = (float(lanc["METROS_REAL"].fillna(0).sum()) if "METROS_REAL" in lanc
-               else float((lanc["METROS"].fillna(0) * lanc["PCT"].fillna(0) / 100).sum()))
+    proporcional = lanc["METROS"].fillna(0) * lanc["PCT"].fillna(0) / 100
+    real = (lanc["METROS_REAL"].fillna(0) if "METROS_REAL" in lanc
+            else pd.Series(0.0, index=lanc.index))
+    lancado = float(real.where(real > 0, proporcional).sum())
     pontas = cert_txt(pd.concat([lanc["ORIGEM"], lanc["DESTINO"]]))
     caixas = {p for p in pontas if p.startswith(CAIXA_PREFIXOS)}
     return {"circuitos": int(len(lanc)), "metros": metros, "lancado": lancado,
@@ -4599,9 +4614,9 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
           <div class="v andando">{br_pct(pct_lanc)}</div>
           <div class="s">{br_num(int(pan['lancado']))} de {br_num(int(pan['metros']))} m</div>
           <div class="pl-barra"><i class="andando" style="width:{pct_lanc:.1f}%"></i></div></div>
-        <div class="pl-kpi"><div class="r">Cabo apto</div>
+        <div class="pl-kpi"><div class="r">Circuitos aptos</div>
           <div class="v">{br_num(pan['cabo_apto'])}</div>
-          <div class="s">{br_pct(pct_cabo)} · cadeia lançada</div>
+          <div class="s">circuitos aptos para certificação · {br_pct(pct_cabo)}</div>
           <div class="pl-barra"><i class="feito" style="width:{pct_cabo:.1f}%"></i></div></div>
         <div class="pl-kpi"><div class="r">TAG apta</div>
           <div class="v">{br_num(pan['tag_apta'])}</div>
@@ -4618,7 +4633,7 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     por_tag = pan["por_tag"]
     RECORTES = {
         "Todos": (lambda v: True, total),
-        "Cabo apto": (lambda v: v["cabo"], pan["cabo_apto"]),
+        "Circuitos aptos": (lambda v: v["cabo"], pan["cabo_apto"]),
         "TAG apta": (lambda v: v["apta"], pan["tag_apta"]),
         "Montadas travadas": (lambda v: v["montada"] and not v["cabo"],
                               pan["montadas_travadas"]),
@@ -4627,7 +4642,7 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     alvo_recorte = st.segmented_control(
         "Status de certificação", list(RECORTES),
         format_func=lambda x: f"{x} · {br_num(RECORTES[x][1])}",
-        default="Todos", key="cert_situacao_filtro") or "Todos"
+        default="Todos", key="cert_recorte") or "Todos"
     cabe = RECORTES[alvo_recorte][0]
 
     tags_no_filtro = sorted(t for t in indice if t in por_tag and cabe(por_tag[t]))
