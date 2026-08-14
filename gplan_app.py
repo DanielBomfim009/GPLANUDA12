@@ -1816,8 +1816,14 @@ def inject_css():
         .ct-lin.sel td:first-child { box-shadow:inset 3px 0 0 var(--accent-blue); }
         /* rolagem propria, com o cabecalho preso: com 1.500 linhas, rolar sem
            ele e perder de vista qual coluna e qual */
+        .ct-painel { margin-top:20px; padding:20px 22px 22px; }
+        .ct-painel .gplan-panel-title { display:flex; align-items:baseline; gap:12px;
+          margin-bottom:14px; }
+        .ct-painel .gplan-panel-title span { margin-left:auto; font-size:11.5px; }
         .ct-rolo { max-height:440px; overflow-y:auto; border:1px solid var(--border-color);
-          border-radius:12px; }
+          border-radius:12px; background:var(--dark-card-2); }
+        .ct-rolo table { width:100%; }
+        .ct-rolo td, .ct-rolo th { padding:9px 14px; }
         .ct-rolo table { margin:0; }
         .ct-rolo thead th { position:sticky; top:0; z-index:2;
           background:var(--dark-card-2); }
@@ -4617,6 +4623,30 @@ if (D.tag) requestAnimationFrame(() => focar(1.6));
 // natural, mas o iframe do Streamlit e sandbox sem allow-top-navigation: mexer
 // no location do pai levanta SecurityError. O que ele permite e allow-same-origin
 // -- entao a ficha abre pela classe que o CSS ja reconhece ao lado do :target.
+// O que fecha a ficha e registrado assim que a moldura carrega, e nao na
+// primeira ficha aberta: fechar nao pode depender de por onde ela abriu.
+function armarFechamento() {
+  try {
+    const d = parent.document;
+    if (parent.__gplanFicha) return;
+    parent.__gplanFicha = true;
+    const fechar = () => d.querySelectorAll('.fmodal-on')
+      .forEach(m => m.classList.remove('fmodal-on'));
+    // o X e o fundo sao <a href="#">: com :target isso bastava, com a classe
+    // e preciso ouvir o clique
+    d.addEventListener('click', ev => {
+      if (ev.target.closest && ev.target.closest('.fmodal-bg, .fmodal-x')) fechar();
+    }, true);
+    d.addEventListener('keydown', ev => { if (ev.key === 'Escape') fechar(); });
+    // Uma ficha aberta por ancora e outra aberta por classe empilham: as duas
+    // sao fixed e ocupam a tela inteira, e a de cima engole o clique de fechar
+    // da de baixo. Foi o que travava ao descer da TAG para a malha. Quando a
+    // ancora muda, a que abriu por classe sai de cena.
+    parent.addEventListener('hashchange', fechar);
+  } catch (_) { /* sem acesso ao pai, a ficha nao abre por aqui */ }
+}
+armarFechamento();
+
 function abrirFicha(id) {
   try {
     const d = parent.document;
@@ -4624,17 +4654,6 @@ function abrirFicha(id) {
     if (!alvo) return false;
     d.querySelectorAll('.fmodal-on').forEach(m => m.classList.remove('fmodal-on'));
     alvo.classList.add('fmodal-on');
-    if (!parent.__gplanFicha) {
-      parent.__gplanFicha = true;
-      const fechar = () => d.querySelectorAll('.fmodal-on')
-        .forEach(m => m.classList.remove('fmodal-on'));
-      // o X e o fundo do modal sao <a href="#">: com :target isso bastava para
-      // fechar, com a classe e preciso ouvir o clique
-      d.addEventListener('click', ev => {
-        if (ev.target.closest && ev.target.closest('.fmodal-bg, .fmodal-x')) fechar();
-      }, true);
-      d.addEventListener('keydown', ev => { if (ev.key === 'Escape') fechar(); });
-    }
     return true;
   } catch (_) {
     return false;   // sem acesso ao pai, o clique volta a prender a dica
@@ -5064,13 +5083,33 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         alvo, tag_sel = nome, ""
 
     com_ficha = set(resumo["TAG"].astype(str))
-    def render_tabela():
-        """A tabela é do universo inteiro, e não da cena: ela vale igual na
-        vista da caixa e na do painel."""
-        # A tabela é do universo inteiro, não só da cadeia aberta: a pergunta
-        # "quais das minhas TAGs estão aptas" não se responde uma caixa por vez.
+    def render_fichas(ids):
+        """As fichas ficam no fim da página, fechadas: o clique no desenho abre
+        só a que ele pedir, e nenhuma ida ao servidor acontece.
+
+        As fichas de nível vêm junto para que os degraus da trilha -- Fase,
+        SOP, SSOP, Malha -- abram aqui mesmo. Sem elas na página, o degrau
+        virava um link para a aba Progresso, que é sair da tela para ver algo
+        que cabia nela.
+        """
+        ids = list(dict.fromkeys(ids))
+        if not ids:
+            return
+        espera = espera_por_documento(_revisoes_por_doc(cache_key, sigem))
+        base_niveis = progresso_base(resumo, tags)
+        base_niveis = base_niveis[base_niveis["TAG"].isin(ids)]
+        render_html(fichas_niveis_html(cache_key, "cert", "", "", 0, base_niveis)
+                    + fichas_modais_html(ids, resumo, esperados, tags, espera,
+                                         niveis_na_pagina=True))
+
+    def render_tabela(do_alvo=None, rotulo=""):
+        """A tabela acompanha o desenho: as TAGs do alvo aberto, recortadas
+        pelo status. Mostrar o universo enquanto o desenho mostra um segmento
+        era pedir para comparar duas coisas diferentes lado a lado."""
+        no_alvo = set(do_alvo) if do_alvo else None
         linhas = []
-        for tag in tags_no_filtro:
+        for tag in (tags_no_filtro if no_alvo is None
+                    else [t for t in tags_no_filtro if t in no_alvo]):
             v = por_tag[tag]
             marca = CERT_CLASSE[v["tom"]]
             mt = "ok" if v["montada"] else "crit"
@@ -5083,20 +5122,18 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                 f'<td><span class="gtbl-badge {mt}">'
                 f'{"montada" if v["montada"] else "não montada"}</span></td>'
                 f'<td class="gtbl-muted" style="font-size:11px">{v["onde"]}</td></tr>')
-        cabecalho = (f'<div class="gplan-panel-title" style="margin:20px 0 8px">'
-                     f'{alvo_recorte} <span class="gtbl-muted" style="font-weight:500">'
-                     f'{br_num(len(linhas))} {"TAG" if len(linhas) == 1 else "TAGs"}'
-                     f'</span></div>')
-        if not linhas:
-            render_html(cabecalho + '<div class="gplan-panel"><div class="gtbl-empty">'
-                        f"Nenhuma TAG neste recorte hoje. O desenho continua na TAG "
-                        f"escolhida acima.</div></div>")
-        else:
-            render_html(
-                cabecalho +
-                f'<div class="ct-rolo"><table class="gtbl"><thead><tr><th>TAG</th>'
-                f'<th>Caixa</th><th>Cabo</th><th>Montagem</th><th>Trava em</th></tr></thead>'
-                f'<tbody>{"".join(linhas)}</tbody></table></div>')
+        onde = f" · {rotulo}" if rotulo else ""
+        corpo = (f'<div class="gtbl-empty">Nenhuma TAG deste {rotulo or "recorte"} '
+                 f'em {alvo_recorte.lower()}.</div>' if not linhas else
+                 f'<div class="ct-rolo"><table class="gtbl"><thead><tr><th>TAG</th>'
+                 f'<th>Caixa</th><th>Cabo</th><th>Montagem</th><th>Trava em</th></tr>'
+                 f'</thead><tbody>{"".join(linhas)}</tbody></table></div>')
+        render_html(
+            f'<div class="gplan-panel ct-painel">'
+            f'<div class="gplan-panel-title">TAGs do desenho'
+            f'<span class="gtbl-muted" style="font-weight:500">{br_num(len(linhas))} '
+            f'{"TAG" if len(linhas) == 1 else "TAGs"}{onde} · {alvo_recorte.lower()}'
+            f'</span></div>{corpo}</div>')
 
     if alvo in paineis:
         cad = cert_cadeia_painel(alvo, paineis[alvo], mont)
@@ -5126,7 +5163,10 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
             render_html(fichas_modais_html(do_painel_tags, resumo, esperados, tags,
                                            espera_por_doc=espera_por_documento(
                                                _revisoes_por_doc(cache_key, sigem))))
-        render_tabela()
+        render_tabela([t["org"] for bl in cad["blocos"] for t in bl["tags"]]
+                      + [bl["nome"] for bl in cad["blocos"]], f"painel {alvo}")
+        render_fichas([t["org"] for bl in cad["blocos"] for t in bl["tags"]
+                       if t["org"] in com_ficha])
         return
 
     cad = cert_cadeia(alvo, lanc, mont)
@@ -5186,15 +5226,8 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         <span><b style="background:var(--accent-purple)"></b>sem par na base de TAGs</span>
       </div>""")
 
-    render_tabela()
-
-    # As fichas ficam no fim da página, fechadas: o :target abre só a que o
-    # clique no desenho pedir, e nenhuma ida ao servidor acontece.
-    da_cena = [r["org"] for r in cad["ramais"] if r["org"] in com_ficha]
-    if da_cena:
-        render_html(fichas_modais_html(da_cena, resumo, esperados, tags,
-                                       espera_por_doc=espera_por_documento(
-                                           _revisoes_por_doc(cache_key, sigem))))
+    render_tabela([r["org"] for r in cad["ramais"]], f"caixa {cad['caixa']}")
+    render_fichas([r["org"] for r in cad["ramais"] if r["org"] in com_ficha])
 
 
 def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFrame,
