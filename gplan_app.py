@@ -5032,8 +5032,14 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
               + [f"{t}  ·  TAG" for t in base_busca]
               + ([f"{a}  ·  {'fieldbus' if a.startswith('CFF') else 'caixa'}"
                   for a in alvos] if not tags_no_filtro or alvo_recorte == "Todos" else []))
+    # O pouso e uma TAG, nao o primeiro painel: PN-12-201 tem 72 caixas e leva
+    # 14 s para desenhar, e abrir a aba nao pode custar isso. O painel continua
+    # na lista, a um "PN" digitado de distancia.
     padrao = st.session_state.get("cert_escolha")
-    idx = opcoes.index(padrao) if padrao in opcoes else 0
+    if padrao in opcoes:
+        idx = opcoes.index(padrao)
+    else:
+        idx = next((i for i, o in enumerate(opcoes) if o.endswith("·  TAG")), 0)
     escolha = st.selectbox("Pesquisar TAG, caixa ou tronco de fieldbus", opcoes,
                            index=idx, key="cert_escolha",
                            help="Digite para filtrar. A TAG escolhida abre destacada.")
