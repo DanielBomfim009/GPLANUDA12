@@ -3168,7 +3168,8 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
 
 def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame,
                         sigem: pd.DataFrame, cache_key: str = "",
-                        lancamento: pd.DataFrame | None = None):
+                        lancamento: pd.DataFrame | None = None,
+                        depara: pd.DataFrame | None = None):
     render_header("Pesquisa tag",
                   extra_pill=f"<strong>{br_num(len(resumo))}</strong> tags"
                   if st.session_state.get("_flt_selo") else None)
@@ -3209,8 +3210,9 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
 
     # O painel sai da planilha de cabos, e nem toda planilha a tem: sem ela o
     # campo não aparece, em vez de aparecer vazio sem explicação.
-    painel_de = (cert_painel_por_tag(lancamento, cache_key)
-                 if lancamento is not None and not lancamento.empty else {})
+    painel_de = (cert_painel_por_tag(lancamento, depara, cache_key)
+                 if lancamento is not None and not lancamento.empty
+                 and depara is not None else {})
     if painel_de:
         col_busca, col_painel = st.columns([3, 2], gap="medium")
     else:
@@ -3220,11 +3222,19 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
 
     list_df = resumo[["TAG", "DESCRICAO", "GRUPO_REGRA", "ITEM_PPU", "RELATORIOS_ESPERADOS", "AVANCO_DOCUMENTAL"]].copy()
     if painel_de:
+        # Só entra no filtro o painel que tem segmentação: instrumento pendurado
+        # em caixa de junção. Painel de Elétrica que alimenta um circuito direto
+        # não é segmento -- e eram dezenas deles enchendo a lista com uma TAG.
         do_painel: dict[str, list] = {}
         for t in resumo["TAG"].astype(str):
-            p = painel_de.get(t)
-            if p:
-                do_painel.setdefault(p, []).append(t)
+            pa = painel_de.get(t)
+            if pa:
+                do_painel.setdefault(pa, []).append(t)
+        # Segmentação é painel → caixa → instrumento: os três. Só a caixa não
+        # basta -- o PN-12-220(CIU) tem uma, e nada chega nela.
+        do_painel = {pa: v for pa, v in do_painel.items()
+                     if any(t.startswith(CAIXA_PREFIXOS) for t in v)
+                     and any(not t.startswith(CAIXA_PREFIXOS) for t in v)}
         with col_painel:
             escolha_painel = st.selectbox(
                 "Painel", ["Todos os painéis"]
@@ -3851,13 +3861,19 @@ def cert_indice(lanc: pd.DataFrame, cache_key: str) -> dict:
 
 
 @st.cache_data(show_spinner=False, max_entries=3)
-def cert_painel_por_tag(lanc: pd.DataFrame, cache_key: str) -> dict:
-    """De cada instrumento para o painel que o alimenta.
+def cert_painel_por_tag(lanc: pd.DataFrame, depara: pd.DataFrame, cache_key: str) -> dict:
+    """De cada TAG do segmento para o painel que a alimenta.
 
-    O painel não está na base de TAGs: ele sai da planilha de cabos, subindo do
-    instrumento pela caixa até um PN/PL/PCC. Quando a subida não chega em
-    painel nenhum -- caixa sem circuito de saída --, a TAG fica de fora em vez
-    de receber um palpite.
+    Vale para o instrumento e para a caixa de junção: a caixa também é TAG, tem
+    montagem e documento próprios, e deixá-la de fora fazia o filtro mostrar 20
+    das 30 TAGs do PN-12-204.
+
+    O nome da ponta passa pelo de-para antes de sair: a planilha de cabos e a
+    base de TAGs escrevem a mesma TAG de formas diferentes, e sem a tradução um
+    terço do segmento não casaria com a lista.
+
+    Quando a subida não chega em painel nenhum -- caixa sem circuito de saída --
+    a TAG fica de fora, em vez de receber um palpite.
     """
     if lanc.empty:
         return {}
@@ -3866,14 +3882,22 @@ def cert_painel_por_tag(lanc: pd.DataFrame, cache_key: str) -> dict:
         org = str(r["ORIGEM"]).strip()
         if org not in ("", "nan"):
             saida.setdefault(org, []).append(str(r["DESTINO"]).strip())
+
+    traduz: dict[str, list] = {}
+    if not depara.empty:
+        for ponta, grupo in depara.groupby(cert_txt(depara["PONTA"])):
+            traduz[ponta] = [t for t in cert_txt(grupo["TAG"]) if t and t != "nan"]
+
+    pontas = {v for c in ("ORIGEM", "DESTINO") for v in cert_txt(lanc[c])}
     por_tag: dict[str, str] = {}
-    for org, destinos in saida.items():
-        if cert_nivel(org) != 0:
+    for ponta in pontas:
+        if ponta in ("", "nan") or cert_nivel(ponta) == 2:
             continue
-        atual = destinos[0]
+        atual = ponta
         for _ in range(6):
             if cert_nivel(atual) == 2:
-                por_tag[org] = atual
+                for nome in traduz.get(ponta, [ponta]):
+                    por_tag[nome] = atual
                 break
             prox = saida.get(atual)
             if not prox:
@@ -6051,7 +6075,7 @@ def main():
     dashboard_page = st.Page(lambda: _sob_carga("Carregando o painel", lambda: render_dashboard(resumo, esperados, tags, sigem, cache_key)), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
     relatorios_page = st.Page(lambda: _sob_carga("Carregando os relatórios", lambda: render_relatorios(esperados, resumo, tags, sigem, cache_key)), title="Relatórios", icon=":material/description:", url_path="relatorios")
     progresso_page = st.Page(lambda: _sob_carga("Abrindo o Progresso", lambda: render_progresso(resumo, esperados, tags, sigem, cache_key)), title="Progresso", icon=":material/insights:", url_path="progresso")
-    pesquisa_page = st.Page(lambda: _sob_carga("Carregando as tags", lambda: render_pesquisa_tag(resumo, esperados, tags, sigem, cache_key, lancamento)), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
+    pesquisa_page = st.Page(lambda: _sob_carga("Carregando as tags", lambda: render_pesquisa_tag(resumo, esperados, tags, sigem, cache_key, lancamento, depara)), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
     sigem_page = st.Page(lambda: _sob_carga("Carregando a base SIGEM", lambda: render_sigem(sigem, esperados, any(escolhas.values()))), title="Base SIGEM", icon=":material/database:", url_path="sigem")
     gitec_page = st.Page(lambda: _sob_carga("Carregando a medição de campo", lambda: render_gitec(gitec_f, resumo, tags, esperados, sigem, cache_key)), title="Gitec", icon=":material/engineering:", url_path="gitec")
     planta_page = st.Page(lambda: _sob_carga("Desenhando o avanço na planta", lambda: render_planta(tags, resumo, locacao, aux_areas)), title="Planta", icon=":material/map:", url_path="planta")
