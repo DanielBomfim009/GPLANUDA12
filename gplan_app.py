@@ -36,7 +36,7 @@ def _logo_svg(sufixo: str = "") -> str:
     grad = f"gpArc{sufixo}"
     return (
         '<svg viewBox="0 0 48 48" fill="none">'
-        '<circle cx="24" cy="24" r="19" stroke="var(--neutro)" stroke-width="5"/>'
+        '<circle cx="24" cy="24" r="19" stroke="var(--text-3)" stroke-width="5"/>'
         f'<path d="M24 5a19 19 0 0 1 15.6 29.8" stroke="url(#{grad})" stroke-width="5" stroke-linecap="round"/>'
         '<circle cx="24" cy="24" r="5.5" fill="var(--accent-teal)"/>'
         '<path d="M24 24L33 15" stroke="var(--text-1)" stroke-width="3" stroke-linecap="round"/>'
@@ -1821,6 +1821,31 @@ def inject_css():
         .ct-rolo table { margin:0; }
         .ct-rolo thead th { position:sticky; top:0; z-index:2;
           background:var(--dark-card-2); }
+        /* O segmented control nasce com a paleta do config.toml, que e escura, e
+           o texto dentro dele herda a cor do tema -- no claro dava escuro sobre
+           escuro, 1,11:1. Mesma armadilha do campo de busca: o widget precisa
+           ser vestido por testid, um por um. */
+        /* O "?" de ajuda desenha com o tom do config.toml: no claro sobrava um
+           traco quase branco sobre fundo claro, 1,03:1. */
+        [data-testid="stTooltipHoverTarget"] { color: var(--text-3) !important; }
+        [data-testid="stTooltipHoverTarget"] svg,
+        [data-testid="stTooltipHoverTarget"] svg * { stroke: currentColor !important; }
+        [data-testid="stTooltipHoverTarget"]:hover { color: var(--text-1) !important; }
+        [data-testid="stButtonGroup"] button {
+          background: var(--dark-card-2) !important;
+          border: 1px solid var(--border-strong) !important;
+        }
+        [data-testid="stButtonGroup"] button,
+        [data-testid="stButtonGroup"] button * { color: var(--text-2) !important; }
+        [data-testid="stButtonGroup"] button:hover { border-color: var(--accent-blue) !important; }
+        [data-testid="stButtonGroup"] button[aria-checked="true"] {
+          background: rgba(var(--rgb-azul),0.14) !important;
+          border-color: var(--accent-blue) !important;
+        }
+        [data-testid="stButtonGroup"] button[aria-checked="true"],
+        [data-testid="stButtonGroup"] button[aria-checked="true"] * {
+          color: var(--txt-azul) !important; font-weight: 650 !important;
+        }
         .pl-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:16px; }
         .pl-kpis.cinco { grid-template-columns:repeat(5,1fr); }
         .pl-kpis.cinco .pl-kpi .v { font-size:25px; }
@@ -3994,6 +4019,7 @@ function dicaTag(r) {
        cls(r.status)) +
     dl('lançado', br(r.m_real) + ' de ' + br(r.m) + ' m') +
     (r.seg ? dl('caixa', esc(r.seg)) : '') + lista +
+    (r.ancora ? "<div class='solta'>clique para abrir a ficha da TAG</div>" : '') +
     (r.como && r.como !== 'exato'
       ? `<div class='obs'>de-para ${r.como}: a base de TAGs grava
          <b>${esc((r.tags || []).join(' + '))}</b></div>` : '');
@@ -4116,7 +4142,7 @@ function transmissor(x, y, mont) {
 
 function cartao(xi, yi, r) {
   const sel = D.tag === r.org ? ' sel' : '';
-  return `<g class="inst${sel}" ${dd(dicaTag(r))}>
+  return `<g class="inst${sel}" data-ficha="${esc(r.ancora || '')}" ${dd(dicaTag(r))}>
     <rect class="chip-bg" x="${xi - 36}" y="${yi - 30}" width="72" height="52" rx="9"/>
     ${transmissor(xi, yi - 8, r.mont)}
     <text x="${xi}" y="${yi + 16}" text-anchor="middle" fill="var(--t2)" font-size="7.5"
@@ -4313,6 +4339,34 @@ document.getElementById('cena').innerHTML = cena(D.cadeia);
 aplicarZoom();
 if (D.tag) requestAnimationFrame(() => focar(1.6));
 
+// A ficha da TAG e um modal da pagina de fora. Trocar a ancora seria o caminho
+// natural, mas o iframe do Streamlit e sandbox sem allow-top-navigation: mexer
+// no location do pai levanta SecurityError. O que ele permite e allow-same-origin
+// -- entao a ficha abre pela classe que o CSS ja reconhece ao lado do :target.
+function abrirFicha(id) {
+  try {
+    const d = parent.document;
+    const alvo = d.getElementById(id);
+    if (!alvo) return false;
+    d.querySelectorAll('.fmodal-on').forEach(m => m.classList.remove('fmodal-on'));
+    alvo.classList.add('fmodal-on');
+    if (!parent.__gplanFicha) {
+      parent.__gplanFicha = true;
+      const fechar = () => d.querySelectorAll('.fmodal-on')
+        .forEach(m => m.classList.remove('fmodal-on'));
+      // o X e o fundo do modal sao <a href="#">: com :target isso bastava para
+      // fechar, com a classe e preciso ouvir o clique
+      d.addEventListener('click', ev => {
+        if (ev.target.closest && ev.target.closest('.fmodal-bg, .fmodal-x')) fechar();
+      }, true);
+      d.addEventListener('keydown', ev => { if (ev.key === 'Escape') fechar(); });
+    }
+    return true;
+  } catch (_) {
+    return false;   // sem acesso ao pai, o clique volta a prender a dica
+  }
+}
+
 (function () {
   const b = document.getElementById('dica'), z = document.getElementById('zona');
   let fixado = null;
@@ -4345,7 +4399,16 @@ if (D.tag) requestAnimationFrame(() => focar(1.6));
     mostrar(alvo, e.clientX, e.clientY, false);
   }, {passive: true});
   addEventListener('mouseleave', () => { if (!fixado) b.classList.remove('ver'); });
-  addEventListener('keydown', e => { if (e.key === 'Escape') soltar(); });
+  // o Esc precisa valer dos dois lados: depois de clicar num cartao o foco fica
+  // aqui dentro, e o ouvinte que registrei na pagina de fora nao recebe a tecla
+  addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    soltar();
+    try {
+      parent.document.querySelectorAll('.fmodal-on')
+        .forEach(m => m.classList.remove('fmodal-on'));
+    } catch (_) { /* sem acesso ao pai, so a dica solta */ }
+  });
   // Ctrl+roda amplia; sem o Ctrl a roda continua rolando, que é o que se espera
   z.addEventListener('wheel', e => {
     if (!e.ctrlKey && !e.metaKey) return;
@@ -4371,10 +4434,12 @@ if (D.tag) requestAnimationFrame(() => focar(1.6));
     const clicou = a && !a.andou, alvo = a && a.alvo;
     a = null; z.classList.remove('arrasta');
     if (!clicou) return;
-    if (!alvo || alvo === fixado) { soltar(); return; }
+    if (!alvo) { soltar(); return; }
+    const ficha = alvo.getAttribute('data-ficha');
+    if (ficha && abrirFicha(ficha)) { soltar(); return; }
+    if (alvo === fixado) { soltar(); return; }
     soltar();
     fixado = alvo;
-    if (alvo.classList.contains('inst')) alvo.classList.add('fixo');
     mostrar(alvo, e.clientX, e.clientY, true);
   });
   z.addEventListener('pointercancel', () => { a = null; z.classList.remove('arrasta'); });
@@ -4431,7 +4496,7 @@ svg.cena{{width:100%;height:auto;display:block}}
 .inst.sel .chip-bg{{stroke:var(--azul);stroke-width:2.5}}
 .inst:hover .chip-bg{{stroke:var(--t2)}}
 .hit{{stroke:transparent;fill:none}}
-.inst,.hit{{cursor:pointer}}
+.inst{{cursor:pointer}}
 .inst.fixo .chip-bg{{stroke:var(--t2);stroke-width:2;stroke-dasharray:4 3}}
 .dica.fixo{{border-color:var(--t3)}}
 .dica .solta{{font-size:9.5px;color:var(--t3);margin-top:7px;padding-top:6px;
@@ -4455,8 +4520,8 @@ svg.cena{{width:100%;height:auto;display:block}}
 </style></head><body>
 <div class="dica" id="dica"></div>
 <div class="barra">
-  <span class="tt">passe o mouse para ver a situação · clique para prender a dica ·
-    arraste para deslocar · Ctrl + roda amplia</span>
+  <span class="tt">passe o mouse para ver a situação · clique na TAG para abrir a
+    ficha · arraste para deslocar · Ctrl + roda amplia</span>
   <button class="zb" onclick="focar(1/1.3)" title="Afastar">−</button>
   <span class="zn" id="zn">100%</span>
   <button class="zb" onclick="focar(1.3)" title="Aproximar">+</button>
@@ -4615,6 +4680,7 @@ def cert_altura(cad: dict, largura_px: int = 1320) -> int:
 
 
 def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataFrame,
+                        resumo: pd.DataFrame, esperados: pd.DataFrame, sigem: pd.DataFrame,
                         cache_key: str):
     """Se esta TAG pode ser certificada, e onde a cadeia dela para.
 
@@ -4688,13 +4754,13 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     cabe = RECORTES[alvo_recorte][0]
 
     tags_no_filtro = sorted(t for t in indice if t in por_tag and cabe(por_tag[t]))
-    opcoes = ([f"{t}  ·  TAG" for t in tags_no_filtro]
+    # Um recorte vazio não pode apagar a tela: "TAG apta" hoje tem zero, e a
+    # aba inteira sumia junto. A busca cai de volta para todas, e quem explica
+    # o vazio é a tabela, no lugar dela.
+    base_busca = tags_no_filtro or sorted(indice)
+    opcoes = ([f"{t}  ·  TAG" for t in base_busca]
               + ([f"{a}  ·  {'fieldbus' if a.startswith('CFF') else 'caixa'}"
-                  for a in alvos] if alvo_recorte == "Todos" else []))
-    if not opcoes:
-        render_html('<div class="gplan-panel"><div class="gtbl-empty">'
-                    f"Nenhuma TAG em {alvo_recorte.lower()}.</div></div>")
-        return
+                  for a in alvos] if not tags_no_filtro or alvo_recorte == "Todos" else []))
     padrao = st.session_state.get("cert_escolha")
     idx = opcoes.index(padrao) if padrao in opcoes else 0
     escolha = st.selectbox("Pesquisar TAG, caixa ou tronco de fieldbus", opcoes,
@@ -4706,6 +4772,7 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     else:
         alvo, tag_sel = nome, ""
 
+    com_ficha = set(resumo["TAG"].astype(str))
     cad = cert_cadeia(alvo, lanc, mont)
     if not cad["ramais"]:
         render_html('<div class="gplan-panel"><div class="gtbl-empty">'
@@ -4731,6 +4798,9 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         r["status"] = ("Concluído" if all(c["pct"] >= 99.5 for c in cs)
                        else "Em Andamento" if any(c["pct"] > 0 for c in cs)
                        else cs[0]["status"])
+        # a âncora só vale para TAG que existe no controle documental: sem ficha
+        # para abrir, o cartão não deve parecer clicável
+        r["ancora"] = ficha_anchor(r["org"]) if r["org"] in com_ficha else ""
 
     titulo = (f"{cad['painel'] or 'painel indefinido'} → {cad['caixa']}"
               + (f" ({len(cad['segmentos'])} caixas em série)" if cad["segmentos"] else "")
@@ -4775,13 +4845,28 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
             f'<td><span class="gtbl-badge {mt}">'
             f'{"montada" if v["montada"] else "não montada"}</span></td>'
             f'<td class="gtbl-muted" style="font-size:11px">{v["onde"]}</td></tr>')
-    render_html(
-        f'<div class="gplan-panel-title" style="margin:20px 0 8px">{alvo_recorte} '
-        f'<span class="gtbl-muted" style="font-weight:500">{br_num(len(linhas))} '
-        f'{"TAG" if len(linhas) == 1 else "TAGs"}</span></div>'
-        f'<div class="ct-rolo"><table class="gtbl"><thead><tr><th>TAG</th>'
-        f'<th>Caixa</th><th>Cabo</th><th>Montagem</th><th>Trava em</th></tr></thead>'
-        f'<tbody>{"".join(linhas)}</tbody></table></div>')
+    cabecalho = (f'<div class="gplan-panel-title" style="margin:20px 0 8px">'
+                 f'{alvo_recorte} <span class="gtbl-muted" style="font-weight:500">'
+                 f'{br_num(len(linhas))} {"TAG" if len(linhas) == 1 else "TAGs"}'
+                 f'</span></div>')
+    if not linhas:
+        render_html(cabecalho + '<div class="gplan-panel"><div class="gtbl-empty">'
+                    f"Nenhuma TAG neste recorte hoje. O desenho continua na TAG "
+                    f"escolhida acima.</div></div>")
+    else:
+        render_html(
+            cabecalho +
+            f'<div class="ct-rolo"><table class="gtbl"><thead><tr><th>TAG</th>'
+            f'<th>Caixa</th><th>Cabo</th><th>Montagem</th><th>Trava em</th></tr></thead>'
+            f'<tbody>{"".join(linhas)}</tbody></table></div>')
+
+    # As fichas ficam no fim da página, fechadas: o :target abre só a que o
+    # clique no desenho pedir, e nenhuma ida ao servidor acontece.
+    da_cena = [r["org"] for r in cad["ramais"] if r["org"] in com_ficha]
+    if da_cena:
+        render_html(fichas_modais_html(da_cena, resumo, esperados, tags,
+                                       espera_por_doc=espera_por_documento(
+                                           _revisoes_por_doc(cache_key, sigem))))
 
 
 def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFrame,
@@ -5912,7 +5997,7 @@ def main():
     sigem_page = st.Page(lambda: _sob_carga("Carregando a base SIGEM", lambda: render_sigem(sigem, esperados, any(escolhas.values()))), title="Base SIGEM", icon=":material/database:", url_path="sigem")
     gitec_page = st.Page(lambda: _sob_carga("Carregando a medição de campo", lambda: render_gitec(gitec_f, resumo, tags, esperados, sigem, cache_key)), title="Gitec", icon=":material/engineering:", url_path="gitec")
     planta_page = st.Page(lambda: _sob_carga("Desenhando o avanço na planta", lambda: render_planta(tags, resumo, locacao, aux_areas)), title="Planta", icon=":material/map:", url_path="planta")
-    certificacao_page = st.Page(lambda: _sob_carga("Montando a cadeia de certificação", lambda: render_certificacao(tags, lancamento, depara, cache_key)), title="Certificação", icon=":material/fact_check:", url_path="certificacao")
+    certificacao_page = st.Page(lambda: _sob_carga("Montando a cadeia de certificação", lambda: render_certificacao(tags, lancamento, depara, resumo, esperados, sigem, cache_key)), title="Certificação", icon=":material/fact_check:", url_path="certificacao")
 
     nav = st.navigation([dashboard_page, progresso_page, relatorios_page, pesquisa_page,
                          sigem_page, gitec_page, planta_page, certificacao_page],
