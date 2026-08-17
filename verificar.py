@@ -27,9 +27,15 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 ALVO = os.environ.get("ALVO", "http://localhost:8501")
-PLANILHA = Path(__file__).resolve().parent.parent / (
-    "Controle de Relatório dos Instrumentos/01_ARQUIVO_ATUAL/"
-    "CONTROLE_DOCUMENTAL_INSTRUMENTACAO_ATUAL.xlsx"
+# A referencia e a planilha atual. Da para apontar para outra pelo ambiente:
+# serve quando o app esta servindo uma versao do Supabase que nao e a do disco,
+# ou quando a atual esta no meio de uma atualizacao do pipeline.
+#     PLANILHA=".../outputs/atualizacoes/..._20260817_105542.xlsx" python verificar.py
+_outra = os.environ.get("PLANILHA", "").strip()
+PLANILHA = Path(_outra) if _outra else (
+    Path(__file__).resolve().parent.parent
+    / "Controle de Relatório dos Instrumentos/01_ARQUIVO_ATUAL/"
+      "CONTROLE_DOCUMENTAL_INSTRUMENTACAO_ATUAL.xlsx"
 )
 APROVADOS = {"SEM COMENTÁRIOS", "COM COMENTÁRIOS", "PARA CONSTRUÇÃO"}
 
@@ -452,6 +458,13 @@ with sync_playwright() as p:
                  sorted(set(pg.evaluate(TXT % ".ua-tag")) - do_projeto), [])
         conferir("Estado das três frentes em cada linha",
                  pg.locator(".ua-est i").count(), movs * 3)
+        # As fichas sao o ultimo bloco da pagina e chegam depois da lista: no
+        # Render sao ~30 s de diferenca, e os 4 s de folga do abrir() reprovavam
+        # uma tela que estava so a caminho.
+        try:
+            pg.wait_for_selector(".fmodal[id^='f-']", timeout=ESPERA)
+        except Exception:
+            pass
         conferir("Ficha da TAG na página",
                  pg.locator(".fmodal[id^='f-']").count() > 0, True)
         conferir("Degraus abrem na própria aba",
