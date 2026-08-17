@@ -441,23 +441,38 @@ with sync_playwright() as p:
         movs = pg.locator(".ua-mov").count()
         conferir("Movimentações na tela", movs > 0, True)
         conferir("Agrupadas por dia", pg.locator(".ua-dia").count() > 0, True)
-        conferir("Recorte por frente",
-                 pg.locator("[data-testid='stButtonGroup']").count(), 1)
+        # dois seletores: o periodo e a frente
+        conferir("Período e frente na tela",
+                 pg.locator("[data-testid='stButtonGroup']").count(), 2)
+        conferir("Janela de 7 dias por padrão",
+                 pg.locator("[data-testid='stButtonGroup']").first
+                 .locator("button[aria-checked='true']").inner_text().startswith("7 dias"),
+                 True)
+        # cada linha diz para onde foi; a maioria diz tambem de onde saiu
+        conferir("Toda linha tem destino", pg.locator(".ua-para").count() >= movs, True)
+        conferir("A maioria tem origem", pg.locator(".ua-de").count() > movs / 2, True)
+        # so vale movimentacao dentro da janela escolhida
+        dias = pg.evaluate("() => [...document.querySelectorAll('.ua-sel')]"
+                           ".map(e => e.innerText.split(String.fromCharCode(10))[0])")
+        conferir("Nenhum dia fora da janela", len(dias) <= 8, True)
         # O pedido que motivou a mudanca: nada que nao seja deste projeto. Todo
-        # nome da lista tem que sair de uma base desta planilha -- a de TAGs, ou
-        # a de cabos, cujo tronco entre paineis nao e instrumento mas e obra
-        # daqui.
+        # nome da lista tem que sair de uma base desta planilha -- a de TAGs, a
+        # de cabos (cujo tronco entre paineis nao e instrumento mas e obra
+        # daqui) -- ou ser o titulo de um grupo, tipo "37 TAGs".
         do_projeto = set(tags["TAG"].astype(str))
         try:
             cab = pd.read_excel(PLANILHA, sheet_name="02_CABOS_LANCAMENTO")
+            do_projeto |= set(cab["CIRCUITO"].astype(str).str.strip())
             do_projeto |= set(cab["ORIGEM"].astype(str).str.strip())
             do_projeto |= set(cab["DESTINO"].astype(str).str.strip())
         except Exception:
             pass
-        conferir("Nada de fora do projeto",
-                 sorted(set(pg.evaluate(TXT % ".ua-tag")) - do_projeto), [])
-        conferir("Estado das três frentes em cada linha",
-                 pg.locator(".ua-est i").count(), movs * 3)
+        pg.locator("[data-testid='stButtonGroup']").nth(1).locator(
+            "button").nth(2).click()          # frente Montagem
+        pg.wait_for_timeout(4000)
+        na_tela = {t.split(" ")[0] for t in pg.evaluate(TXT % ".ua-alvos .ua-tag")}
+        conferir("Montagem só com TAG deste projeto",
+                 sorted(na_tela - do_projeto)[:5], [])
         # As fichas sao o ultimo bloco da pagina e chegam depois da lista: no
         # Render sao ~30 s de diferenca, e os 4 s de folga do abrir() reprovavam
         # uma tela que estava so a caminho.
@@ -470,11 +485,20 @@ with sync_playwright() as p:
         conferir("Degraus abrem na própria aba",
                  pg.locator(".fmodal[id^='n-']").count() > 0, True)
         # O documento so entra se estiver na 08_RELATORIOS_ESPERADOS: era por
-        # falta disso que o SIGEM de obra alheia ocupava a pagina.
-        pg.locator("[data-testid='stButtonGroup'] button").nth(1).click()
+        # falta disso que o SIGEM de obra alheia ocupava a pagina. O nome
+        # inteiro fica no title, que e o que da para conferir contra a planilha.
+        pg.locator("[data-testid='stButtonGroup']").nth(1).locator(
+            "button").nth(1).click()          # frente Documento
         pg.wait_for_timeout(4000)
-        conferir("Documento só de TAG do controle",
-                 sorted(set(pg.evaluate(TXT % ".ua-tag")) - set(tags["TAG"].astype(str))), [])
+        titulos = set(pg.evaluate(
+            "() => [...document.querySelectorAll('.ua-alvos .ua-tag[title]')]"
+            ".map(e => e.title)"))
+        conferir("Documento só do controle",
+                 sorted(titulos - set(esperados["DOCUMENTO_ESPERADO"].astype(str)))[:5], [])
+        # o caso que motivou: o documento e o sujeito, e diz quantas TAGs
+        # dependem dele -- nao vai pendurado numa TAG so
+        conferir("Documento diz quantas TAGs afeta",
+                 pg.locator(".ua-quantas").count() > 0, True)
 
     # A lateral: marca no topo, menu logo abaixo, sem filtro rápido
     print("")
