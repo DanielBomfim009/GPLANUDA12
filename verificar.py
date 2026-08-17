@@ -341,6 +341,26 @@ with sync_playwright() as p:
     # a Progresso hoje nem responde em producao, por falta de memoria.
     ESPERA = int(os.environ.get("ESPERA", "240")) * 1000
 
+    def escolher(grupo: int, botao: int) -> None:
+        """Clica num seletor esperando a tela parar de carregar.
+
+        O _sob_carga cobre a pagina com .gpl-cheia enquanto o Streamlit re-roda.
+        Aqui isso passa batido; no Render a re-execucao demora mais que os 30 s
+        de folga do clique, e o Playwright reprovava com "subtree intercepts
+        pointer events" -- overlay no caminho, nao botao quebrado.
+        """
+        try:
+            pg.wait_for_selector(".gpl-cheia", state="detached", timeout=ESPERA)
+        except Exception:
+            pass
+        pg.locator("[data-testid='stButtonGroup']").nth(grupo).locator(
+            "button").nth(botao).click(timeout=ESPERA)
+        try:
+            pg.wait_for_selector(".gpl-cheia", state="detached", timeout=ESPERA)
+        except Exception:
+            pass
+        pg.wait_for_timeout(3000)
+
     def abrir(caminho: str, marcador: str) -> bool:
         try:
             pg.goto(ALVO + caminho, wait_until="domcontentloaded", timeout=ESPERA)
@@ -467,9 +487,7 @@ with sync_playwright() as p:
             do_projeto |= set(cab["DESTINO"].astype(str).str.strip())
         except Exception:
             pass
-        pg.locator("[data-testid='stButtonGroup']").nth(1).locator(
-            "button").nth(2).click()          # frente Montagem
-        pg.wait_for_timeout(4000)
+        escolher(1, 2)                       # frente Montagem
         na_tela = {t.split(" ")[0] for t in pg.evaluate(TXT % ".ua-alvos .ua-tag")}
         conferir("Montagem só com TAG deste projeto",
                  sorted(na_tela - do_projeto)[:5], [])
@@ -487,9 +505,13 @@ with sync_playwright() as p:
         # O documento so entra se estiver na 08_RELATORIOS_ESPERADOS: era por
         # falta disso que o SIGEM de obra alheia ocupava a pagina. O nome
         # inteiro fica no title, que e o que da para conferir contra a planilha.
-        pg.locator("[data-testid='stButtonGroup']").nth(1).locator(
-            "button").nth(1).click()          # frente Documento
-        pg.wait_for_timeout(4000)
+        escolher(1, 1)                       # frente Documento
+        # esperar a lista virar de fato: no Render o desenho chega depois de o
+        # overlay sair, e olhar antes disso e conferir a tela anterior
+        try:
+            pg.wait_for_selector(".ua-frente.documento", timeout=ESPERA)
+        except Exception:
+            pass
         titulos = set(pg.evaluate(
             "() => [...document.querySelectorAll('.ua-alvos .ua-tag[title]')]"
             ".map(e => e.title)"))
