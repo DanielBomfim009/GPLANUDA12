@@ -4140,10 +4140,6 @@ def cert_agrupar(circuitos: list) -> list:
     return sorted(saida, key=lambda c: c["org"])
 
 
-def cert_feito(c: dict) -> bool:
-    return c["pct"] >= 99.5
-
-
 CERT_ROTULO = {"ok": "Apto", "warn": "Predecessora em andamento",
                "crit": "Bloqueado", "desc": "Não dá para afirmar"}
 CERT_CLASSE = {"ok": "ok", "warn": "warn", "crit": "crit", "desc": "roxo"}
@@ -6400,14 +6396,6 @@ def _universo(escolhas: dict, tags, resumo, esperados, pular: str = "") -> set:
     return ids
 
 
-def _limpar_filtros():
-    """Callback do botao. Precisa ser callback: mexer na chave de um widget
-    depois que ele ja foi criado no mesmo run levanta excecao no Streamlit --
-    os callbacks rodam antes do rerun, quando ainda e permitido."""
-    for chave, _, padrao, _, _ in FILTROS:
-        st.session_state[f"gf_{chave}"] = padrao
-
-
 def consumir_filtros_url(tags: pd.DataFrame, resumo: pd.DataFrame,
                          esperados: pd.DataFrame) -> None:
     """Aplica ?fase=/?sop=/?grupo= que chegam de um clique dentro da propria
@@ -6447,62 +6435,6 @@ def filtros_da_url(tags: pd.DataFrame, resumo: pd.DataFrame,
     ativos = {c: v for c, v in escolhas.items() if v}
     rotulos = {c: r for c, r, *_ in FILTROS}
     alvo = _universo(escolhas, tags, resumo, esperados)
-    st.session_state["_flt_selo"] = (
-        '<div class="du-selo filtro"><i></i>'
-        + " · ".join(f"{rotulos[c]}: {esc(v)}" for c, v in ativos.items())
-        + f" — {br_num(len(alvo))} de {br_num(len(tags))} tags</div>"
-    ) if ativos else ""
-    return escolhas
-
-
-def sidebar_filtros(tags: pd.DataFrame, resumo: pd.DataFrame,
-                    esperados: pd.DataFrame) -> dict:
-    """Filtros da lateral, em cascata e validos para o app inteiro.
-
-    Cada campo so oferece o que ainda sobra depois dos outros: escolher uma
-    FASE reduz a lista de SOPs aos daquela fase, e escolher um SOP reduz os
-    grupos. Sem isso da para montar uma combinacao que nao devolve nada e
-    parece defeito. Quando o valor guardado sai da lista -- porque outro
-    filtro mudou -- ele volta ao padrao em vez de estourar.
-
-    A chave do session_state E a chave do widget, de proposito: com duas
-    chaves o valor vindo da URL era escrito numa e o selectbox continuava
-    lendo a outra, e o seletor nao mexia.
-    """
-    consumir_filtros_url(tags, resumo, esperados)
-
-    def escolhido(chave: str, padrao: str) -> str:
-        v = st.session_state.get(f"gf_{chave}", padrao)
-        return "" if v == padrao else v
-
-    with st.sidebar:
-        # O contador so existe depois que os quatro seletores forem lidos, mas
-        # ele mora na mesma linha do titulo, acima deles. Reservar o espaco com
-        # st.empty() e preencher no fim economiza a linha inteira -- e era ela
-        # que empurrava o ultimo item do menu para tras da barra de tarefas.
-        topo = st.empty()
-        for chave, rotulo, padrao, fonte, coluna in FILTROS:
-            escolhas = {c: escolhido(c, p) for c, _, p, _, _ in FILTROS}
-            base = {"tags": tags, "resumo": resumo, "esperados": esperados}[fonte]
-            sub = base[base["TAG"].isin(
-                _universo(escolhas, tags, resumo, esperados, pular=chave))]
-            serie = sub[coluna].map(sentence_case) if chave in NORMALIZA else sub[coluna]
-            opcoes = [padrao] + _valores(serie)
-            if st.session_state.get(f"gf_{chave}", padrao) not in opcoes:
-                st.session_state[f"gf_{chave}"] = padrao
-            st.selectbox(rotulo, opcoes, key=f"gf_{chave}")
-
-        escolhas = {c: escolhido(c, p) for c, _, p, _, _ in FILTROS}
-        ativos = {c: v for c, v in escolhas.items() if v}
-        alvo = _universo(escolhas, tags, resumo, esperados)
-        topo.markdown(
-            '<div class="flt-topo"><span class="flt-titulo">Filtros rápidos</span>'
-            f'<span class="flt-conta"><b>{br_num(len(alvo))}</b> de {br_num(len(tags))}</span>'
-            "</div>", unsafe_allow_html=True)
-        if ativos:
-            st.button("Limpar filtros", key="gf_limpar", on_click=_limpar_filtros)
-
-    rotulos = {c: r for c, r, *_ in FILTROS}
     st.session_state["_flt_selo"] = (
         '<div class="du-selo filtro"><i></i>'
         + " · ".join(f"{rotulos[c]}: {esc(v)}" for c, v in ativos.items())
