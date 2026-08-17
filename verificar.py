@@ -353,9 +353,103 @@ with sync_playwright() as p:
         ("/progresso", "Progresso", "details.arv-n1"),
         ("/gitec", "Gitec", ".fx-tiles"),
         ("/planta", "Planta", ".pl-tela"),
+        ("/certificacao", "Certificação", ".ct-painel"),
+        ("/atualizacao", "Última atualização", ".ua-item"),
     ]:
         conferir(nome, abrir(caminho, marcador), True)
 
+
+    # Certificação: os cartões contra a planilha de cabos, e os números da aba
+    # contra eles mesmos.
+    print("")
+    print("  Certificação bate com a planilha de cabos")
+    if abrir("/certificacao", ".ct-painel"):
+        # o rotulo do cartao vem em versalete pelo CSS, e innerText devolve o
+        # que a tela mostra: a chave e comparada sem caixa
+        cart = {c.split("|")[0].strip().upper(): c.split("|")
+                for c in pg.evaluate(TXT % ".pl-kpi") if "|" in c}
+        try:
+            lanc = pd.read_excel(PLANILHA, sheet_name="02_CABOS_LANCAMENTO")
+        except Exception:
+            lanc = None
+        if lanc is not None and "AVANÇO DO CABO" in cart:
+            metros = float(lanc["METROS"].fillna(0).sum())
+            prop = lanc["METROS"].fillna(0) * lanc["PCT"].fillna(0) / 100
+            real = (lanc["METROS_REAL"].fillna(0) if "METROS_REAL" in lanc
+                    else pd.Series(0.0, index=lanc.index))
+            lancado = float(real.where(real > 0, prop).sum())
+            partes = cart["AVANÇO DO CABO"]
+            conferir("Avanço do cabo", partes[1],
+                     ("%.1f%%" % (lancado / metros * 100)).replace(".", ","))
+            rodape = partes[2] if len(partes) > 2 else ""
+            conferir("Metros lançados na Certificação",
+                     numero(rodape.split(" de ")[0]) if " de " in rodape else -1.0,
+                     float(round(lancado)))
+            conferir("Metros totais na Certificação",
+                     numero(rodape.split(" de ")[1]) if " de " in rodape else -1.0,
+                     float(round(metros)))
+
+        # os recortes do filtro têm de fechar entre si
+        # locator em vez de evaluate: o seletor tem aspas simples dentro, e o
+        # TXT ja usa aspas simples -- juntos viram erro de sintaxe no navegador
+        chips = [t for t in pg.locator("[data-testid='stButtonGroup'] button")
+                 .all_inner_texts() if "·" in t]
+        n = {c.split("·")[0].strip(): int(numero(c.split("·")[-1])) for c in chips}
+        conferir("Todos = Circuitos aptos + Inaptas",
+                 n.get("Circuitos aptos", 0) + n.get("Inaptas", -1), n.get("Todos", 0))
+        conferir("TAG apta cabe em Circuitos aptos",
+                 n.get("TAG apta", 1) <= n.get("Circuitos aptos", 0), True)
+        conferir("Montadas travadas cabem em Inaptas",
+                 n.get("Montadas travadas", 1) <= n.get("Inaptas", 0), True)
+        conferir("TAGs mapeadas = Todos",
+                 int(numero(cart.get("TAGS MAPEADAS", ["", "0"])[1])), n.get("Todos", -1))
+        conferir("Cartão de circuitos aptos = chip",
+                 int(numero(cart.get("CIRCUITOS APTOS", ["", "0"])[1])),
+                 n.get("Circuitos aptos", -1))
+
+        # o desenho existe, e as fichas que ele abre estão na página
+        conferir("Moldura do desenho na tela", pg.locator("iframe").count() >= 1, True)
+        conferir("Fichas das TAGs do desenho",
+                 pg.locator(".fmodal[id^='f-']").count() > 0, True)
+        conferir("Fichas de nível para os degraus",
+                 pg.locator(".fmodal[id^='n-']").count() > 0, True)
+        conferir("Degraus abrem na própria aba",
+                 pg.locator(".fmodal[id^='f-'] a[href^='#n-']").count() > 0, True)
+        titulo = (pg.evaluate(TXT % ".ct-painel .gplan-panel-title") or [""])[0]
+        conferir("Tabela segue o desenho", "TAGs do desenho" in titulo, True)
+
+    # Pesquisa tag: o campo de painel na tela e a lista inteira antes do recorte
+    print("")
+    print("  Filtro de painel na Pesquisa tag")
+    if abrir("/pesquisa", "table.gtbl"):
+        # um so: os quatro filtros rapidos sairam da lateral, entao o unico
+        # seletor da pagina e o de painel
+        conferir("Campo de painel na tela", pg.get_by_role("combobox").count(), 1)
+        conferir("Lista completa antes do filtro",
+                 "5.098" in (pg.evaluate(TXT % ".gtbl-pag") or [""])[0], True)
+
+    # A aba Última atualização
+    print("")
+    print("  Última atualização")
+    if abrir("/atualizacao", ".ua-item"):
+        conferir("Movimentações na tela", pg.locator(".ua-item").count() > 0, True)
+        conferir("Agrupadas por dia", pg.locator(".ua-dia").count() > 0, True)
+        conferir("Recorte por origem",
+                 pg.locator("[data-testid='stButtonGroup']").count(), 1)
+
+    # A lateral: marca no topo, menu logo abaixo, sem filtro rápido
+    print("")
+    print("  Lateral")
+    abrir("", ".du-tela")
+    conferir("Sem filtro rápido na lateral",
+             pg.locator("section[data-testid='stSidebar'] [role='combobox']").count(), 0)
+    conferir("Menu com as nove abas",
+             pg.locator("[data-testid='stSidebarNav'] a").count(), 9)
+    conferir("Marca acima do menu", pg.evaluate(
+        "() => { const m = document.querySelector('.gplan-brand');"
+        " const n = document.querySelector(\"[data-testid='stSidebarNav']\");"
+        " return !!m && !!n && m.getBoundingClientRect().top"
+        " < n.getBoundingClientRect().top; }"), True)
     # Dashboard: os cinco cartões contra a planilha
     print("\n  Dashboard bate com a planilha")
     abrir("", ".du-tela")

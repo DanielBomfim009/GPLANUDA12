@@ -1,4 +1,5 @@
 import base64
+import collections
 import io
 import json
 import math
@@ -669,13 +670,11 @@ def inject_css():
         section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
           order: 1; padding-top: 0 !important; padding-bottom: 0 !important;
         }
-        /* Menu abaixo dos filtros. O dropdown do selectbox e portalado no
-           body com position:fixed e nao vira para cima quando falta espaco:
-           com os cinco itens de menu antes, o ultimo filtro comecava a 617px
-           numa janela de 650 e a lista abria atras da barra de tarefas. Com
-           os filtros no topo o ultimo termina por volta de 330px, e os 300px
-           da lista cabem. */
-        section[data-testid="stSidebar"] [data-testid="stSidebarNav"] { order: 4; }
+        /* O menu ocupa o lugar que era dos filtros rapidos. Eles saiam por
+           decisao de uso, e de quebra o motivo que os prendia no topo -- o
+           dropdown do selectbox e portalado no body e abria atras da barra de
+           tarefas quando comecava baixo demais -- deixou de existir. */
+        section[data-testid="stSidebar"] [data-testid="stSidebarNav"] { order: 2; }
         section[data-testid="stSidebar"] [data-testid="stSidebarNavSeparator"] { display: none; }
 
         .gplan-brand {
@@ -1803,6 +1802,34 @@ def inject_css():
 
         /* ---------------------------------------------------- aba Planta */
 
+        /* ---- Última atualização ---- */
+        .ua-lista { display:flex; flex-direction:column; }
+        .ua-item { display:flex; gap:14px; align-items:flex-start; padding:13px 4px;
+          border-bottom:1px solid var(--border-color); }
+        .ua-item:last-child { border-bottom:0; }
+        .ua-seta { width:26px; height:26px; border-radius:8px; flex:none; display:grid;
+          place-items:center; font-size:13px; font-weight:800; margin-top:1px; }
+        .ua-seta.ok { background:rgba(var(--rgb-teal),0.16); color:var(--txt-teal); }
+        .ua-seta.warn { background:rgba(var(--rgb-ambar),0.16); color:var(--txt-ambar); }
+        .ua-seta.crit { background:rgba(var(--rgb-vermelho),0.16); color:var(--txt-vermelho); }
+        .ua-seta.azul { background:rgba(var(--rgb-azul),0.16); color:var(--txt-azul); }
+        .ua-cp { flex:1; min-width:0; }
+        .ua-l1 { font-size:13px; line-height:1.45; color:var(--text-2); }
+        .ua-l1 b { color:var(--text-1); font-weight:700;
+          font-family:ui-monospace,Consolas,monospace; font-size:12.5px; }
+        .ua-l1 .ua-para { font-weight:700; }
+        .ua-l1 .ua-para.ok { color:var(--txt-teal); }
+        .ua-l1 .ua-para.warn { color:var(--txt-ambar); }
+        .ua-l1 .ua-para.crit { color:var(--txt-vermelho); }
+        .ua-l1 .ua-para.azul { color:var(--txt-azul); }
+        .ua-l2 { font-size:11px; color:var(--text-3); margin-top:3px; }
+        .ua-quando { font-size:11.5px; color:var(--text-3); flex:none; white-space:nowrap;
+          padding-top:3px; }
+        .ua-dia { font-size:10.5px; letter-spacing:.7px; text-transform:uppercase;
+          font-weight:800; color:var(--text-3); padding:16px 4px 6px;
+          border-bottom:1px solid var(--border-color); }
+        .ua-dia:first-child { padding-top:2px; }
+        .ua-rolo { max-height:640px; overflow-y:auto; }
         /* ---- Certificação ---- */
         .ct-leg { display:flex; gap:16px; flex-wrap:wrap; font-size:11px;
           color:var(--text-3); padding:10px 14px; background:var(--dark-card-2);
@@ -5230,6 +5257,174 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     render_fichas([r["org"] for r in cad["ramais"] if r["org"] in com_ficha])
 
 
+# ===================================================================== #
+# Última atualização: o que mudou, com a data que o campo registrou      #
+# ===================================================================== #
+# Não é um diff entre versões da planilha -- é o evento datado que as
+# próprias bases já carregam. Parecer do SIGEM, conexão de ponta e teste de
+# cabo, medição do Gitec: cada um traz a data em que aconteceu, e é isso que
+# permite dizer "há dois dias" sem inventar histórico.
+
+UA_TOM = {"SEM COMENTÁRIOS": "ok", "PARA CONSTRUÇÃO": "ok", "COM COMENTÁRIOS": "warn",
+          "EM ANÁLISE": "azul", "RECUSADO": "crit", "CANCELADO": "crit"}
+
+
+def ua_quando(quando: pd.Timestamp, agora: pd.Timestamp) -> str:
+    """Quanto tempo faz, na medida que a pessoa usa para falar disso."""
+    seg = (agora - quando).total_seconds()
+    if seg < 0:
+        return "agora"
+    if seg < 3600:
+        return f"{max(1, int(seg // 60))} min atrás"
+    if seg < 86400:
+        return f"{int(seg // 3600)} h atrás"
+    dias = int(seg // 86400)
+    if dias == 1:
+        return "ontem"
+    if dias < 30:
+        return f"{dias}d atrás"
+    if dias < 365:
+        meses = dias // 30
+        return f"{meses} {'meses' if meses > 1 else 'mês'} atrás"
+    return f"{dias // 365} ano{'s' if dias // 365 > 1 else ''} atrás"
+
+
+@st.cache_data(show_spinner=False, max_entries=3)
+def ua_eventos(sigem: pd.DataFrame, gitec: pd.DataFrame, lanc: pd.DataFrame,
+               esperados: pd.DataFrame, cache_key: str, limite: int = 400) -> list:
+    """Os eventos datados das três bases, do mais novo para o mais velho.
+
+    O SIGEM domina em volume -- 21.545 documentos com data de parecer -- e por
+    isso entra pelo parecer, não pela emissão: emissão é quando o documento
+    nasceu, parecer é quando a fiscalização mexeu nele, que é o que muda.
+    """
+    eventos = []
+    dono = {}
+    if not esperados.empty and "DOCUMENTO_ESPERADO" in esperados:
+        dono = dict(zip(esperados["DOCUMENTO_ESPERADO"].astype(str),
+                        esperados["TAG"].astype(str)))
+
+    if not sigem.empty and "DATA_PARECER" in sigem:
+        d = sigem.copy()
+        d["_q"] = pd.to_datetime(d["DATA_PARECER"], errors="coerce", dayfirst=True)
+        d = d[d["_q"].notna()].sort_values("_q", ascending=False).head(limite)
+        for _, r in d.iterrows():
+            st_txt = str(r.get("STATUS", "")).strip()
+            doc = str(r.get("DOCUMENTO", "")).strip()
+            eventos.append({
+                "quando": r["_q"], "tom": UA_TOM.get(st_txt.upper(), "azul"),
+                "o_que": doc, "de": f"revisão {str(r.get('REVISAO', '')).strip()}".strip(),
+                "para": st_txt or "sem parecer",
+                "onde": "Relatório" + (f" · {dono[doc]}" if doc in dono else ""),
+            })
+
+    if not lanc.empty:
+        d = lanc.copy()
+        for coluna, rot in (("TESTE", "teste concluído"),
+                            ("PONTA2", "2ª ponta conectada"),
+                            ("PONTA1", "1ª ponta conectada")):
+            if coluna not in d:
+                continue
+            m = d.copy()
+            m["_q"] = pd.to_datetime(m[coluna], errors="coerce", dayfirst=True)
+            m = m[m["_q"].notna()].sort_values("_q", ascending=False).head(limite)
+            for _, r in m.iterrows():
+                eventos.append({
+                    "quando": r["_q"], "tom": "ok",
+                    "o_que": str(r["CIRCUITO"]).strip(),
+                    "de": str(r["DISCIPLINA"]).strip().title(), "para": rot,
+                    "onde": f"Cabo · {str(r['ORIGEM']).strip()} → {str(r['DESTINO']).strip()}",
+                })
+
+    if not gitec.empty and "DATA_EXECUCAO" in gitec:
+        d = gitec.copy()
+        d["_q"] = pd.to_datetime(d["DATA_EXECUCAO"], errors="coerce", dayfirst=True)
+        d = d[d["_q"].notna()].sort_values("_q", ascending=False).head(limite)
+        for _, r in d.iterrows():
+            eventos.append({
+                "quando": r["_q"], "tom": "ok", "o_que": str(r["TAG"]).strip(),
+                "de": str(r.get("ETAPA", "")).strip() or "medição",
+                "para": str(r.get("STATUS", "")).strip() or "medido",
+                "onde": f"Gitec · {str(r.get('FASE', '')).strip()}",
+            })
+
+    # sem corte global aqui: o parecer do SIGEM e de agosto e o campo para em
+    # junho, entao um corte unico apagaria o campo inteiro. Quem corta e o
+    # recorte escolhido na tela.
+    eventos.sort(key=lambda e: e["quando"], reverse=True)
+    return eventos
+
+
+def render_atualizacao(sigem: pd.DataFrame, gitec: pd.DataFrame, lanc: pd.DataFrame,
+                       esperados: pd.DataFrame, cache_key: str):
+    """O que mudou, do mais recente para o mais antigo.
+
+    A aba responde uma pergunta que nenhuma outra respondia: o que andou desde
+    a última vez que olhei. As demais mostram o retrato de agora; esta mostra o
+    movimento.
+    """
+    render_header("Última atualização")
+    eventos = ua_eventos(sigem, gitec, lanc, esperados, cache_key)
+    if not eventos:
+        render_html('<div class="gplan-panel"><div class="gtbl-empty">'
+                    "Nenhuma data de movimentação nas bases desta planilha."
+                    "</div></div>")
+        return
+
+    agora = pd.Timestamp.now(tz=BR_TZ).tz_localize(None)
+    fontes = collections.Counter(e["onde"].split(" · ")[0] for e in eventos)
+    # O parecer do SIGEM é de agosto e o campo para em junho: numa lista só, o
+    # documento empurra o cabo para fora da tela. O recorte é o que devolve
+    # cada fonte à vista.
+    RECORTES = {"Tudo": None, "Relatórios": "Relatório", "Cabo": "Cabo", "Gitec": "Gitec"}
+    escolha = st.segmented_control(
+        "Origem da movimentação", list(RECORTES),
+        format_func=lambda x: (f"{x} · {br_num(len(eventos))}" if x == "Tudo"
+                               else f"{x} · {br_num(fontes.get(RECORTES[x], 0))}"),
+        default="Tudo", key="ua_fonte") or "Tudo"
+    if RECORTES[escolha]:
+        eventos = [e for e in eventos if e["onde"].split(" · ")[0] == RECORTES[escolha]]
+    eventos = eventos[:250]
+    if not eventos:
+        render_html('<div class="gplan-panel"><div class="gtbl-empty">'
+                    f"Nenhuma movimentação de {escolha.lower()} nesta planilha."
+                    "</div></div>")
+        return
+    render_html(f"""
+      <div class="pl-kpis">
+        <div class="pl-kpi"><div class="r">Movimentações</div>
+          <div class="v">{br_num(len(eventos))}</div>
+          <div class="s">{escolha.lower()} · as mais recentes</div></div>
+        <div class="pl-kpi"><div class="r">Mais recente</div>
+          <div class="v andando" style="font-size:20px">{ua_quando(eventos[0]['quando'], agora)}</div>
+          <div class="s">{eventos[0]['quando']:%d/%m/%Y}</div></div>
+        <div class="pl-kpi"><div class="r">Relatórios</div>
+          <div class="v">{br_num(fontes.get('Relatório', 0))}</div>
+          <div class="s">parecer da fiscalização</div></div>
+        <div class="pl-kpi"><div class="r">Campo</div>
+          <div class="v">{br_num(fontes.get('Cabo', 0) + fontes.get('Gitec', 0))}</div>
+          <div class="s">cabo e medição</div></div>
+      </div>""")
+
+    linhas, dia_atual = [], None
+    for e in eventos:
+        dia = e["quando"].date()
+        if dia != dia_atual:
+            dia_atual = dia
+            linhas.append(f'<div class="ua-dia">{e["quando"]:%d/%m/%Y}</div>')
+        linhas.append(
+            f'<div class="ua-item"><span class="ua-seta {e["tom"]}">&rarr;</span>'
+            f'<span class="ua-cp"><div class="ua-l1"><b>{esc(e["o_que"])}</b> · '
+            f'{esc(e["de"])} &rarr; <span class="ua-para {e["tom"]}">{esc(e["para"])}</span></div>'
+            f'<div class="ua-l2">{esc(e["onde"])}</div></span>'
+            f'<span class="ua-quando">{ua_quando(e["quando"], agora)}</span></div>')
+    render_html(f'<div class="gplan-panel ct-painel">'
+                f'<div class="gplan-panel-title">Movimentações'
+                f'<span class="gtbl-muted" style="font-weight:500">'
+                f'quem mexeu, de onde para onde</span></div>'
+                f'<div class="ua-rolo ua-lista">{"".join(linhas)}</div></div>')
+
+
 def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFrame,
                   aux: pd.DataFrame):
     """O avanco de montagem por area, desenhado sobre o arranjo da unidade.
@@ -6236,6 +6431,30 @@ def consumir_filtros_url(tags: pd.DataFrame, resumo: pd.DataFrame,
             st.session_state[f"gf_{chave}"] = vindo[chave]
 
 
+def filtros_da_url(tags: pd.DataFrame, resumo: pd.DataFrame,
+                   esperados: pd.DataFrame) -> dict:
+    """O recorte que veio no endereço, sem painel de seleção na lateral.
+
+    Os seletores saíram da lateral, mas os links que a ficha gera -- "ver na
+    Progresso" com ?fase= -- continuam existindo. Ler a URL aqui é o que
+    impede esses links de prometerem um recorte que não aconteceria.
+    """
+    consumir_filtros_url(tags, resumo, esperados)
+    escolhas = {}
+    for chave, _rotulo, padrao, _fonte, _coluna in FILTROS:
+        v = st.session_state.get(f"gf_{chave}", padrao)
+        escolhas[chave] = "" if v == padrao else v
+    ativos = {c: v for c, v in escolhas.items() if v}
+    rotulos = {c: r for c, r, *_ in FILTROS}
+    alvo = _universo(escolhas, tags, resumo, esperados)
+    st.session_state["_flt_selo"] = (
+        '<div class="du-selo filtro"><i></i>'
+        + " · ".join(f"{rotulos[c]}: {esc(v)}" for c, v in ativos.items())
+        + f" — {br_num(len(alvo))} de {br_num(len(tags))} tags</div>"
+    ) if ativos else ""
+    return escolhas
+
+
 def sidebar_filtros(tags: pd.DataFrame, resumo: pd.DataFrame,
                     esperados: pd.DataFrame) -> dict:
     """Filtros da lateral, em cascata e validos para o app inteiro.
@@ -6345,7 +6564,7 @@ def main():
             "</div></div>"
         )
 
-    escolhas = sidebar_filtros(tags, resumo, esperados)
+    escolhas = filtros_da_url(tags, resumo, esperados)
     tags, resumo, esperados = aplicar_filtros(escolhas, tags, resumo, esperados)
     # a medicao segue as tags: filtrou a fase, a aba Gitec mostra so o que foi
     # medido nela
@@ -6359,10 +6578,11 @@ def main():
     gitec_page = st.Page(lambda: _sob_carga("Carregando a medição de campo", lambda: render_gitec(gitec_f, resumo, tags, esperados, sigem, cache_key)), title="Gitec", icon=":material/engineering:", url_path="gitec")
     planta_page = st.Page(lambda: _sob_carga("Desenhando o avanço na planta", lambda: render_planta(tags, resumo, locacao, aux_areas)), title="Planta", icon=":material/map:", url_path="planta")
     certificacao_page = st.Page(lambda: _sob_carga("Montando a cadeia de certificação", lambda: render_certificacao(tags, lancamento, depara, resumo, esperados, sigem, cache_key)), title="Certificação", icon=":material/fact_check:", url_path="certificacao")
+    atualizacao_page = st.Page(lambda: _sob_carga("Lendo as movimentações", lambda: render_atualizacao(sigem, gitec, lancamento, esperados, cache_key)), title="Última atualização", icon=":material/history:", url_path="atualizacao")
 
     nav = st.navigation([dashboard_page, progresso_page, relatorios_page, pesquisa_page,
-                         sigem_page, gitec_page, planta_page, certificacao_page],
-                        position="sidebar")
+                         sigem_page, gitec_page, planta_page, certificacao_page,
+                         atualizacao_page], position="sidebar")
     nav.run()
 
 
