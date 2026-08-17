@@ -354,7 +354,7 @@ with sync_playwright() as p:
         ("/gitec", "Gitec", ".fx-tiles"),
         ("/planta", "Planta", ".pl-tela"),
         ("/certificacao", "Certificação", ".ct-painel"),
-        ("/atualizacao", "Última atualização", ".ua-item"),
+        ("/atualizacao", "Última atualização", ".ua-mov"),
     ]:
         conferir(nome, abrir(caminho, marcador), True)
 
@@ -431,11 +431,37 @@ with sync_playwright() as p:
     # A aba Última atualização
     print("")
     print("  Última atualização")
-    if abrir("/atualizacao", ".ua-item"):
-        conferir("Movimentações na tela", pg.locator(".ua-item").count() > 0, True)
+    if abrir("/atualizacao", ".ua-mov"):
+        movs = pg.locator(".ua-mov").count()
+        conferir("Movimentações na tela", movs > 0, True)
         conferir("Agrupadas por dia", pg.locator(".ua-dia").count() > 0, True)
-        conferir("Recorte por origem",
+        conferir("Recorte por frente",
                  pg.locator("[data-testid='stButtonGroup']").count(), 1)
+        # O pedido que motivou a mudanca: nada que nao seja deste projeto. Todo
+        # nome da lista tem que sair de uma base desta planilha -- a de TAGs, ou
+        # a de cabos, cujo tronco entre paineis nao e instrumento mas e obra
+        # daqui.
+        do_projeto = set(tags["TAG"].astype(str))
+        try:
+            cab = pd.read_excel(PLANILHA, sheet_name="02_CABOS_LANCAMENTO")
+            do_projeto |= set(cab["ORIGEM"].astype(str).str.strip())
+            do_projeto |= set(cab["DESTINO"].astype(str).str.strip())
+        except Exception:
+            pass
+        conferir("Nada de fora do projeto",
+                 sorted(set(pg.evaluate(TXT % ".ua-tag")) - do_projeto), [])
+        conferir("Estado das três frentes em cada linha",
+                 pg.locator(".ua-est i").count(), movs * 3)
+        conferir("Ficha da TAG na página",
+                 pg.locator(".fmodal[id^='f-']").count() > 0, True)
+        conferir("Degraus abrem na própria aba",
+                 pg.locator(".fmodal[id^='n-']").count() > 0, True)
+        # O documento so entra se estiver na 08_RELATORIOS_ESPERADOS: era por
+        # falta disso que o SIGEM de obra alheia ocupava a pagina.
+        pg.locator("[data-testid='stButtonGroup'] button").nth(1).click()
+        pg.wait_for_timeout(4000)
+        conferir("Documento só de TAG do controle",
+                 sorted(set(pg.evaluate(TXT % ".ua-tag")) - set(tags["TAG"].astype(str))), [])
 
     # A lateral: marca no topo, menu logo abaixo, sem filtro rápido
     print("")

@@ -41,7 +41,7 @@ ABAS = [("", "Dashboard", ".du-tela"),
         ("/gitec", "Gitec", ".fx-tiles"),
         ("/planta", "Planta", ".pl-tela"),
         ("/certificacao", "Certificação", ".ct-painel"),
-        ("/atualizacao", "Última atualização", ".ua-item")]
+        ("/atualizacao", "Última atualização", ".ua-mov")]
 
 # O script roda no navegador: sobe a cor de fundo até achar quem de fato pinta,
 # compõe as camadas semitransparentes e devolve o contraste de cada elemento.

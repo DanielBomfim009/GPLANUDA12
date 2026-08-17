@@ -1802,34 +1802,65 @@ def inject_css():
 
         /* ---------------------------------------------------- aba Planta */
 
-        /* ---- Última atualização ---- */
-        .ua-lista { display:flex; flex-direction:column; }
-        .ua-item { display:flex; gap:14px; align-items:flex-start; padding:13px 4px;
-          border-bottom:1px solid var(--border-color); }
-        .ua-item:last-child { border-bottom:0; }
-        .ua-seta { width:26px; height:26px; border-radius:8px; flex:none; display:grid;
-          place-items:center; font-size:13px; font-weight:800; margin-top:1px; }
-        .ua-seta.ok { background:rgba(var(--rgb-teal),0.16); color:var(--txt-teal); }
-        .ua-seta.warn { background:rgba(var(--rgb-ambar),0.16); color:var(--txt-ambar); }
-        .ua-seta.crit { background:rgba(var(--rgb-vermelho),0.16); color:var(--txt-vermelho); }
-        .ua-seta.azul { background:rgba(var(--rgb-azul),0.16); color:var(--txt-azul); }
-        .ua-cp { flex:1; min-width:0; }
-        .ua-l1 { font-size:13px; line-height:1.45; color:var(--text-2); }
-        .ua-l1 b { color:var(--text-1); font-weight:700;
-          font-family:ui-monospace,Consolas,monospace; font-size:12.5px; }
-        .ua-l1 .ua-para { font-weight:700; }
-        .ua-l1 .ua-para.ok { color:var(--txt-teal); }
-        .ua-l1 .ua-para.warn { color:var(--txt-ambar); }
-        .ua-l1 .ua-para.crit { color:var(--txt-vermelho); }
-        .ua-l1 .ua-para.azul { color:var(--txt-azul); }
-        .ua-l2 { font-size:11px; color:var(--text-3); margin-top:3px; }
-        .ua-quando { font-size:11.5px; color:var(--text-3); flex:none; white-space:nowrap;
+        /* ---- Última atualização ----
+           Um diário de obra, não um quadro de cartões: o dia manda na coluna da
+           esquerda e cada linha começa pela TAG, que é o objeto deste controle.
+           À direita, o estado de hoje nas três frentes -- documento, cabo,
+           montagem -- para que ver o movimento e ver onde ele parou sejam o
+           mesmo olhar. */
+        .ua-log { display:flex; flex-direction:column; }
+        .ua-dia { display:grid; grid-template-columns:74px 1fr; gap:16px;
+          padding:14px 0; border-top:1px solid var(--border-color); }
+        .ua-dia:first-child { border-top:0; padding-top:2px; }
+        .ua-sel { position:sticky; top:0; align-self:start; text-align:right;
           padding-top:3px; }
-        .ua-dia { font-size:10.5px; letter-spacing:.7px; text-transform:uppercase;
-          font-weight:800; color:var(--text-3); padding:16px 4px 6px;
-          border-bottom:1px solid var(--border-color); }
-        .ua-dia:first-child { padding-top:2px; }
-        .ua-rolo { max-height:640px; overflow-y:auto; }
+        .ua-num { font-size:23px; font-weight:800; line-height:1; color:var(--text-1);
+          font-variant-numeric:tabular-nums; }
+        .ua-mes { font-size:9.5px; letter-spacing:1.2px; text-transform:uppercase;
+          font-weight:800; color:var(--text-3); margin-top:5px; }
+        .ua-qtd { font-size:10px; color:var(--text-3); margin-top:7px; }
+        .ua-movs { display:flex; flex-direction:column; gap:8px; min-width:0; }
+        .ua-mov { display:grid; grid-template-columns:1fr auto; gap:16px;
+          align-items:start; padding:11px 14px; border-radius:11px;
+          background:var(--dark-card-2); border:1px solid var(--border-color);
+          border-left:3px solid var(--border-strong); }
+        .ua-mov.ok { border-left-color:var(--accent-teal); }
+        .ua-mov.warn { border-left-color:var(--accent-amber); }
+        .ua-mov.crit { border-left-color:var(--accent-red); }
+        .ua-mov.azul { border-left-color:var(--accent-blue); }
+        .ua-cp { min-width:0; }
+        .ua-tag { font-family:ui-monospace,Consolas,monospace; font-size:13px;
+          font-weight:700; color:var(--text-1); text-decoration:none !important; }
+        /* O Streamlit pinta <a> com a cor primária e ganha da regra de classe:
+           no tema claro isso dava azul sobre branco a 2,63:1. */
+        a.ua-tag, a.ua-tag:visited { color:var(--text-1) !important; }
+        a.ua-tag:hover { color:var(--txt-azul) !important; }
+        .ua-frente { font-size:9px; letter-spacing:.7px; text-transform:uppercase;
+          font-weight:800; padding:2px 7px; border-radius:5px; margin-left:9px;
+          vertical-align:1.5px; }
+        .ua-frente.doc { color:var(--txt-azul); background:rgba(var(--rgb-azul),0.15); }
+        .ua-frente.cabo { color:var(--txt-teal); background:rgba(var(--rgb-teal),0.15); }
+        .ua-frente.mont { color:var(--txt-roxo); background:rgba(var(--rgb-roxo),0.15); }
+        .ua-fato { font-size:12.5px; color:var(--text-2); margin-top:5px; line-height:1.5; }
+        .ua-fato b { color:var(--text-1); font-weight:650;
+          font-family:ui-monospace,Consolas,monospace; font-size:12px; }
+        .ua-parecer { font-weight:700; }
+        .ua-parecer.ok { color:var(--txt-teal); }
+        .ua-parecer.warn { color:var(--txt-ambar); }
+        .ua-parecer.crit { color:var(--txt-vermelho); }
+        .ua-parecer.azul { color:var(--txt-azul); }
+        .ua-onde { font-size:10.5px; color:var(--text-3); margin-top:4px; }
+        .ua-dir { text-align:right; }
+        .ua-quando { font-size:11px; color:var(--text-3); white-space:nowrap; }
+        .ua-est { display:flex; gap:3px; justify-content:flex-end; margin-top:8px;
+          cursor:help; }
+        .ua-est i { width:20px; height:5px; border-radius:3px;
+          background:var(--border-strong); }
+        .ua-est i.ok { background:var(--accent-teal); }
+        .ua-est i.meio { background:var(--accent-amber); }
+        .ua-est i.nao { background:var(--accent-red); }
+        .ua-rolo { max-height:640px; overflow-y:auto; padding-right:10px; }
+        .ua-vazio { color:var(--text-3); font-size:12.5px; padding:20px 4px; }
         /* ---- Certificação ---- */
         .ct-leg { display:flex; gap:16px; flex-wrap:wrap; font-size:11px;
           color:var(--text-3); padding:10px 14px; background:var(--dark-card-2);
@@ -5261,8 +5292,17 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
 # cabo, medição do Gitec: cada um traz a data em que aconteceu, e é isso que
 # permite dizer "há dois dias" sem inventar histórico.
 
-UA_TOM = {"SEM COMENTÁRIOS": "ok", "PARA CONSTRUÇÃO": "ok", "COM COMENTÁRIOS": "warn",
-          "EM ANÁLISE": "azul", "RECUSADO": "crit", "CANCELADO": "crit"}
+UA_TOM = {"SEM COMENTÁRIOS": "ok", "PARA CONSTRUÇÃO": "ok", "CERTIFICADO": "ok",
+          "COM COMENTÁRIOS": "warn", "PENDENTE CERTIFICAÇÃO": "warn",
+          "EM ANÁLISE": "azul", "EMITIDO PARA COMENTÁRIOS": "azul", "PARA COMPRA": "azul",
+          "RECUSADO": "crit", "CANCELADO": "crit"}
+
+UA_MESES = ["jan", "fev", "mar", "abr", "mai", "jun",
+            "jul", "ago", "set", "out", "nov", "dez"]
+
+# Quando a TAG mexeu mais de uma vez no mesmo dia, a etiqueta conta em vez de
+# repetir a linha.
+UA_PLURAL = {"doc": "documentos", "cabo": "lançamentos", "mont": "etapas"}
 
 
 def ua_quando(quando: pd.Timestamp, agora: pd.Timestamp) -> str:
@@ -5271,154 +5311,310 @@ def ua_quando(quando: pd.Timestamp, agora: pd.Timestamp) -> str:
     if seg < 0:
         return "agora"
     if seg < 3600:
-        return f"{max(1, int(seg // 60))} min atrás"
+        return f"há {max(1, int(seg // 60))} min"
     if seg < 86400:
-        return f"{int(seg // 3600)} h atrás"
+        return f"há {int(seg // 3600)} h"
     dias = int(seg // 86400)
     if dias == 1:
         return "ontem"
     if dias < 30:
-        return f"{dias}d atrás"
+        return f"há {dias} dias"
     if dias < 365:
         meses = dias // 30
-        return f"{meses} {'meses' if meses > 1 else 'mês'} atrás"
-    return f"{dias // 365} ano{'s' if dias // 365 > 1 else ''} atrás"
+        return f"há {meses} {'meses' if meses > 1 else 'mês'}"
+    anos = dias // 365
+    return f"há {anos} {'anos' if anos > 1 else 'ano'}"
+
+
+def ua_doc_curto(documento: str, tag: str) -> str:
+    """O nome do relatório sem o cabeçalho do contrato.
+
+    Os 25.931 documentos esperados vêm todos como
+    C1N_RNEST_U12_<item>_INS_<TIPO>_<alvo>. O que muda de linha para linha é o
+    tipo e o alvo, e é só isso que a linha precisa dizer -- e quando o alvo é a
+    própria TAG do cartão, nem isso. O nome inteiro fica no title, para quem
+    precisar procurar no SIGEM.
+    """
+    tipo, _, alvo = documento.split("_INS_")[-1].partition("_")
+    return tipo if not alvo or alvo == tag else f"{tipo} · {alvo}"
+
+
+def ua_pares(depara: pd.DataFrame) -> dict:
+    """Ponta de cabo -> TAG, do de-para que o pipeline já resolveu."""
+    if depara is None or depara.empty or "PONTA" not in depara:
+        return {}
+    return dict(zip(cert_txt(depara["PONTA"]), cert_txt(depara["TAG"])))
+
+
+def ua_tag_do_circuito(lanc: pd.DataFrame, pares: dict, conhecidas: set) -> pd.Series:
+    """O nome pelo qual o circuito aparece: a TAG do controle quando a ponta
+    resolve, e a própria ponta de campo quando não resolve.
+
+    ORIGEM é a ponta de campo -- o instrumento, ou a caixa, que também é TAG
+    deste controle -- e resolve 2.847 dos 4.375 circuitos; o destino recupera
+    mais 148. O que sobra é tronco entre painéis, e é quase todo o cabo já
+    lançado: dos 689 circuitos com data, só 18 têm ponta em instrumento. Cortar
+    esses apagaria o campo inteiro da página, e eles são obra desta planilha do
+    mesmo jeito -- entram pelo nome da própria ponta.
+    """
+    org = cert_txt(lanc["ORIGEM"]).map(lambda p: pares.get(p, p))
+    dst = cert_txt(lanc["DESTINO"]).map(lambda p: pares.get(p, p))
+    return org.where(org.isin(conhecidas) | ~dst.isin(conhecidas), dst)
 
 
 @st.cache_data(show_spinner=False, max_entries=3)
-def ua_eventos(sigem: pd.DataFrame, gitec: pd.DataFrame, lanc: pd.DataFrame,
-               esperados: pd.DataFrame, cache_key: str, limite: int = 400) -> list:
-    """Os eventos datados das três bases, do mais novo para o mais velho.
+def ua_estado(cache_key: str, _resumo: pd.DataFrame, _tags: pd.DataFrame,
+              _lanc: pd.DataFrame, _depara: pd.DataFrame) -> dict:
+    """Onde cada TAG está hoje nas três frentes que a levam à certificação.
 
-    O SIGEM domina em volume -- 21.545 documentos com data de parecer -- e por
-    isso entra pelo parecer, não pela emissão: emissão é quando o documento
-    nasceu, parecer é quando a fiscalização mexeu nele, que é o que muda.
+    O movimento sozinho não diz se a TAG está perto de fechar. As três barras ao
+    lado da linha dizem, sem tirar ninguém da tela.
+    """
+    doc, mont, cabo = {}, {}, {}
+    if not _resumo.empty and "AVANCO_DOCUMENTAL" in _resumo:
+        doc = dict(zip(cert_txt(_resumo["TAG"]),
+                       pd.to_numeric(_resumo["AVANCO_DOCUMENTAL"],
+                                     errors="coerce").fillna(0.0)))
+    if not _tags.empty and "STATUS_MONTAGEM" in _tags:
+        mont = dict(zip(cert_txt(_tags["TAG"]), cert_txt(_tags["STATUS_MONTAGEM"])))
+    if not _lanc.empty and "METROS" in _lanc:
+        d = _lanc.assign(_tag=ua_tag_do_circuito(_lanc, ua_pares(_depara), set(mont)))
+        col_real = "METROS_REAL" if "METROS_REAL" in d else "METROS"
+        for tag, g in d.groupby("_tag"):
+            total = sum(cert_num(v) for v in g["METROS"])
+            feito = sum(cert_num(v) for v in g[col_real])
+            cabo[tag] = (feito / total) if total > 0 else 0.0
+    return {"doc": doc, "cabo": cabo, "mont": mont}
+
+
+UA_MONT_TOM = {"MONTADO": "ok", "EM PROGRAMAÇÃO": "meio",
+               "NÃO MONTADO": "nao", "NÃO PROGRAMADO": "nao"}
+
+
+def ua_barras(tag: str, estado: dict) -> str:
+    """As três frentes da TAG em três traços, com a leitura por extenso no hover."""
+    def faixa(v):
+        return "ok" if v >= 0.999 else ("meio" if v > 0 else "nao")
+
+    d = estado["doc"].get(tag)
+    c = estado["cabo"].get(tag)
+    m = estado["mont"].get(tag, "")
+    legenda = [f"Documento {round((d or 0) * 100)}%" if d is not None else "Documento —",
+               f"Cabo {round((c or 0) * 100)}%" if c is not None else "Cabo sem circuito",
+               f"Montagem {m.lower() or '—'}"]
+    return (f'<div class="ua-est" title="{esc(" · ".join(legenda))}">'
+            f'<i class="{faixa(d) if d is not None else ""}"></i>'
+            f'<i class="{faixa(c) if c is not None else ""}"></i>'
+            f'<i class="{UA_MONT_TOM.get(m.upper(), "")}"></i></div>')
+
+
+@st.cache_data(show_spinner=False, max_entries=3)
+def ua_eventos(cache_key: str, _sigem: pd.DataFrame, _gitec: pd.DataFrame,
+               _lanc: pd.DataFrame, _esperados: pd.DataFrame, _depara: pd.DataFrame,
+               _tags: pd.DataFrame, por_frente: int = 500) -> list:
+    """As movimentações deste projeto, da mais nova para a mais velha.
+
+    O corte é no SIGEM, que é a base de todo mundo: guarda 21.545 documentos
+    com parecer e apenas 4.312 são deste controle -- sem o recorte, obra alheia
+    ocupava 383 das 400 linhas mais recentes, e a página falava de tudo menos
+    desta obra. Cabo e Gitec são bases desta planilha e entram inteiros.
     """
     eventos = []
-    dono = {}
-    if not esperados.empty and "DOCUMENTO_ESPERADO" in esperados:
-        dono = dict(zip(esperados["DOCUMENTO_ESPERADO"].astype(str),
-                        esperados["TAG"].astype(str)))
+    conhecidas = set(cert_txt(_tags["TAG"])) if not _tags.empty else set()
+    contexto = {}
+    if not _tags.empty:
+        vazia = pd.Series("", index=_tags.index)
+        malha = cert_txt(_tags["MALHA"]) if "MALHA" in _tags else vazia
+        fase = cert_txt(_tags["FASE"]) if "FASE" in _tags else vazia
+        contexto = {t: (m, f) for t, m, f in zip(cert_txt(_tags["TAG"]), malha, fase)}
 
-    if not sigem.empty and "DATA_PARECER" in sigem:
-        d = sigem.copy()
+    def onde(tag):
+        m, f = contexto.get(tag, ("", ""))
+        return esc(" · ".join(p for p in (f"Malha {m}" if m and m != "-" else "",
+                                          f"Fase {f}" if f and f != "-" else "") if p))
+
+    if not _sigem.empty and "DATA_PARECER" in _sigem:
+        dono = {}
+        if not _esperados.empty and "DOCUMENTO_ESPERADO" in _esperados:
+            dono = dict(zip(cert_txt(_esperados["DOCUMENTO_ESPERADO"]),
+                            cert_txt(_esperados["TAG"])))
+        d = _sigem.copy()
+        d["_tag"] = cert_txt(d["DOCUMENTO"]).map(dono)
+        d = d[d["_tag"].notna()]
         d["_q"] = pd.to_datetime(d["DATA_PARECER"], errors="coerce", dayfirst=True)
-        d = d[d["_q"].notna()].sort_values("_q", ascending=False).head(limite)
+        d = d[d["_q"].notna()].sort_values("_q", ascending=False).head(por_frente)
         for _, r in d.iterrows():
-            st_txt = str(r.get("STATUS", "")).strip()
-            doc = str(r.get("DOCUMENTO", "")).strip()
+            parecer = str(r.get("STATUS", "") or "").strip()
+            rev = str(r.get("REVISAO", "") or "").strip()
+            tom = UA_TOM.get(parecer.upper(), "azul")
+            doc = str(r["DOCUMENTO"]).strip()
             eventos.append({
-                "quando": r["_q"], "tom": UA_TOM.get(st_txt.upper(), "azul"),
-                "o_que": doc, "de": f"revisão {str(r.get('REVISAO', '')).strip()}".strip(),
-                "para": st_txt or "sem parecer",
-                "onde": "Relatório" + (f" · {dono[doc]}" if doc in dono else ""),
-            })
+                "quando": r["_q"], "tom": tom,
+                "tag": r["_tag"], "frente": "doc", "rot": "documento",
+                "fato": (f'<b title="{esc(doc)}">{esc(ua_doc_curto(doc, r["_tag"]))}</b>'
+                         + (f" · revisão {esc(rev)}" if rev and rev.lower() != "nan" else "")
+                         + f' — <span class="ua-parecer {tom}">'
+                           f'{esc(parecer or "sem parecer")}</span>'),
+                "onde": onde(r["_tag"])})
 
-    if not lanc.empty:
-        d = lanc.copy()
-        for coluna, rot in (("TESTE", "teste concluído"),
+    if not _lanc.empty:
+        d = _lanc.assign(_tag=ua_tag_do_circuito(_lanc, ua_pares(_depara), conhecidas))
+        for coluna, rot in (("TESTE", "teste do circuito concluído"),
                             ("PONTA2", "2ª ponta conectada"),
                             ("PONTA1", "1ª ponta conectada")):
             if coluna not in d:
                 continue
-            m = d.copy()
-            m["_q"] = pd.to_datetime(m[coluna], errors="coerce", dayfirst=True)
-            m = m[m["_q"].notna()].sort_values("_q", ascending=False).head(limite)
+            m = d.assign(_q=pd.to_datetime(d[coluna], errors="coerce", dayfirst=True))
+            m = m[m["_q"].notna()].sort_values("_q", ascending=False).head(por_frente)
             for _, r in m.iterrows():
                 eventos.append({
-                    "quando": r["_q"], "tom": "ok",
-                    "o_que": str(r["CIRCUITO"]).strip(),
-                    "de": str(r["DISCIPLINA"]).strip().title(), "para": rot,
-                    "onde": f"Cabo · {str(r['ORIGEM']).strip()} → {str(r['DESTINO']).strip()}",
-                })
+                    "quando": r["_q"], "tom": "ok", "tag": r["_tag"],
+                    "frente": "cabo", "rot": "cabo",
+                    "fato": (f"<b>{esc(str(r['CIRCUITO']).strip())}</b> — "
+                             f'<span class="ua-parecer ok">{rot}</span>'),
+                    "onde": (f"{esc(str(r['ORIGEM']).strip())} &rarr; "
+                             f"{esc(str(r['DESTINO']).strip())} · "
+                             f"{esc(str(r['DISCIPLINA']).strip().title())}")})
 
-    if not gitec.empty and "DATA_EXECUCAO" in gitec:
-        d = gitec.copy()
+    if not _gitec.empty and "DATA_EXECUCAO" in _gitec:
+        d = _gitec.copy()
         d["_q"] = pd.to_datetime(d["DATA_EXECUCAO"], errors="coerce", dayfirst=True)
-        d = d[d["_q"].notna()].sort_values("_q", ascending=False).head(limite)
+        d = d[d["_q"].notna()].sort_values("_q", ascending=False).head(por_frente)
         for _, r in d.iterrows():
+            tag = str(r["TAG"]).strip()
+            etapa = str(r.get("ETAPA", "") or "").strip() or "etapa medida"
             eventos.append({
-                "quando": r["_q"], "tom": "ok", "o_que": str(r["TAG"]).strip(),
-                "de": str(r.get("ETAPA", "")).strip() or "medição",
-                "para": str(r.get("STATUS", "")).strip() or "medido",
-                "onde": f"Gitec · {str(r.get('FASE', '')).strip()}",
-            })
+                "quando": r["_q"], "tom": "ok", "tag": tag,
+                "frente": "mont", "rot": "montagem",
+                "fato": (f"<b>{esc(etapa)}</b> — "
+                         f'<span class="ua-parecer ok">'
+                         f"{esc(str(r.get('STATUS', '') or '').strip() or 'medida')}"
+                         "</span> no Gitec"),
+                "onde": onde(tag) or esc(str(r.get("FASE", "") or "").strip())})
 
-    # sem corte global aqui: o parecer do SIGEM e de agosto e o campo para em
-    # junho, entao um corte unico apagaria o campo inteiro. Quem corta e o
-    # recorte escolhido na tela.
+    # Sem corte global: o parecer do SIGEM é de agosto e o campo parou em junho,
+    # então um corte único apagaria o campo inteiro. Quem corta é a frente
+    # escolhida na tela.
     eventos.sort(key=lambda e: e["quando"], reverse=True)
     return eventos
 
 
 def render_atualizacao(sigem: pd.DataFrame, gitec: pd.DataFrame, lanc: pd.DataFrame,
-                       esperados: pd.DataFrame, cache_key: str):
-    """O que mudou, do mais recente para o mais antigo.
+                       esperados: pd.DataFrame, depara: pd.DataFrame, tags: pd.DataFrame,
+                       resumo: pd.DataFrame, cache_key: str):
+    """O que andou nas TAGs deste controle, do mais recente para o mais antigo.
 
-    A aba responde uma pergunta que nenhuma outra respondia: o que andou desde
-    a última vez que olhei. As demais mostram o retrato de agora; esta mostra o
-    movimento.
+    As outras abas mostram o retrato de agora. Esta mostra o movimento -- e é a
+    única em que a data manda na ordem, não a hierarquia.
     """
     render_header("Última atualização")
-    eventos = ua_eventos(sigem, gitec, lanc, esperados, cache_key)
+    eventos = ua_eventos(cache_key, sigem, gitec, lanc, esperados, depara, tags)
     if not eventos:
         render_html('<div class="gplan-panel"><div class="gtbl-empty">'
-                    "Nenhuma data de movimentação nas bases desta planilha."
+                    "Nenhuma movimentação datada nas TAGs desta planilha."
                     "</div></div>")
         return
 
     agora = pd.Timestamp.now(tz=BR_TZ).tz_localize(None)
-    fontes = collections.Counter(e["onde"].split(" · ")[0] for e in eventos)
-    # O parecer do SIGEM é de agosto e o campo para em junho: numa lista só, o
-    # documento empurra o cabo para fora da tela. O recorte é o que devolve
-    # cada fonte à vista.
-    RECORTES = {"Tudo": None, "Relatórios": "Relatório", "Cabo": "Cabo", "Gitec": "Gitec"}
-    escolha = st.segmented_control(
-        "Origem da movimentação", list(RECORTES),
-        format_func=lambda x: (f"{x} · {br_num(len(eventos))}" if x == "Tudo"
-                               else f"{x} · {br_num(fontes.get(RECORTES[x], 0))}"),
-        default="Tudo", key="ua_fonte") or "Tudo"
-    if RECORTES[escolha]:
-        eventos = [e for e in eventos if e["onde"].split(" · ")[0] == RECORTES[escolha]]
-    eventos = eventos[:250]
-    if not eventos:
-        render_html('<div class="gplan-panel"><div class="gtbl-empty">'
-                    f"Nenhuma movimentação de {escolha.lower()} nesta planilha."
-                    "</div></div>")
-        return
+    conta = collections.Counter(e["frente"] for e in eventos)
+    # Só conta contra as 5.098 quem é TAG do controle: o tronco entre painéis
+    # aparece na lista, mas não é instrumento e inflaria o cartão.
+    mexidas = len({e["tag"] for e in eventos} & set(cert_txt(tags["TAG"])))
     render_html(f"""
       <div class="pl-kpis">
-        <div class="pl-kpi"><div class="r">Movimentações</div>
-          <div class="v">{br_num(len(eventos))}</div>
-          <div class="s">{escolha.lower()} · as mais recentes</div></div>
-        <div class="pl-kpi"><div class="r">Mais recente</div>
-          <div class="v andando" style="font-size:20px">{ua_quando(eventos[0]['quando'], agora)}</div>
-          <div class="s">{eventos[0]['quando']:%d/%m/%Y}</div></div>
-        <div class="pl-kpi"><div class="r">Relatórios</div>
-          <div class="v">{br_num(fontes.get('Relatório', 0))}</div>
+        <div class="pl-kpi"><div class="r">TAGs com movimento</div>
+          <div class="v">{br_num(mexidas)}</div>
+          <div class="s">de {br_num(len(resumo))} no controle</div></div>
+        <div class="pl-kpi"><div class="r">Movimento mais recente</div>
+          <div class="v andando" style="font-size:20px">
+            {ua_quando(eventos[0]['quando'], agora)}</div>
+          <div class="s">{eventos[0]['quando']:%d/%m/%Y} · {esc(eventos[0]['tag'])}</div></div>
+        <div class="pl-kpi"><div class="r">Documento</div>
+          <div class="v">{br_num(conta.get('doc', 0))}</div>
           <div class="s">parecer da fiscalização</div></div>
         <div class="pl-kpi"><div class="r">Campo</div>
-          <div class="v">{br_num(fontes.get('Cabo', 0) + fontes.get('Gitec', 0))}</div>
-          <div class="s">cabo e medição</div></div>
+          <div class="v">{br_num(conta.get('cabo', 0) + conta.get('mont', 0))}</div>
+          <div class="s">cabo e montagem</div></div>
       </div>""")
 
-    linhas, dia_atual = [], None
-    for e in eventos:
+    # O parecer é de agosto e o campo parou em junho: numa lista só, o documento
+    # empurra o cabo para fora da tela. A frente é o que devolve cada uma à vista.
+    FRENTES = {"Tudo": None, "Documento": "doc", "Cabo": "cabo", "Montagem": "mont"}
+    escolha = st.segmented_control(
+        "Frente", list(FRENTES),
+        format_func=lambda x: (f"{x} · {br_num(len(eventos))}" if x == "Tudo"
+                               else f"{x} · {br_num(conta.get(FRENTES[x], 0))}"),
+        default="Tudo", key="ua_frente") or "Tudo"
+    mostra = ([e for e in eventos if e["frente"] == FRENTES[escolha]]
+              if FRENTES[escolha] else eventos)[:200]
+
+    estado = ua_estado(cache_key, resumo, tags, lanc, depara)
+    com_ficha = set(cert_txt(resumo["TAG"]))
+    # Uma linha por TAG no dia, não por documento: a fiscalização dá parecer em
+    # três relatórios da mesma TAG de uma vez, e em linhas soltas isso vira a
+    # mesma TAG repetida três vezes, empurrando as outras para fora da tela.
+    dias = []
+    for e in mostra:
         dia = e["quando"].date()
-        if dia != dia_atual:
-            dia_atual = dia
-            linhas.append(f'<div class="ua-dia">{e["quando"]:%d/%m/%Y}</div>')
-        linhas.append(
-            f'<div class="ua-item"><span class="ua-seta {e["tom"]}">&rarr;</span>'
-            f'<span class="ua-cp"><div class="ua-l1"><b>{esc(e["o_que"])}</b> · '
-            f'{esc(e["de"])} &rarr; <span class="ua-para {e["tom"]}">{esc(e["para"])}</span></div>'
-            f'<div class="ua-l2">{esc(e["onde"])}</div></span>'
-            f'<span class="ua-quando">{ua_quando(e["quando"], agora)}</span></div>')
+        if not dias or dias[-1][0] != dia:
+            dias.append((dia, {}))
+        dias[-1][1].setdefault((e["tag"], e["frente"]), []).append(e)
+
+    blocos = []
+    for dia, grupos in dias:
+        cartoes, quantos = [], 0
+        for (nome, frente), evs in grupos.items():
+            quantos += len(evs)
+            tom = next((t for t in ("crit", "warn", "azul", "ok")
+                        if any(e["tom"] == t for e in evs)), "ok")
+            rot = (evs[0]["rot"] if len(evs) == 1 else
+                   f"{len(evs)} {UA_PLURAL[frente]}")
+            tag = (f'<a class="ua-tag" href="#{ficha_anchor(nome)}">{esc(nome)}</a>'
+                   if nome in com_ficha else f'<span class="ua-tag">{esc(nome)}</span>')
+            fatos = "".join(f'<div class="ua-fato">{e["fato"]}</div>' for e in evs[:4])
+            if len(evs) > 4:
+                fatos += f'<div class="ua-fato">e mais {br_num(len(evs) - 4)}</div>'
+            # O rodapé só vale para o grupo inteiro: 20 circuitos do mesmo painel
+            # vão para 20 destinos, e repetir o do primeiro seria dizer errado.
+            onde = {e["onde"] for e in evs}
+            cartoes.append(
+                f'<div class="ua-mov {tom}"><div class="ua-cp">'
+                f'<div>{tag}<span class="ua-frente {frente}">{rot}</span></div>'
+                f'{fatos}'
+                + (f'<div class="ua-onde">{evs[0]["onde"]}</div>'
+                   if len(onde) == 1 and evs[0]["onde"] else "")
+                + f'</div><div class="ua-dir">'
+                f'<div class="ua-quando">{ua_quando(evs[0]["quando"], agora)}</div>'
+                f'{ua_barras(nome, estado)}</div></div>')
+        blocos.append(
+            f'<div class="ua-dia"><div class="ua-sel">'
+            f'<div class="ua-num">{dia.day:02d}</div>'
+            f'<div class="ua-mes">{UA_MESES[dia.month - 1]} {dia.year % 100:02d}</div>'
+            f'<div class="ua-qtd">{br_num(quantos)} mov.</div></div>'
+            f'<div class="ua-movs">{"".join(cartoes)}</div></div>')
+
+    corpo = ("".join(blocos) if blocos else
+             f'<div class="ua-vazio">Nenhuma movimentação de {escolha.lower()}.</div>')
     render_html(f'<div class="gplan-panel ct-painel">'
-                f'<div class="gplan-panel-title">Movimentações'
+                f'<div class="gplan-panel-title">Movimentações das TAGs'
                 f'<span class="gtbl-muted" style="font-weight:500">'
-                f'quem mexeu, de onde para onde</span></div>'
-                f'<div class="ua-rolo ua-lista">{"".join(linhas)}</div></div>')
+                f'{br_num(len(mostra))} mais recentes · clique na TAG para abrir a ficha'
+                f'</span></div><div class="ua-rolo"><div class="ua-log">{corpo}</div></div>'
+                f'<div class="ua-onde" style="margin-top:12px">Os três traços são o '
+                f'estado de hoje da TAG: documento, cabo e montagem.</div></div>')
+
+    # As fichas das TAGs da lista ficam na página, fechadas: o clique abre só a
+    # que ele pedir, sem ida ao servidor. As de nível vêm junto para que Fase,
+    # SOP, SSOP e Malha abram aqui, e não joguem a pessoa na aba Progresso.
+    ids = [t for t in dict.fromkeys(e["tag"] for e in mostra) if t in com_ficha]
+    if ids:
+        base = progresso_base(resumo, tags)
+        render_html(fichas_niveis_html(cache_key, "ua", "", "", 0,
+                                       base[base["TAG"].isin(ids)])
+                    + fichas_modais_html(ids, resumo, esperados, tags,
+                                         espera_por_documento(
+                                             _revisoes_por_doc(cache_key, sigem)),
+                                         niveis_na_pagina=True))
 
 
 def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFrame,
@@ -6510,7 +6706,7 @@ def main():
     gitec_page = st.Page(lambda: _sob_carga("Carregando a medição de campo", lambda: render_gitec(gitec_f, resumo, tags, esperados, sigem, cache_key)), title="Gitec", icon=":material/engineering:", url_path="gitec")
     planta_page = st.Page(lambda: _sob_carga("Desenhando o avanço na planta", lambda: render_planta(tags, resumo, locacao, aux_areas)), title="Planta", icon=":material/map:", url_path="planta")
     certificacao_page = st.Page(lambda: _sob_carga("Montando a cadeia de certificação", lambda: render_certificacao(tags, lancamento, depara, resumo, esperados, sigem, cache_key)), title="Certificação", icon=":material/fact_check:", url_path="certificacao")
-    atualizacao_page = st.Page(lambda: _sob_carga("Lendo as movimentações", lambda: render_atualizacao(sigem, gitec, lancamento, esperados, cache_key)), title="Última atualização", icon=":material/history:", url_path="atualizacao")
+    atualizacao_page = st.Page(lambda: _sob_carga("Lendo as movimentações", lambda: render_atualizacao(sigem, gitec, lancamento, esperados, depara, tags, resumo, cache_key)), title="Última atualização", icon=":material/history:", url_path="atualizacao")
 
     nav = st.navigation([dashboard_page, progresso_page, relatorios_page, pesquisa_page,
                          sigem_page, gitec_page, planta_page, certificacao_page,
