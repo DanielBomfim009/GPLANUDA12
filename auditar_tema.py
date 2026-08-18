@@ -312,14 +312,61 @@ def main() -> int:
             problemas.append(f"{sobrando} botões de tema na tela")
 
         # ---- a preferência sobrevive a fechar e reabrir --------------------
-        pg.goto(pg.url, wait_until="domcontentloaded", timeout=ESPERA)
-        pg.wait_for_selector(".du-tela", timeout=ESPERA)
+        # Recarregar a mesma URL nao provava nada: a query ainda estava la. O
+        # caso que quebrava era navegar antes -- o link da barra lateral troca o
+        # caminho e descarta o ?tema=, e so entao o refresh perdia a escolha.
+        pg.locator(".st-key-gplan_btn_tema button").first.click(force=True)
         pg.wait_for_timeout(2500)
-        persistiu = pg.evaluate(
-            "() => getComputedStyle(document.querySelector('.stApp')).backgroundColor") == depois
-        print(f"  [{'ok  ' if persistiu else 'FALHA'}] preferência sobrevive ao recarregar")
-        if not persistiu:
-            problemas.append("a preferência de tema não sobreviveu ao recarregar")
+        claro = pg.evaluate("() => getComputedStyle(document.querySelector('.stApp')).backgroundColor")
+        pg.locator("[data-testid='stSidebarNav'] a").nth(2).click()
+        pg.wait_for_timeout(4000)
+        pg.reload(wait_until="domcontentloaded")
+        pg.wait_for_timeout(4000)
+        depois_nav = pg.evaluate("() => getComputedStyle(document.querySelector('.stApp')).backgroundColor")
+        ok_nav = depois_nav == claro
+        print(f"  [{'ok  ' if ok_nav else 'FALHA'}] preferência sobrevive a navegar e recarregar")
+        if not ok_nav:
+            problemas.append(f"apos navegar e recarregar o fundo era {depois_nav}, nao {claro}")
+
+        # e a memoria entre visitas: URL limpa, sem query nenhuma, so o cookie
+        # decidindo. Vale na mesma aba -- cada carregamento abre sessao nova no
+        # Streamlit, entao a sessao anterior nao ajuda a passar. Pagina nova em
+        # contexto novo nao serve: contexto novo nao herda cookie, e reprovaria
+        # qualquer implementacao correta.
+        pg.goto(ALVO, wait_until="domcontentloaded", timeout=ESPERA)
+        pg.wait_for_selector(".du-tela", timeout=ESPERA)
+        pg.wait_for_timeout(3000)
+        ok_cookie = pg.evaluate(
+            "() => getComputedStyle(document.querySelector('.stApp')).backgroundColor") == claro
+        print(f"  [{'ok  ' if ok_cookie else 'FALHA'}] preferência volta com a URL limpa (cookie)")
+        if not ok_cookie:
+            problemas.append("a preferencia nao voltou com a URL limpa")
+
+        # ---- a lateral recolhe e o conteudo cresce -------------------------
+        pg.goto(ALVO, wait_until="domcontentloaded", timeout=ESPERA)
+        pg.wait_for_selector(".du-tela", timeout=ESPERA)
+        pg.wait_for_timeout(3000)
+        med = ("() => ({lateral: Math.round(document.querySelector"
+               "('section[data-testid=\"stSidebar\"]').getBoundingClientRect().width),"
+               " conteudo: Math.round(document.querySelector"
+               "('[data-testid=\"stMainBlockContainer\"]').getBoundingClientRect().width)})")
+        aberta = pg.evaluate(med)
+        pg.evaluate("() => document.querySelector"
+                    "('[data-testid=\"stSidebarCollapseButton\"] button').click()")
+        pg.wait_for_timeout(2500)
+        fechada = pg.evaluate(med)
+        pg.evaluate("() => { const e=document.querySelector"
+                    "('[data-testid=\"stExpandSidebarButton\"]');"
+                    " const b = e && (e.tagName==='BUTTON'? e : e.querySelector('button'));"
+                    " if (b) b.click(); }")
+        pg.wait_for_timeout(2500)
+        voltou = pg.evaluate(med)
+        ok_lat = (fechada["lateral"] == 0 and fechada["conteudo"] > aberta["conteudo"]
+                  and voltou["lateral"] == aberta["lateral"])
+        print(f"  [{'ok  ' if ok_lat else 'FALHA'}] lateral recolhe e o conteúdo cresce  "
+              f"{aberta['conteudo']} -> {fechada['conteudo']} -> {voltou['conteudo']}")
+        if not ok_lat:
+            problemas.append(f"lateral nao recolheu direito: {aberta} {fechada} {voltou}")
 
         print(f"  [{'ok  ' if not erros_js else 'FALHA'}] erros de JavaScript "
               f"{erros_js[:1] or 'nenhum'}")
