@@ -563,9 +563,36 @@ def tema_ativo() -> str:
     if escolhido not in TEMAS:
         escolhido = st.query_params.get("tema")
     if escolhido not in TEMAS:
+        # O cookie e a memoria entre visitas. Chega junto com o pedido da
+        # pagina, entao da para ler aqui, antes de qualquer CSS sair -- o
+        # localStorage so responderia depois, e a tela nasceria num tema e
+        # trocaria no meio do carregamento.
+        try:
+            escolhido = st.context.cookies.get("gplan_tema")
+        except Exception:
+            escolhido = None
+    if escolhido not in TEMAS:
         escolhido = TEMA_PADRAO
     st.session_state["gplan_tema"] = escolhido
+    # O link da barra lateral troca o caminho e descarta a query: bastava
+    # navegar e recarregar para a escolha virar padrao de novo. Repor devolve a
+    # preferencia a URL sem recarregar nada.
+    if st.query_params.get("tema") != escolhido:
+        st.query_params["tema"] = escolhido
     return escolhido
+
+
+def lembrar_tema(tema: str) -> None:
+    """Grava a escolha no navegador, para a proxima vez que a pessoa abrir.
+
+    Cookie, e nao localStorage, porque este valor precisa existir no servidor
+    na primeira execucao -- e o st.context.cookies quem o le. Um ano de prazo:
+    a preferencia de tema nao envelhece.
+    """
+    st.components.v1.html(
+        "<script>try{parent.document.cookie="
+        f"'gplan_tema={tema};path=/;max-age=31536000;samesite=lax'}}catch(e){{}}</script>",
+        height=0)
 
 
 def tokens_css(tema: str) -> str:
@@ -623,6 +650,7 @@ def trocar_tema():
     novo = "claro" if st.session_state.get("gplan_tema") == "escuro" else "escuro"
     st.session_state["gplan_tema"] = novo
     st.query_params["tema"] = novo
+    # o cookie e reescrito no proximo desenho, por lembrar_tema
 
 
 def seletor_tema():
@@ -666,7 +694,17 @@ def inject_css():
         section[data-testid="stSidebar"] {
           background: linear-gradient(180deg, var(--fundo-3) 0%, var(--dark-bg) 100%);
           border-right: 1px solid var(--border-color);
+        }
+        /* A largura so vale com a lateral aberta. Fixar sem essa condicao
+           vencia o recolhimento do Streamlit -- a setinha mudava o estado e a
+           barra continuava ocupando os 212 px, com o conteudo parado do lado.
+           Fechada, ela vai a zero e o conteudo toma o espaco sozinho, porque
+           esta no fluxo normal. */
+        section[data-testid="stSidebar"][aria-expanded="true"] {
           width: 212px !important; min-width: 212px !important;
+        }
+        section[data-testid="stSidebar"][aria-expanded="false"] {
+          width: 0 !important; min-width: 0 !important; border-right: 0;
         }
         /* O st.navigation sempre injeta o menu antes do conteudo do usuario,
            entao a marca caia embaixo. Reordena via flex para o topo. */
@@ -6802,6 +6840,7 @@ def main():
     )
     inject_css()
     seletor_tema()
+    lembrar_tema(tema_ativo())
 
     # O carimbo da planilha e a chave de cache sao coisas diferentes: a chave
     # leva a versao da regra colada no fim, e quem le a data precisa do valor
