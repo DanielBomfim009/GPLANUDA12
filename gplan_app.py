@@ -2276,11 +2276,11 @@ def fichas_modais_html(tags_ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
             continue
         blocos += f"""
             <div class="fmodal" id="{ficha_anchor(tag_id)}">
-              <a class="fmodal-bg" href="#" aria-label="Fechar"></a>
+              <a class="fmodal-bg" href="#fechado" aria-label="Fechar"></a>
               <div class="fmodal-box">
                 <div class="fmodal-head">
                   <div class="fmodal-title">{esc(tag_id)}</div>
-                  <a class="fmodal-x" href="#" aria-label="Fechar">&times;</a>
+                  <a class="fmodal-x" href="#fechado" aria-label="Fechar">&times;</a>
                 </div>
                 <div class="fmodal-body">{corpo}</div>
               </div>
@@ -2490,10 +2490,10 @@ def du_modal_recusados(esperados: pd.DataFrame, sigem: pd.DataFrame) -> str:
     zero de servidor das fichas.
     """
     return ('<div class="fmodal" id="du-recusados">'
-            '<a class="fmodal-bg" href="#" aria-label="Fechar"></a>'
+            '<a class="fmodal-bg" href="#fechado" aria-label="Fechar"></a>'
             '<div class="fmodal-box"><div class="fmodal-head">'
             '<div class="fmodal-title">Recusados há mais tempo</div>'
-            '<a class="fmodal-x" href="#" aria-label="Fechar">&times;</a></div>'
+            '<a class="fmodal-x" href="#fechado" aria-label="Fechar">&times;</a></div>'
             f'<div class="fmodal-body">{painel_recusados(esperados, sigem)}</div></div></div>')
 
 
@@ -5637,7 +5637,7 @@ def ua_cartao(tipo: str, campo: str, de: str, para: str, itens: list,
 
 
 def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFrame,
-                  aux: pd.DataFrame):
+                  aux: pd.DataFrame, esperados: pd.DataFrame):
     """O avanco de montagem por area, desenhado sobre o arranjo da unidade.
 
     A aba e so o visual e o resumo: serve para bater o olho e ver onde a
@@ -5731,6 +5731,13 @@ def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFram
     # As fichas ficam no fim da pagina, fechadas: o :target so abre a que a
     # zona clicada aponta. Sem todas geradas, o clique cairia no vazio.
     render_html_pesado(planta_fichas_html(mapa, areas, area_do_desenho, base))
+    # E as fichas das TAGs listadas dentro delas: sem estas na pagina, clicar
+    # num instrumento da planta nao teria para onde abrir e viraria ida para
+    # outra aba.
+    ids = [t for t in dict.fromkeys(base["TAG"].astype(str))
+           if t in set(resumo["TAG"].astype(str))]
+    if ids:
+        render_html_pesado(fichas_modais_html(ids, resumo, esperados, tags))
 
 
 def planta_ficha_html(desenho: str, area: dict, sub: pd.DataFrame,
@@ -5794,7 +5801,7 @@ def planta_ficha_html(desenho: str, area: dict, sub: pd.DataFrame,
         d = float(r["_docfrac"]) * 100
         linhas.append(
             "<tr>"
-            f'<td>{tag_pill(r["TAG"])}</td>'
+            f'<td>{tag_link(r["TAG"])}</td>'
             f'<td class="desc">{esc(r.get("DESCRICAO", ""))}</td>'
             f'<td>{"<span class=\'pl-sim\'>Montado</span>" if r["_montado"] else "<span class=\'pl-nao\'>—</span>"}</td>'
             f'<td class="num">{br_pct(d)}</td>'
@@ -5819,14 +5826,14 @@ def planta_ficha_html(desenho: str, area: dict, sub: pd.DataFrame,
 
     return (
         f'<div class="fmodal" id="{_ancora("PLANTA", desenho)}">'
-        '<a class="fmodal-bg" href="#" aria-label="Fechar"></a>'
+        '<a class="fmodal-bg" href="#fechado" aria-label="Fechar"></a>'
         '<div class="fmodal-box"><div class="fmodal-head">'
         '<div><div class="fn-tipo">Planta</div>'
         f'<div class="fmodal-title">{esc(desenho)}</div></div>'
         '<div class="fn-avanco">'
         f'<div class="fn-track"><div class="fn-fill {tom}" style="width:{max(pct, 1.5):.1f}%;"></div></div>'
         f'<div class="fn-pct">{br_pct(pct)}</div></div>'
-        '<a class="fmodal-x" href="#" aria-label="Fechar">&times;</a></div>'
+        '<a class="fmodal-x" href="#fechado" aria-label="Fechar">&times;</a></div>'
         f'<div class="fmodal-body"><div class="fx">{fx_trilha(trilha)}'
         f'<div class="fx-tiles">{tiles}</div>'
         '<div class="fx-corpo"><div class="fx-col">'
@@ -6339,14 +6346,14 @@ def _modal_nivel(tipo: str, nome: object, sub: pd.DataFrame, rotulo_tipo: str) -
 
     return (
         f'<div class="fmodal" id="{_ancora(tipo, valor_ancora)}">'
-        '<a class="fmodal-bg" href="#" aria-label="Fechar"></a>'
+        '<a class="fmodal-bg" href="#fechado" aria-label="Fechar"></a>'
         '<div class="fmodal-box"><div class="fmodal-head">'
         f'<div><div class="fn-tipo">{esc(rotulo_tipo)}</div>'
         f'<div class="fmodal-title">{esc(titulo)}</div></div>'
         '<div class="fn-avanco">'
         f'<div class="fn-track"><div class="fn-fill {tom}" style="width:{max(pct, 1.5):.1f}%;"></div></div>'
         f'<div class="fn-pct">{br_pct(pct)}</div></div>'
-        '<a class="fmodal-x" href="#" aria-label="Fechar">&times;</a></div>'
+        '<a class="fmodal-x" href="#fechado" aria-label="Fechar">&times;</a></div>'
         f'<div class="fmodal-body"><div class="fx">{fx_trilha(trilha)}'
         f'<div class="fx-tiles">{tiles}</div>'
         '<div class="fx-corpo"><div class="fx-col">'
@@ -6723,7 +6730,7 @@ def main():
     pesquisa_page = st.Page(lambda: _sob_carga("Carregando as tags", lambda: render_pesquisa_tag(resumo, esperados, tags, sigem, cache_key, lancamento, depara)), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
     sigem_page = st.Page(lambda: _sob_carga("Carregando a base SIGEM", lambda: render_sigem(sigem, esperados, any(escolhas.values()))), title="Base SIGEM", icon=":material/database:", url_path="sigem")
     gitec_page = st.Page(lambda: _sob_carga("Carregando a medição de campo", lambda: render_gitec(gitec_f, resumo, tags, esperados, sigem, cache_key)), title="Gitec", icon=":material/engineering:", url_path="gitec")
-    planta_page = st.Page(lambda: _sob_carga("Desenhando o avanço na planta", lambda: render_planta(tags, resumo, locacao, aux_areas)), title="Planta", icon=":material/map:", url_path="planta")
+    planta_page = st.Page(lambda: _sob_carga("Desenhando o avanço na planta", lambda: render_planta(tags, resumo, locacao, aux_areas, esperados)), title="Planta", icon=":material/map:", url_path="planta")
     certificacao_page = st.Page(lambda: _sob_carga("Montando a cadeia de certificação", lambda: render_certificacao(tags, lancamento, depara, resumo, esperados, sigem, cache_key)), title="Certificação", icon=":material/fact_check:", url_path="certificacao")
     atualizacao_page = st.Page(lambda: _sob_carga("Lendo as movimentações", lambda: render_atualizacao(movimentacoes, sigem, esperados, lancamento, tags, resumo, cache_key)), title="Última atualização", icon=":material/history:", url_path="atualizacao")
 
