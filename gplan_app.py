@@ -2291,7 +2291,8 @@ def tag_link(value: object) -> str:
 def fichas_modais_html(tags_ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
                        tags: pd.DataFrame, espera_por_doc: dict | None = None,
                        niveis_na_pagina: bool = False,
-                       volta_por_tag: dict | None = None) -> str:
+                       volta_por_tag: dict | None = None,
+                       com_relatorio: bool = True) -> str:
     """Modais das tags visiveis na pagina, abertos/fechados via CSS :target.
 
     volta_por_tag diz para onde o X de cada TAG leva. Na Planta a TAG e aberta
@@ -2315,7 +2316,8 @@ def fichas_modais_html(tags_ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
         corpo = tag_ficha_html(tag_id, g_resumo[tag_id], g_esp.get(tag_id, vazio_esp),
                                g_tags.get(tag_id, vazio_tags), com_cabecalho=False,
                                espera_por_doc=espera_por_doc,
-                               niveis_na_pagina=niveis_na_pagina)
+                               niveis_na_pagina=niveis_na_pagina,
+                               com_relatorio=com_relatorio)
         if corpo is None:
             continue
         volta = (volta_por_tag or {}).get(tag_id, "#fechado")
@@ -3109,7 +3111,8 @@ def fichas_relatorios_html(docs, esperados: pd.DataFrame, historico: dict) -> st
 def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
                    tags: pd.DataFrame, com_cabecalho: bool = True,
                    espera_por_doc: dict | None = None,
-                   niveis_na_pagina: bool = False) -> str | None:
+                   niveis_na_pagina: bool = False,
+                   com_relatorio: bool = True) -> str | None:
     """Ficha completa da tag, como um bloco HTML unico.
 
     Serve tanto a aba Pesquisa tag quanto o modal aberto pelo Dashboard, pelos
@@ -3207,7 +3210,7 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
             f'<tr><td class="gtbl-strong">{fx_svg("folha", "fx-folha")}{esc(rel)}</td>'
             f"<td>{esc(ref)}</td><td>{esc(doc)}</td><td>{status_badge(stat)}</td>"
             f"<td>{esc(format_missing(rev))}</td>"
-            f'<td class="gtbl-num">{botao_detalhes(doc, POSTADO(stat))}</td></tr>'
+            f'<td class="gtbl-num">{botao_detalhes(doc, com_relatorio and POSTADO(stat))}</td></tr>'
         )
     tabela = html_table(
         ["Relatório", "Referência", "Documento esperado", "Status SIGEM", "#Revisão",
@@ -5227,9 +5230,14 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         espera = espera_por_documento(_revisoes_por_doc(cache_key, sigem))
         base_niveis = progresso_base(resumo, tags)
         base_niveis = base_niveis[base_niveis["TAG"].isin(ids)]
+        # As tres familias juntas: sem a do relatorio, o "ver detalhe" dentro da
+        # ficha da TAG apontava para uma ancora inexistente e o :target fechava
+        # tudo -- parecia que o clique tinha fechado a ficha de proposito.
         render_html(fichas_niveis_html(cache_key, "cert", "", "", 0, base_niveis)
                     + fichas_modais_html(ids, resumo, esperados, tags, espera,
-                                         niveis_na_pagina=True))
+                                         niveis_na_pagina=True)
+                    + fichas_relatorios_pagina(cache_key, "cert", "", "", 0,
+                                               ids, esperados, sigem))
 
     def render_tabela(do_alvo=None, rotulo=""):
         """A tabela acompanha o desenho: as TAGs do alvo aberto, recortadas
@@ -5589,7 +5597,9 @@ def render_atualizacao(movs: pd.DataFrame, sigem: pd.DataFrame, esperados: pd.Da
                     + fichas_modais_html(ids, resumo, esperados, tags,
                                          espera_por_documento(
                                              _revisoes_por_doc(cache_key, sigem)),
-                                         niveis_na_pagina=True))
+                                         niveis_na_pagina=True)
+                    + fichas_relatorios_pagina(cache_key, "ua", "", "", 0,
+                                               ids, esperados, sigem))
 
 
 def _ua_chave(rotulo: str) -> str:
@@ -5684,7 +5694,8 @@ def ua_cartao(tipo: str, campo: str, de: str, para: str, itens: list,
 
 
 def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFrame,
-                  aux: pd.DataFrame, esperados: pd.DataFrame):
+                  aux: pd.DataFrame, esperados: pd.DataFrame, sigem: pd.DataFrame,
+                  cache_key: str):
     """O avanco de montagem por area, desenhado sobre o arranjo da unidade.
 
     A aba e so o visual e o resumo: serve para bater o olho e ver onde a
@@ -5793,8 +5804,22 @@ def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFram
             zonas = zonas_area.get(area_tag)
             if zonas:
                 volta[tag] = f'#{_ancora("PLANTA", zonas[0])}'
-        render_html_pesado(fichas_modais_html(ids, resumo, esperados, tags,
-                                              volta_por_tag=volta))
+        # As tres familias, como na Progresso: a de nivel para os degraus da
+        # trilha abrirem aqui, e a do relatorio para o "ver detalhe" ter para
+        # onde ir -- sem ela o clique caia numa ancora inexistente e fechava
+        # tudo. Dentro da ficha do relatorio o fechar ja devolve para a TAG.
+        # Aqui nao entram as fichas de relatorio: sao 2.772 para as 2.098 TAGs
+        # da unidade, e a pagina saia de 8 s para minutos. Sem elas o botao
+        # Detalhes fica inerte -- com_relatorio=False --, que e melhor que um
+        # clique que fecha tudo. O detalhe do relatorio esta na aba Relatorios,
+        # que e onde ele cabe.
+        base_niveis = progresso_base(resumo, tags)
+        render_html_pesado(
+            fichas_niveis_html(cache_key, "planta", "", "", 0,
+                               base_niveis[base_niveis["TAG"].isin(ids)])
+            + fichas_modais_html(ids, resumo, esperados, tags,
+                                 niveis_na_pagina=True, volta_por_tag=volta,
+                                 com_relatorio=False))
 
 
 def planta_ficha_html(desenho: str, area: dict, sub: pd.DataFrame,
@@ -6880,7 +6905,7 @@ def main():
     pesquisa_page = st.Page(lambda: _sob_carga("Carregando as tags", lambda: render_pesquisa_tag(resumo, esperados, tags, sigem, cache_key, lancamento, depara)), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
     sigem_page = st.Page(lambda: _sob_carga("Carregando a base SIGEM", lambda: render_sigem(sigem, esperados, any(escolhas.values()))), title="Base SIGEM", icon=":material/database:", url_path="sigem")
     gitec_page = st.Page(lambda: _sob_carga("Carregando a medição de campo", lambda: render_gitec(gitec_f, resumo, tags, esperados, sigem, cache_key)), title="Gitec", icon=":material/engineering:", url_path="gitec")
-    planta_page = st.Page(lambda: _sob_carga("Desenhando o avanço na planta", lambda: render_planta(tags, resumo, locacao, aux_areas, esperados)), title="Planta", icon=":material/map:", url_path="planta")
+    planta_page = st.Page(lambda: _sob_carga("Desenhando o avanço na planta", lambda: render_planta(tags, resumo, locacao, aux_areas, esperados, sigem, cache_key)), title="Planta", icon=":material/map:", url_path="planta")
     certificacao_page = st.Page(lambda: _sob_carga("Montando a cadeia de certificação", lambda: render_certificacao(tags, lancamento, depara, resumo, esperados, sigem, cache_key)), title="Certificação", icon=":material/fact_check:", url_path="certificacao")
     atualizacao_page = st.Page(lambda: _sob_carga("Lendo as movimentações", lambda: render_atualizacao(movimentacoes, sigem, esperados, lancamento, tags, resumo, cache_key)), title="Última atualização", icon=":material/history:", url_path="atualizacao")
 
