@@ -2252,8 +2252,14 @@ def tag_link(value: object) -> str:
 
 def fichas_modais_html(tags_ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
                        tags: pd.DataFrame, espera_por_doc: dict | None = None,
-                       niveis_na_pagina: bool = False) -> str:
-    """Modais das tags visiveis na pagina, abertos/fechados via CSS :target."""
+                       niveis_na_pagina: bool = False,
+                       volta_por_tag: dict | None = None) -> str:
+    """Modais das tags visiveis na pagina, abertos/fechados via CSS :target.
+
+    volta_por_tag diz para onde o X de cada TAG leva. Na Planta a TAG e aberta
+    de dentro da ficha da planta, e fechar tem que devolver para ela -- fechar
+    tudo obrigava a achar a planta de novo no desenho. Sem o mapa, o X fecha.
+    """
     ids = list(dict.fromkeys(tags_ids))  # unicas, preservando a ordem
     # Indexar uma vez. Antes cada ficha varria resumo, esperados e tags
     # inteiros: com as 1.209 TAGs de uma pagina davam 42 milhoes de comparacoes
@@ -2274,13 +2280,16 @@ def fichas_modais_html(tags_ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
                                niveis_na_pagina=niveis_na_pagina)
         if corpo is None:
             continue
+        volta = (volta_por_tag or {}).get(tag_id, "#fechado")
+        rotulo = "Voltar" if volta != "#fechado" else "Fechar"
         blocos += f"""
             <div class="fmodal" id="{ficha_anchor(tag_id)}">
-              <a class="fmodal-bg" href="#fechado" aria-label="Fechar"></a>
+              <a class="fmodal-bg" href="{volta}" aria-label="{rotulo}"></a>
               <div class="fmodal-box">
                 <div class="fmodal-head">
                   <div class="fmodal-title">{esc(tag_id)}</div>
-                  <a class="fmodal-x" href="#fechado" aria-label="Fechar">&times;</a>
+                  <a class="fmodal-x" href="{volta}" aria-label="{rotulo}"
+                     title="{rotulo}">&times;</a>
                 </div>
                 <div class="fmodal-body">{corpo}</div>
               </div>
@@ -5737,7 +5746,17 @@ def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFram
     ids = [t for t in dict.fromkeys(base["TAG"].astype(str))
            if t in set(resumo["TAG"].astype(str))]
     if ids:
-        render_html_pesado(fichas_modais_html(ids, resumo, esperados, tags))
+        # Fechar a ficha do instrumento devolve para a ficha da planta de onde
+        # ele foi aberto, em vez de fechar tudo. A TAG pertence a uma area so,
+        # e a area a uma zona -- entao da para dizer de onde ela veio.
+        zonas_area = planta_zonas_por_area(mapa, area_do_desenho)
+        volta = {}
+        for tag, area_tag in zip(base["TAG"].astype(str), base["_area"]):
+            zonas = zonas_area.get(area_tag)
+            if zonas:
+                volta[tag] = f'#{_ancora("PLANTA", zonas[0])}'
+        render_html_pesado(fichas_modais_html(ids, resumo, esperados, tags,
+                                              volta_por_tag=volta))
 
 
 def planta_ficha_html(desenho: str, area: dict, sub: pd.DataFrame,
@@ -5760,7 +5779,10 @@ def planta_ficha_html(desenho: str, area: dict, sub: pd.DataFrame,
     sem_medicao = int(((sub["_montado"]) & (sub["_medido"] != "SIM")).sum())
     tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
 
-    trilha = [(f'Área {area["area"]}', ""), (esc(area["nome"]), ""), (desenho, "")]
+    # os dois primeiros degraus levam a ficha da area; o terceiro e onde estamos
+    alvo_area = f'#{_ancora("AREA", area["area"])}'
+    trilha = [(f'Área {area["area"]}', alvo_area), (area["nome"], alvo_area),
+              (desenho, "")]
 
     tiles = (
         fx_tile("Instrumentos", br_num(n), "tag", "#2dd4bf",
@@ -5846,6 +5868,89 @@ def planta_ficha_html(desenho: str, area: dict, sub: pd.DataFrame,
     )
 
 
+def planta_zonas_por_area(mapa: dict, area_do_desenho: dict) -> dict:
+    """As zonas marcadas de cada area, pelo codigo que a ficha da planta usa."""
+    por_area: dict[str, list[str]] = {}
+    for prancha in mapa["pranchas"]:
+        for z in prancha["zonas"]:
+            a = zona_area(z, area_do_desenho)
+            if a:
+                cod = codigos_da_zona(z)
+                if cod not in por_area.setdefault(a, []):
+                    por_area[a].append(cod)
+    return por_area
+
+
+def planta_area_ficha_html(area: dict, sub: pd.DataFrame, zonas: list[str]) -> str:
+    """A ficha da area: o degrau acima da planta, que a trilha ja anunciava.
+
+    A trilha da planta dizia "Area 120 > Filtros e permutadores de cru > CHZ-323"
+    com os dois primeiros em texto morto. Agora levam aqui, como o degrau da
+    Progresso leva a ficha do SOP.
+    """
+    n = len(sub)
+    montados = int(sub["_montado"].sum())
+    pct = montados / n * 100 if n else 0.0
+    completos = int((sub["_docfrac"] >= 1.0).sum())
+    medidos = int((sub["_medido"] == "SIM").sum())
+    doc = float(sub["_docfrac"].mean() * 100) if n else 0.0
+    valor = float(sub["_preco"].sum())
+    valor_mont = float(sub.loc[sub["_montado"], "_preco"].sum())
+    tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
+
+    tiles = (
+        fx_tile("Instrumentos", br_num(n), "tag", "#2dd4bf",
+                f"{br_num(completos)} com documentação completa")
+        + fx_tile("Montados", br_num(montados), "seta", "#34d399", br_pct(pct))
+        + fx_tile("Medidos no Gitec", br_num(medidos), "check", "#60a5fa",
+                  f"de {br_num(montados)} montados")
+        + fx_tile("Plantas", br_num(len(zonas)), "grade", "#a78bfa",
+                  "desenhos desta área"))
+
+    # So os nomes, sem contagem por planta: a base localiza a TAG pela area,
+    # nao pelo desenho, entao qualquer numero aqui seria o total da area
+    # repetido em cada linha -- foi o que a primeira versao mostrou, 74 em cada
+    # uma das duas plantas de uma area de 74 instrumentos.
+    tabela = ('<div class="ua-alvos">'
+              + "".join(f'<a class="ua-tag gtbl-link" href="#{_ancora("PLANTA", c)}">'
+                        f"{esc(c)}</a>" for c in zonas)
+              + "</div>") if zonas else (
+        '<div class="gtbl-empty">Nenhuma planta marcada nesta área.</div>')
+
+    dados = (fx_dado("Área", f'{area["area"]} · {area["nome"]}')
+             + fx_dado("Plantas", ", ".join(zonas) or "—")
+             + fx_dado("Valor montado", f"{br_moeda(valor_mont)} de {br_moeda(valor)}")
+             + fx_dado("Avanço documental", br_pct(doc)))
+
+    direita = fx_painel(
+        "Montagem da área", "seta",
+        fx_rosca(montados, n, "#34d399", "montado")
+        + '<div class="fx-leg">'
+        + fx_lg("Montados", br_num(montados), br_pct(pct), "#34d399")
+        + fx_lg("A montar", br_num(n - montados), br_pct(100 - pct if n else 0), "#f87171")
+        + fx_lg("Instrumentos", br_num(n), "", "#3a4a68", total=True)
+        + "</div>", classe_corpo="centro")
+
+    return (
+        f'<div class="fmodal" id="{_ancora("AREA", area["area"])}">'
+        '<a class="fmodal-bg" href="#fechado" aria-label="Fechar"></a>'
+        '<div class="fmodal-box"><div class="fmodal-head">'
+        '<div><div class="fn-tipo">Área</div>'
+        f'<div class="fmodal-title">{esc(area["area"])} · {esc(area["nome"])}</div></div>'
+        '<div class="fn-avanco">'
+        f'<div class="fn-track"><div class="fn-fill {tom}" style="width:{max(pct, 1.5):.1f}%;"></div></div>'
+        f'<div class="fn-pct">{br_pct(pct)}</div></div>'
+        '<a class="fmodal-x" href="#fechado" aria-label="Fechar">&times;</a></div>'
+        f'<div class="fmodal-body"><div class="fx">'
+        f'<div class="fx-tiles">{tiles}</div>'
+        '<div class="fx-corpo"><div class="fx-col">'
+        + fx_painel("Resumo da área", "grade", f'<div class="fx-dados">{dados}</div>')
+        + fx_painel("Plantas da área", "tag", tabela,
+                    conta=f"{br_num(len(zonas))} plantas")
+        + f'</div><div class="fx-col">{direita}</div></div></div></div></div></div>'
+    )
+
+
 def planta_fichas_html(mapa: dict, areas: dict, area_do_desenho: dict,
                        base: pd.DataFrame) -> str:
     """Uma ficha por zona marcada, todas fechadas.
@@ -5874,6 +5979,12 @@ def planta_fichas_html(mapa: dict, areas: dict, area_do_desenho: dict,
                   if x not in meus]
         partes.append(planta_ficha_html(codigos_da_zona(z), areas[a],
                                         base[base["_area"] == a], irmaos))
+    # e a ficha de cada area, que e o degrau acima na trilha da planta
+    zonas_area = planta_zonas_por_area(mapa, area_do_desenho)
+    for a, zonas in zonas_area.items():
+        if a in areas:
+            partes.append(planta_area_ficha_html(areas[a], base[base["_area"] == a],
+                                                 zonas))
     return "".join(partes)
 
 
