@@ -1981,6 +1981,23 @@ def inject_css():
         .pl-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:16px; }
         .pl-kpis.cinco { grid-template-columns:repeat(5,1fr); }
         .pl-kpis.cinco .pl-kpi .v { font-size:25px; }
+        .pl-kpis.tres { grid-template-columns:repeat(3,1fr); }
+
+        /* Avanco por segmento: uma barra por segmento H1, a pior em cima.
+           Trilho de largura fixa e o metro ao lado -- com 142 segmentos a
+           lista e um ranking, e o numero e quem da a escala. */
+        .cs-lista { max-height:330px; overflow-y:auto; padding-right:4px; }
+        .cs-lin { display:grid; grid-template-columns:104px 1fr 150px;
+                  gap:12px; align-items:center; padding:5px 0; }
+        .cs-lin + .cs-lin { border-top:1px solid var(--border-color); }
+        .cs-seg { font-size:12px; font-weight:700; color:var(--text-2);
+                  font-family:ui-monospace,'Cascadia Mono',Consolas,monospace; }
+        .cs-trilho { height:14px; border-radius:4px; overflow:hidden;
+                     background:rgba(var(--rgb-tinta),.07); }
+        .cs-trilho i { display:block; height:100%; border-radius:4px; }
+        .cs-num { font-size:11px; color:var(--text-3); text-align:right;
+                  font-variant-numeric:tabular-nums; white-space:nowrap; }
+        .cs-num b { font-size:12.5px; font-weight:800; }
         .pl-kpi { background:var(--dark-card); border:1px solid var(--border-color);
                   border-radius:14px; padding:15px 18px; }
         .pl-kpi .r { font-size:10px; letter-spacing:.75px; text-transform:uppercase;
@@ -5189,11 +5206,9 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     # Tudo em TAG. Metro e circuito são a unidade da planilha de cabos, não a
     # do controle: o que se certifica é o instrumento.
     total = pan["tags"]
-    pct_cabo = pan["cabo_apto"] / total * 100 if total else 0.0
-    pct_apta = pan["tag_apta"] / total * 100 if total else 0.0
     pct_lanc = pan["lancado"] / pan["metros"] * 100 if pan["metros"] else 0.0
     render_html(f"""
-      <div class="pl-kpis cinco">
+      <div class="pl-kpis tres">
         <div class="pl-kpi"><div class="r">TAGs mapeadas</div>
           <div class="v">{br_num(total)}</div>
           <div class="s">com cadeia de cabo na base</div></div>
@@ -5201,14 +5216,6 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
           <div class="v andando">{br_pct(pct_lanc)}</div>
           <div class="s">{br_num(int(pan['lancado']))} de {br_num(int(pan['metros']))} m</div>
           <div class="pl-barra"><i class="andando" style="width:{pct_lanc:.1f}%"></i></div></div>
-        <div class="pl-kpi"><div class="r">Circuitos aptos</div>
-          <div class="v">{br_num(pan['cabo_apto'])}</div>
-          <div class="s">circuitos aptos para certificação · {br_pct(pct_cabo)}</div>
-          <div class="pl-barra"><i class="feito" style="width:{pct_cabo:.1f}%"></i></div></div>
-        <div class="pl-kpi"><div class="r">TAG apta</div>
-          <div class="v">{br_num(pan['tag_apta'])}</div>
-          <div class="s">circuitos aptos e instrumento montado · {br_pct(pct_apta)}</div>
-          <div class="pl-barra"><i class="feito" style="width:{pct_apta:.1f}%"></i></div></div>
         <div class="pl-kpi"><div class="r">Montadas travadas</div>
           <div class="v">{br_num(pan['montadas_travadas'])}</div>
           <div class="s">montadas, esperando cabo</div></div>
@@ -5271,6 +5278,56 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     cabe = RECORTES[alvo_recorte][0]
 
     tags_no_filtro = sorted(t for t in universo_f if cabe(por_tag[t]))
+
+    # Avanço por segmento. Fica depois dos filtros de propósito: escolhido um
+    # painel, o gráfico compara os segmentos DELE -- é a pergunta que a aba
+    # não respondia, e que obrigava a abrir caixa por caixa.
+    if any(c == "SEGMENTO" for c, _ in campos):
+        circuitos_tag = cert_circuitos_por_tag(lanc, cache_key)
+        segs: dict[str, dict] = {}
+        for t in universo_f:
+            nome_seg = atrib.get(t, {}).get("SEGMENTO", "")
+            if not nome_seg:
+                continue
+            s = segs.setdefault(nome_seg, {"m": 0.0, "real": 0.0, "tags": 0, "aptas": 0})
+            s["tags"] += 1
+            s["aptas"] += 1 if por_tag[t]["cabo"] else 0
+            for c in circuitos_tag.get(t, []):
+                s["m"] += c["m"]
+                s["real"] += c["m_real"]
+        if segs:
+            # pior primeiro: o que a obra precisa ver está embaixo de tudo se a
+            # ordem for alfabética, e são 142 segmentos
+            ordem = sorted(segs.items(),
+                           key=lambda kv: (kv[1]["real"] / kv[1]["m"] * 100
+                                           if kv[1]["m"] else 0.0, -kv[1]["m"]))
+            prontos = sum(1 for _, s in ordem
+                          if s["m"] and s["real"] / s["m"] * 100 >= 99.5)
+            # 1.130 dos 4.375 circuitos têm METROS_REAL maior que METROS: o
+            # campo mediu mais do que a estimativa previa. A conta é a mesma
+            # do cartão "Avanço do cabo" -- recalcular com o metro capado
+            # daria uma segunda resposta para a mesma pergunta na mesma tela
+            # -- então o percentual passa de 100 nesses, e a barra é que para.
+            acima = sum(1 for _, s in ordem if s["m"] and s["real"] > s["m"])
+            linhas_seg = []
+            for nome_seg, s in ordem:
+                p = s["real"] / s["m"] * 100 if s["m"] else 0.0
+                linhas_seg.append(
+                    f'<div class="cs-lin"><span class="cs-seg">{esc(nome_seg)}</span>'
+                    f'<div class="cs-trilho"><i class="{classe_avanco(p)}" '
+                    f'style="width:{min(max(p, 0), 100):.1f}%"></i></div>'
+                    f'<span class="cs-num"><b class="{classe_avanco(p)}">{br_pct(p)}</b>'
+                    f' · {br_num(int(s["real"]))}/{br_num(int(s["m"]))} m'
+                    f' · {br_num(s["tags"])} TAG{"s" if s["tags"] > 1 else ""}</span></div>')
+            render_html(
+                '<div class="gplan-panel pl-pn"><div class="gplan-panel-title">'
+                'Avanço do cabo por segmento'
+                f'<span class="pl-res">{br_num(len(ordem))} '
+                f'segmento{"s" if len(ordem) > 1 else ""} · '
+                f'<b class="feito">{br_num(prontos)}</b> com cabo pronto'
+                + (f' · <b class="andando">{br_num(acima)}</b> medidos acima do previsto'
+                   if acima else "")
+                + f'</span></div><div class="cs-lista">{"".join(linhas_seg)}</div></div>')
     # Um recorte vazio não pode apagar a tela: "TAG apta" hoje tem zero, e a
     # aba inteira sumia junto. A busca cai de volta para todas, e quem explica
     # o vazio é a tabela, no lugar dela.
