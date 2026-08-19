@@ -4095,6 +4095,32 @@ def cert_circuitos_por_tag(lanc: pd.DataFrame, cache_key: str) -> dict:
     return saida
 
 
+# Os quatro campos da 01_BASE_TAGS que recortam a Certificação. A ordem é a
+# da cadeia física, do painel para a ponta: painel -> caixa -> segmento H1 ->
+# malha. CFF e PAINEL só existem na planilha depois do pipeline que os
+# importa; sem eles o filtro correspondente simplesmente não aparece, em vez
+# de a aba quebrar numa planilha antiga.
+CERT_FILTROS = [("PAINEL", "Painel"), ("CFF", "Caixa (CFF)"),
+                ("SEGMENTO", "Segmento"), ("MALHA", "Malha")]
+
+
+@st.cache_data(show_spinner=False, max_entries=3)
+def cert_atributos(tags: pd.DataFrame, cache_key: str) -> dict:
+    """TAG -> painel, caixa, segmento e malha, direto da base.
+
+    A base escreve "-" onde não há valor, e são 3.776 das 5.098 TAGs sem
+    fieldbus: normalizar para vazio aqui evita que "-" vire uma opção de
+    filtro que não quer dizer nada.
+    """
+    campos = [c for c, _ in CERT_FILTROS if c in tags.columns]
+    if not campos:
+        return {}
+    fatia = tags[["TAG"] + campos]
+    return {str(r["TAG"]).strip():
+            {c: ("" if vazio(r[c]) else str(r[c]).strip()) for c in campos}
+            for r in fatia.to_dict("records") if str(r["TAG"]).strip()}
+
+
 @st.cache_data(show_spinner=False, max_entries=3)
 def cert_paineis(lanc: pd.DataFrame, cache_key: str) -> dict:
     """Cada painel e as caixas que saem dele, com o que pendura em cada uma.
@@ -5192,13 +5218,51 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     # a busca escolhe dentro dele. Num campo só, escolher "TAG apta" e depois
     # digitar uma travada devolveria lista vazia sem dizer por quê.
     por_tag = pan["por_tag"]
+
+    # Recorte pela cadeia física, direto da 01_BASE_TAGS. Vem antes do status
+    # porque muda o universo: a contagem de cada recorte tem que ser a do
+    # painel escolhido, não a da obra inteira.
+    atrib = cert_atributos(tags, cache_key)
+    campos = [(c, rot) for c, rot in CERT_FILTROS
+              if any(c in v for v in atrib.values())]
+    universo = [t for t in indice if t in por_tag]
+    escolhido = {c: st.session_state.get(f"cert_f_{c}", "Todos") for c, _ in campos}
+
+    def combina(tag, exceto=""):
+        v = atrib.get(tag, {})
+        return all(escolhido[c] == "Todos" or v.get(c, "") == escolhido[c]
+                   for c, _ in campos if c != exceto)
+
+    if campos:
+        for (campo, rotulo), col in zip(campos, st.columns(len(campos))):
+            # As opções saem do universo já recortado pelos OUTROS filtros:
+            # sem isso dá para escolher um painel e um segmento que não se
+            # cruzam, e a tela volta vazia sem dizer por quê.
+            opcoes = ["Todos"] + sorted({atrib[t][campo] for t in universo
+                                         if atrib.get(t, {}).get(campo)
+                                         and combina(t, campo)})
+            chave = f"cert_f_{campo}"
+            # o valor guardado pode ter saído das opções depois de mexer em
+            # outro filtro -- sem isto o Streamlit levanta erro na hora
+            if st.session_state.get(chave) not in opcoes:
+                st.session_state[chave] = "Todos"
+            with col:
+                escolhido[campo] = st.selectbox(rotulo, opcoes, key=chave)
+
+    universo_f = [t for t in universo if combina(t)]
+    ativos = [f"{rot.lower()} {escolhido[c]}" for c, rot in campos
+              if escolhido[c] != "Todos"]
+
+    def conta(prova):
+        return sum(1 for t in universo_f if prova(por_tag[t]))
+
     RECORTES = {
-        "Todos": (lambda v: True, total),
-        "Circuitos aptos": (lambda v: v["cabo"], pan["cabo_apto"]),
-        "TAG apta": (lambda v: v["apta"], pan["tag_apta"]),
+        "Todos": (lambda v: True, len(universo_f)),
+        "Circuitos aptos": (lambda v: v["cabo"], conta(lambda v: v["cabo"])),
+        "TAG apta": (lambda v: v["apta"], conta(lambda v: v["apta"])),
         "Montadas travadas": (lambda v: v["montada"] and not v["cabo"],
-                              pan["montadas_travadas"]),
-        "Inaptas": (lambda v: not v["cabo"], total - pan["cabo_apto"]),
+                              conta(lambda v: v["montada"] and not v["cabo"])),
+        "Inaptas": (lambda v: not v["cabo"], conta(lambda v: not v["cabo"])),
     }
     alvo_recorte = st.segmented_control(
         "Status de certificação", list(RECORTES),
@@ -5206,7 +5270,7 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         default="Todos", key="cert_recorte") or "Todos"
     cabe = RECORTES[alvo_recorte][0]
 
-    tags_no_filtro = sorted(t for t in indice if t in por_tag and cabe(por_tag[t]))
+    tags_no_filtro = sorted(t for t in universo_f if cabe(por_tag[t]))
     # Um recorte vazio não pode apagar a tela: "TAG apta" hoje tem zero, e a
     # aba inteira sumia junto. A busca cai de volta para todas, e quem explica
     # o vazio é a tabela, no lugar dela.
@@ -5266,7 +5330,15 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     def render_tabela(do_alvo=None, rotulo=""):
         """A tabela acompanha o desenho: as TAGs do alvo aberto, recortadas
         pelo status. Mostrar o universo enquanto o desenho mostra um segmento
-        era pedir para comparar duas coisas diferentes lado a lado."""
+        era pedir para comparar duas coisas diferentes lado a lado.
+
+        Com filtro da base ativo é o contrário: aí o pedido é ver o recorte
+        inteiro. O desenho segue mostrando a caixa aberta, e a tabela passa a
+        listar todas as TAGs do filtro -- filtrar por um segmento e continuar
+        vendo só uma caixa esconderia justamente o que foi pedido.
+        """
+        if ativos:
+            do_alvo, rotulo = None, " · ".join(ativos)
         no_alvo = set(do_alvo) if do_alvo else None
         linhas = []
         for tag in (tags_no_filtro if no_alvo is None
