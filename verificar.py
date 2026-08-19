@@ -441,6 +441,13 @@ with sync_playwright() as p:
                  pg.locator(".fmodal[id^='n-']").count() > 0, True)
         conferir("Degraus abrem na própria aba",
                  pg.locator(".fmodal[id^='f-'] a[href^='#n-']").count() > 0, True)
+        # Fechar um degrau sobe para o pai dele na trilha (Malha -> SSOP ->
+        # SOP -> Fase -> fechado), a mesma logica em qualquer aba -- nao pode
+        # mandar para "#fechado" direto nem para outra pagina.
+        conferir("Degrau de nível volta para o pai, não fecha tudo",
+                 pg.locator(".fmodal[id^='n-'] .fmodal-x[href^='#n-'], "
+                           ".fmodal[id^='n-'] .fmodal-x[href='#fechado']").count(),
+                 pg.locator(".fmodal[id^='n-']").count())
         titulo = (pg.evaluate(TXT % ".ct-painel .gplan-panel-title") or [""])[0]
         conferir("Tabela segue o desenho", "TAGs do desenho" in titulo, True)
 
@@ -502,6 +509,10 @@ with sync_playwright() as p:
                  pg.locator(".fmodal[id^='f-']").count() > 0, True)
         conferir("Degraus abrem na própria aba",
                  pg.locator(".fmodal[id^='n-']").count() > 0, True)
+        conferir("Degrau de nível volta para o pai, não fecha tudo",
+                 pg.locator(".fmodal[id^='n-'] .fmodal-x[href^='#n-'], "
+                           ".fmodal[id^='n-'] .fmodal-x[href='#fechado']").count(),
+                 pg.locator(".fmodal[id^='n-']").count())
         # O documento so entra se estiver na 08_RELATORIOS_ESPERADOS: era por
         # falta disso que o SIGEM de obra alheia ocupava a pagina. O nome
         # inteiro fica no title, que e o que da para conferir contra a planilha.
@@ -691,6 +702,18 @@ with sync_playwright() as p:
         geral = sum(1 for a in pct_area.values() if a >= 99.5)
         conferir("concluídas na legenda",
                  int(numero(pg.evaluate(TXT % ".pl-ch.feito .qt b")[0])), geral)
+        # A mesma logica de "fechar volta para o pai" vale aqui: planta ->
+        # area -> fechado, e instrumento -> planta -- nunca "fecha tudo" de
+        # uma vez so nem sai da pagina.
+        pg.locator(".pl-zona").first.click(timeout=ESPERA); pg.wait_for_timeout(1000)
+        x_planta = pg.locator(".fmodal:target .fmodal-x").first
+        conferir("X da planta aponta para a área",
+                 x_planta.get_attribute("href").startswith("#n-AREA-")
+                 if x_planta.count() else False, True)
+        x_planta.click(timeout=ESPERA); pg.wait_for_timeout(1000)
+        x_area = pg.locator(".fmodal:target .fmodal-x").first
+        conferir("X da área fecha (é o topo da cadeia)",
+                 x_area.get_attribute("href") if x_area.count() else "", "#fechado")
     elif pct_area:
         conferir("Planta abre", False, True)
 

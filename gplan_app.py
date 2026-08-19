@@ -574,11 +574,13 @@ def tema_ativo() -> str:
     if escolhido not in TEMAS:
         escolhido = TEMA_PADRAO
     st.session_state["gplan_tema"] = escolhido
-    # O link da barra lateral troca o caminho e descarta a query: bastava
-    # navegar e recarregar para a escolha virar padrao de novo. Repor devolve a
-    # preferencia a URL sem recarregar nada.
-    if st.query_params.get("tema") != escolhido:
-        st.query_params["tema"] = escolhido
+    # Nao repor "tema" na query aqui. st.query_params[...] = x reconstroi a URL
+    # no navegador (para refletir o novo parametro) e essa reconstrucao nao
+    # preserva o #fragmento -- um link como /progresso#n-FASE-X chegava com o
+    # hash, e sumia 2s depois quando este trecho rodava, no meio da propria
+    # navegacao para a ficha de nivel. O cookie (lembrar_tema, mais abaixo) ja
+    # basta para a preferencia sobreviver a navegar e recarregar; a URL nao
+    # precisa carregar "tema" tambem.
     return escolhido
 
 
@@ -2380,22 +2382,39 @@ def painel_recusados(esperados: pd.DataFrame, sigem: pd.DataFrame) -> str:
 
 
 def fichas_completas(ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
-                     tags: pd.DataFrame, sigem: pd.DataFrame, cache_key: str = "") -> str:
-    """Fichas das TAGs pedidas MAIS as dos relatorios que elas listam.
+                     tags: pd.DataFrame, sigem: pd.DataFrame, cache_key: str = "",
+                     origem: str = "fc") -> str:
+    """Fichas das TAGs pedidas MAIS as dos relatorios e dos niveis que elas
+    citam -- usada por Dashboard, Relatorios e Gitec, entao consertar aqui
+    vale para as tres de uma vez.
 
-    As duas andam juntas: a ficha da TAG mostra todos os relatorios dela, e
-    cada um tem um botao Detalhes. Gerar so as fichas dos documentos que
-    aparecem na tabela da pagina deixa esses botoes apontando para ancoras que
-    nao existem, e o clique nao faz nada -- aconteceu no Dashboard e em
-    Relatorios, com 43 dos 83 botoes sem destino. Chamar isto no lugar de
-    fichas_modais_html impede que os dois voltem a divergir.
+    As tres familias andam juntas: a ficha da TAG mostra os relatorios dela
+    (com um botao Detalhes cada) e a trilha de Fase/SOP/SSOP/Malha (com um
+    degrau cada). Gerar so a ficha da TAG deixa esses cliques apontando para
+    ancoras que nao existem -- aconteceu no Dashboard e em Relatorios, com 43
+    dos 83 botoes de Detalhes sem destino, e a varredura completa achou o
+    mesmo buraco no degrau de nivel, nestas mesmas tres abas. Chamar isto no
+    lugar de fichas_modais_html direto impede que as paginas voltem a divergir.
+
+    origem precisa ser diferente por chamador. fichas_niveis_html e cacheada
+    pelo Streamlit e o parametro com o DataFrame (_df) nao entra no calculo do
+    cache -- e a convencao do "_" na frente. As tres paginas chamando com o
+    mesmo "fc" faziam a primeira que rodasse (o Dashboard) gravar o cache, e
+    Relatorios e Gitec receberem de volta os niveis do Dashboard, nao os
+    deles: a Malha MI-YST-121100 do Gitec nunca aparecia, porque quem
+    respondia era sempre a mesma resposta guardada para "fc".
     """
     alvo = set(ids)
     meus = esperados[esperados["TAG"].isin(alvo)]
     docs = meus[meus["STATUS_SIGEM"].map(POSTADO)]["DOCUMENTO_ESPERADO"].tolist()
     historico = _revisoes_por_doc(cache_key, sigem)
     espera = espera_por_documento(historico)
-    return (fichas_modais_html(ids, resumo, esperados, tags, espera)
+    base_niveis = progresso_base(resumo, tags)
+    base_niveis = base_niveis[base_niveis["TAG"].isin(alvo)]
+    return (fichas_niveis_html(cache_key, f"{origem}:{assinatura_tags(alvo)}", "", "",
+                               0, base_niveis)
+            + fichas_modais_html(ids, resumo, esperados, tags, espera,
+                                 niveis_na_pagina=True)
             + fichas_relatorios_html(docs, esperados, historico))
 
 
@@ -2646,7 +2665,8 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
         f'<section class="du-pe">{minis}</section>'
         "</div>"
         + du_modal_recusados(esperados, sigem)
-        + fichas_completas(top["TAG"].tolist(), resumo, esperados, tags, sigem, cache_key)
+        + fichas_completas(top["TAG"].tolist(), resumo, esperados, tags, sigem, cache_key,
+                           origem="dash")
     )
 
 
@@ -2744,7 +2764,7 @@ def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.Da
         )
         + "</div>"
         + fichas_completas(df_page["TAG"].tolist(), resumo, esperados, tags,
-                           sigem, cache_key)
+                           sigem, cache_key, origem="rel")
     )
 
 
@@ -3682,7 +3702,8 @@ def render_gitec(gitec: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame,
                     + fx_linha("Prontas e ainda não medidas", br_num(len(prontas)))
                     + fx_linha("Montadas sem medição", br_num(len(montadas - medidas))))
         + "</div></div></div>"
-        + fichas_completas(pagina["TAG"].tolist(), resumo, esperados, tags, sigem, cache_key)
+        + fichas_completas(pagina["TAG"].tolist(), resumo, esperados, tags, sigem, cache_key,
+                           origem="gitec")
     )
 
 
@@ -5232,8 +5253,11 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         base_niveis = base_niveis[base_niveis["TAG"].isin(ids)]
         # As tres familias juntas: sem a do relatorio, o "ver detalhe" dentro da
         # ficha da TAG apontava para uma ancora inexistente e o :target fechava
-        # tudo -- parecia que o clique tinha fechado a ficha de proposito.
-        render_html(fichas_niveis_html(cache_key, "cert", "", "", 0, base_niveis)
+        # tudo. O degrau de nivel abre aqui mesmo -- fechar aquela ficha volta
+        # para o pai dela na trilha (Malha -> SSOP -> SOP -> Fase -> fechado),
+        # a mesma logica de qualquer outra ficha do projeto.
+        render_html(fichas_niveis_html(cache_key, f"cert:{assinatura_tags(ids)}", "", "",
+                                       0, base_niveis)
                     + fichas_modais_html(ids, resumo, esperados, tags, espera,
                                          niveis_na_pagina=True)
                     + fichas_relatorios_pagina(cache_key, "cert", "", "", 0,
@@ -5294,12 +5318,11 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                     "uma faixa por caixa: o cartão dela e, na mesma linha, os "
                     "instrumentos que penduram nela · clique numa TAG para abrir a ficha "
                     "· a barra do cartão é quanto da caixa já tem cabo pronto</span></div>")
-        do_painel_tags = [t["org"] for bl in cad["blocos"] for t in bl["tags"]
-                          if t["org"] in com_ficha]
-        if do_painel_tags:
-            render_html(fichas_modais_html(do_painel_tags, resumo, esperados, tags,
-                                           espera_por_doc=espera_por_documento(
-                                               _revisoes_por_doc(cache_key, sigem))))
+        # As fichas saem so pelo render_fichas: ele e o unico caminho que gera
+        # tambem as de nivel para os degraus da trilha abrirem aqui. Uma
+        # chamada direta a fichas_modais_html ficou esquecida aqui, gerando as
+        # mesmas TAGs sem essa parte -- e foi exatamente essa copia
+        # desatualizada que a varredura pegou no vale do painel.
         render_tabela([t["org"] for bl in cad["blocos"] for t in bl["tags"]]
                       + [bl["nome"] for bl in cad["blocos"]], f"painel {alvo}")
         render_fichas([t["org"] for bl in cad["blocos"] for t in bl["tags"]
@@ -5592,7 +5615,7 @@ def render_atualizacao(movs: pd.DataFrame, sigem: pd.DataFrame, esperados: pd.Da
     ids = [t for t in dict.fromkeys(ids) if t in set(cert_txt(resumo["TAG"]))][:250]
     if ids:
         base = progresso_base(resumo, tags)
-        render_html(fichas_niveis_html(cache_key, "ua", "", "", 0,
+        render_html(fichas_niveis_html(cache_key, f"ua:{assinatura_tags(ids)}", "", "", 0,
                                        base[base["TAG"].isin(ids)])
                     + fichas_modais_html(ids, resumo, esperados, tags,
                                          espera_por_documento(
@@ -5804,18 +5827,18 @@ def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFram
             zonas = zonas_area.get(area_tag)
             if zonas:
                 volta[tag] = f'#{_ancora("PLANTA", zonas[0])}'
-        # As tres familias, como na Progresso: a de nivel para os degraus da
-        # trilha abrirem aqui, e a do relatorio para o "ver detalhe" ter para
-        # onde ir -- sem ela o clique caia numa ancora inexistente e fechava
-        # tudo. Dentro da ficha do relatorio o fechar ja devolve para a TAG.
-        # Aqui nao entram as fichas de relatorio: sao 2.772 para as 2.098 TAGs
-        # da unidade, e a pagina saia de 8 s para minutos. Sem elas o botao
-        # Detalhes fica inerte -- com_relatorio=False --, que e melhor que um
-        # clique que fecha tudo. O detalhe do relatorio esta na aba Relatorios,
-        # que e onde ele cabe.
+        # Sem fichas de relatorio aqui: sao 2.772 para as 2.098 TAGs da
+        # unidade, e a pagina saia de 8 s para minutos. Sem elas o botao
+        # Detalhes fica inerte -- com_relatorio=False --, melhor que um clique
+        # que nao leva a lugar nenhum. O detalhe do relatorio esta na aba
+        # Relatorios, que e onde ele cabe.
+        # O degrau de nivel abre aqui mesmo, como em toda ficha do projeto:
+        # fechar aquela ficha volta para o pai dela na trilha (a fichas de
+        # nivel sao poucas -- uma por Fase/SOP/SSOP/Malha distinta entre os
+        # instrumentos visiveis -- entao nao pesa como as de relatorio pesavam.
         base_niveis = progresso_base(resumo, tags)
         render_html_pesado(
-            fichas_niveis_html(cache_key, "planta", "", "", 0,
+            fichas_niveis_html(cache_key, f"planta:{assinatura_tags(ids)}", "", "", 0,
                                base_niveis[base_niveis["TAG"].isin(ids)])
             + fichas_modais_html(ids, resumo, esperados, tags,
                                  niveis_na_pagina=True, volta_por_tag=volta,
@@ -5909,16 +5932,19 @@ def planta_ficha_html(desenho: str, area: dict, sub: pd.DataFrame,
         + "</div>",
         classe_corpo="centro")
 
+    # Fechar aqui nao pode ir sempre para "nada": esta ficha tambem e
+    # alcancada de dentro da ficha de Area (lista "Plantas da area"), e
+    # fechar tem que desfazer so esse ultimo passo, nao a navegacao inteira.
     return (
         f'<div class="fmodal" id="{_ancora("PLANTA", desenho)}">'
-        '<a class="fmodal-bg" href="#fechado" aria-label="Fechar"></a>'
+        f'<a class="fmodal-bg" href="{alvo_area}" aria-label="Voltar"></a>'
         '<div class="fmodal-box"><div class="fmodal-head">'
         '<div><div class="fn-tipo">Planta</div>'
         f'<div class="fmodal-title">{esc(desenho)}</div></div>'
         '<div class="fn-avanco">'
         f'<div class="fn-track"><div class="fn-fill {tom}" style="width:{max(pct, 1.5):.1f}%;"></div></div>'
         f'<div class="fn-pct">{br_pct(pct)}</div></div>'
-        '<a class="fmodal-x" href="#fechado" aria-label="Fechar">&times;</a></div>'
+        f'<a class="fmodal-x" href="{alvo_area}" aria-label="Voltar">&times;</a></div>'
         f'<div class="fmodal-body"><div class="fx">{fx_trilha(trilha)}'
         f'<div class="fx-tiles">{tiles}</div>'
         '<div class="fx-corpo"><div class="fx-col">'
@@ -5994,6 +6020,8 @@ def planta_area_ficha_html(area: dict, sub: pd.DataFrame, zonas: list[str]) -> s
         + fx_lg("Instrumentos", br_num(n), "", "#3a4a68", total=True)
         + "</div>", classe_corpo="centro")
 
+    # Reachavel de qualquer uma das plantas da area: fechar tem que voltar
+    # para a que estava aberta, nao apagar a navegacao inteira.
     return (
         f'<div class="fmodal" id="{_ancora("AREA", area["area"])}">'
         '<a class="fmodal-bg" href="#fechado" aria-label="Fechar"></a>'
@@ -6197,6 +6225,22 @@ def assinatura_filtros() -> str:
     """
     return "|".join(f"{c}={st.session_state.get(f'gf_{c}', p)}"
                     for c, _rot, p, _f, _col in FILTROS)
+
+
+def assinatura_tags(ids) -> str:
+    """As TAGs pedidas, como texto, para entrar na chave de cache.
+
+    fichas_niveis_html e cacheada por (cache_key, filtro, f_seg, f_malha,
+    pag) -- o DataFrame em si (_df) nao entra no calculo, pela convencao do
+    "_" na frente. Certificacao, Ultima atualizacao, Planta e a
+    fichas_completas (Dashboard/Relatorios/Gitec) chamavam sempre com o mesmo
+    filtro fixo (por exemplo "cert"), e a mesma TAG do cache_key inteiro:
+    trocar de TAG na busca da Certificacao, ou abrir o Gitec depois do
+    Dashboard, devolvia os niveis de quem tinha rodado primeiro, nao os do
+    pedido atual. A Malha MI-YST-121100 do Gitec nunca aparecia por isso -- o
+    Dashboard tinha gravado o cache primeiro, com TAGs diferentes.
+    """
+    return ",".join(sorted(str(i) for i in ids))
 
 
 def _ancora(tipo: str, valor: str) -> str:
@@ -6446,10 +6490,10 @@ def _modal_nivel(tipo: str, nome: object, sub: pd.DataFrame, rotulo_tipo: str) -
     completas = int(sub["COMPLETA"].sum())
 
     # ------------------------------------------- trilha: a cadeia ate aqui
-    # A ficha de nivel so existe na aba Progresso, e todas as outras estao na
-    # mesma pagina: a trilha sobe por ancora, sem recarregar nada. So vale para
-    # o pai unico -- quando o nivel atravessa dois pais, "SOP-1 e mais 1" nao
-    # aponta para ficha nenhuma, entao fica como texto.
+    # A trilha sobe por ancora, sem recarregar nada -- vale em qualquer aba que
+    # gere as fichas de nivel junto com a da TAG. So vale para o pai unico --
+    # quando o nivel atravessa dois pais, "SOP-1 e mais 1" nao aponta para
+    # ficha nenhuma, entao fica como texto.
     trilha = []
     for pai in FX_ACIMA.get(tipo, []):
         v = _distintos(sub[pai], 1)
@@ -6457,6 +6501,13 @@ def _modal_nivel(tipo: str, nome: object, sub: pd.DataFrame, rotulo_tipo: str) -
         trilha.append((f"{FX_ROTULO_NIVEL[pai]} {v}",
                        f"#{_ancora(pai, v)}" if unico else ""))
     trilha.append((f"{FX_ROTULO_NIVEL[tipo]} {titulo}", ""))
+    # Fechar sobe um degrau na mesma trilha -- Malha volta para a SSOP dela,
+    # SSOP para o SOP, SOP para a Fase. E a mesma logica de toda outra ficha do
+    # projeto: fechar volta para o pai, nao para "nada". So cai no fechado de
+    # verdade quando nao ha um pai unico para voltar (a Fase, que e o topo, ou
+    # um nivel com mais de um pai).
+    pais_com_link = [href for _, href in trilha[:-1] if href]
+    volta_nivel = pais_com_link[-1] if pais_com_link else "#fechado"
 
     # --------------------------------------------------------------- tiles
     n_mal = sub[~sub.MALHA.apply(vazio)].MALHA.nunique()
@@ -6518,16 +6569,17 @@ def _modal_nivel(tipo: str, nome: object, sub: pd.DataFrame, rotulo_tipo: str) -
           f"fecharam 100% documental.</p>",
         classe_corpo="centro")
 
+    rotulo_volta = "Fechar" if volta_nivel == "#fechado" else "Voltar"
     return (
         f'<div class="fmodal" id="{_ancora(tipo, valor_ancora)}">'
-        '<a class="fmodal-bg" href="#fechado" aria-label="Fechar"></a>'
+        f'<a class="fmodal-bg" href="{volta_nivel}" aria-label="{rotulo_volta}"></a>'
         '<div class="fmodal-box"><div class="fmodal-head">'
         f'<div><div class="fn-tipo">{esc(rotulo_tipo)}</div>'
         f'<div class="fmodal-title">{esc(titulo)}</div></div>'
         '<div class="fn-avanco">'
         f'<div class="fn-track"><div class="fn-fill {tom}" style="width:{max(pct, 1.5):.1f}%;"></div></div>'
         f'<div class="fn-pct">{br_pct(pct)}</div></div>'
-        '<a class="fmodal-x" href="#fechado" aria-label="Fechar">&times;</a></div>'
+        f'<a class="fmodal-x" href="{volta_nivel}" aria-label="{rotulo_volta}">&times;</a></div>'
         f'<div class="fmodal-body"><div class="fx">{fx_trilha(trilha)}'
         f'<div class="fx-tiles">{tiles}</div>'
         '<div class="fx-corpo"><div class="fx-col">'
