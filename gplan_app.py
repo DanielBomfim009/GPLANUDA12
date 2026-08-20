@@ -677,6 +677,8 @@ def lembrar_sessao(token: str) -> None:
     não o access_token: o access vence em uma hora e a sessão cairia no meio
     do expediente.
     """
+    if not token:
+        return
     st.components.v1.html(
         "<script>try{parent.document.cookie="
         f"'{COOKIE_SESSAO}={token};path=/;max-age=2592000;samesite=lax'}}"
@@ -770,9 +772,22 @@ svg.lg-mark { width:44px; height:44px; flex:none;
   line-height:1.05; }
 .lg-sub { font-size:11px; color:var(--text-3); letter-spacing:.5px;
   text-transform:uppercase; font-weight:600; margin-top:3px; }
-.lg-chamada { font-size:15px; font-weight:700; color:var(--text-1); margin-bottom:6px; }
-.lg-aviso { font-size:12.5px; color:var(--text-3); line-height:1.55;
-  margin:0 auto 4px; max-width:340px; }
+/* O "Esqueci a senha" tem de parecer texto, nao botao -- mas dentro de um
+   formulario so o submit dispara, entao ele E um submit vestido de link. O
+   alvo e a CLASSE DA CHAVE (st-key-lg_esqueci), e nao :first-of-type: cada
+   botao mora no proprio container, e ali os dois sao "o primeiro" -- a regra
+   pegava o Entrar junto e o encolhia para 37 px. O Entrar segue botao. */
+.st-key-lg_esqueci { width:auto !important; margin:2px 0 12px auto;
+  display:flex; justify-content:flex-end; }
+.st-key-lg_esqueci button {
+  background:none !important; border:none !important; box-shadow:none !important;
+  color:var(--text-3) !important; font-size:11.5px !important;
+  font-weight:500 !important; padding:0 !important; height:auto !important;
+  min-height:0 !important; width:auto !important;
+  text-decoration:underline; text-underline-offset:3px; }
+.st-key-lg_esqueci button:hover { color:var(--text-1) !important;
+  transform:none !important; box-shadow:none !important; }
+.st-key-lg_esqueci button p { font-size:11.5px !important; }
 
 /* o cartão é o próprio formulário do Streamlit */
 [data-testid="stForm"] { position:relative; z-index:1; width:min(392px, 92vw);
@@ -853,44 +868,50 @@ def exigir_login() -> dict:
         '<div class="lg-caixa"><div class="lg-marca">'
         + _logo_svg("Lat").replace("<svg ", '<svg class="lg-mark" ')
         + '<div class="lg-txt"><div class="lg-nome">Gplan</div>'
-        '<div class="lg-sub">Instrumentação · U-12</div></div></div>'
-        '<div class="lg-chamada">Entrar</div></div>')
+        '<div class="lg-sub">Instrumentação · U-12</div></div></div></div>')
 
+    # "Esqueci a senha" e "Entrar" são os dois botões do MESMO formulário, e o
+    # esqueci vem antes -- é o que a pessoa procura enquanto olha os campos,
+    # não depois de já ter desistido. Reaproveitar o e-mail já digitado apagou
+    # a gaveta, o campo repetido e o parágrafo de explicação que havia aqui:
+    # a tela ficou com quatro linhas em vez de nove.
     with st.form("entrar"):
         email = st.text_input("E-mail").strip().lower()
         senha = st.text_input("Senha", type="password")
-        if st.form_submit_button("Entrar", type="primary"):
-            try:
-                entrou = acesso.entrar(email, senha)
-            except acesso.SemSupabase as erro:
-                st.error(str(erro))
-                st.stop()
-            except Exception as erro:
-                avisar_erro("falar com o Supabase para autenticar", erro)
-                st.stop()
-            if not entrou:
-                # a mesma mensagem para conta inexistente, senha errada e
-                # conta desativada: dizer qual dos três entrega quem existe
-                st.error("E-mail ou senha inválidos.")
-            else:
-                usuario, token = entrou
-                st.session_state["gplan_usuario"] = usuario
-                st.session_state["gplan_token"] = token
-                lembrar_sessao(token)
-                st.rerun()
+        esqueci = st.form_submit_button("Esqueci a senha", key="lg_esqueci")
+        entrar = st.form_submit_button("Entrar", type="primary", key="lg_entrar")
 
-    with st.expander("Esqueci a senha"):
-        st.caption("Enviamos um link de redefinição para o e-mail cadastrado. "
-                   "Depende de SMTP configurado no projeto do Supabase.")
-        alvo = st.text_input("E-mail para recuperação", key="lg_recuperar")
-        if st.button("Enviar link", key="lg_enviar"):
+    if esqueci:
+        if not email:
+            st.warning("Escreva o e-mail acima para eu enviar o link.")
+        else:
             try:
-                acesso.recuperar_senha(alvo)
-                # a resposta não diz se o e-mail existe: isso entregaria
-                # quais contas existem a quem só chutou um endereço
+                acesso.recuperar_senha(email)
+                # a resposta não diz se o e-mail existe: isso entregaria quais
+                # contas existem a quem só chutou um endereço
                 st.success("Se esse e-mail estiver cadastrado, o link foi enviado.")
             except Exception as erro:
                 avisar_erro("enviar o e-mail de recuperação", erro)
+
+    if entrar:
+        try:
+            entrou = acesso.entrar(email, senha)
+        except acesso.SemSupabase as erro:
+            st.error(str(erro))
+            st.stop()
+        except Exception as erro:
+            avisar_erro("falar com o Supabase para autenticar", erro)
+            st.stop()
+        if not entrou:
+            # a mesma mensagem para conta inexistente, senha errada e conta
+            # desativada: dizer qual dos três entrega quem existe
+            st.error("E-mail ou senha inválidos.")
+        else:
+            usuario, token = entrou
+            st.session_state["gplan_usuario"] = usuario
+            st.session_state["gplan_token"] = token
+            lembrar_sessao(token)
+            st.rerun()
     st.stop()
 
 
@@ -2283,6 +2304,60 @@ def inject_css():
                   background:rgba(var(--rgb-teal),.12); border-radius:6px;
                   padding:3px 8px; }
         .pf-tag.vazio { color:var(--text-3); background:rgba(var(--rgb-tinta),.07); }
+
+        /* Aba Acessos: o panorama em cima, os cartoes no meio, a edicao
+           embaixo -- na ordem em que a pergunta aparece. */
+        .ac-topo { display:flex; flex-wrap:wrap; gap:9px; margin:2px 0 16px; }
+        .ac-kpi { display:flex; flex-direction:column; gap:1px; padding:9px 14px;
+                  border-radius:11px; background:var(--dark-card-2);
+                  border:1px solid var(--border-color); min-width:88px; }
+        .ac-kpi .n { font-size:19px; font-weight:800; color:var(--text-1);
+                     line-height:1.1; font-variant-numeric:tabular-nums; }
+        .ac-kpi .r { font-size:9.5px; font-weight:700; letter-spacing:.5px;
+                     text-transform:uppercase; color:var(--text-3); }
+        .ac-kpi.roxo .n { color:var(--accent-purple); }
+        .ac-kpi.teal .n { color:var(--accent-teal); }
+        .ac-kpi.azul .n { color:var(--accent-blue); }
+        .ac-kpi.ambar .n { color:var(--accent-amber); }
+        .ac-kpi.vermelho .n { color:var(--accent-red); }
+
+        .ac-card { background:var(--dark-card); border:1px solid var(--border-color);
+                   border-radius:13px; padding:12px 14px; margin-bottom:9px; }
+        .ac-card.off { opacity:.62; }
+        .ac-cab { display:flex; align-items:center; gap:10px; }
+        .ac-ini, .ac-foto { width:36px; height:36px; flex:none; border-radius:50%; }
+        .ac-ini { display:grid; place-items:center; font-size:12.5px; font-weight:800;
+                  color:var(--sobre-cor); background:var(--accent-teal); }
+        .ac-foto { object-fit:cover; border:1px solid var(--border-strong); }
+        .ac-id { min-width:0; flex:1; display:flex; flex-direction:column;
+                 line-height:1.3; }
+        .ac-id b { font-size:13px; font-weight:750; color:var(--text-1);
+                   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .ac-id i { font-style:normal; font-size:10.5px; color:var(--text-3);
+                   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .ac-eu { font-style:normal; font-size:9px; font-weight:700; margin-left:6px;
+                 color:var(--txt-azul); background:rgba(var(--rgb-azul),.15);
+                 border-radius:4px; padding:1px 5px; letter-spacing:.3px; }
+        .ac-papel { flex:none; font-size:9px; font-weight:800; letter-spacing:.5px;
+                    text-transform:uppercase; border-radius:5px; padding:2px 7px; }
+        .ac-papel.roxo { color:var(--txt-roxo); background:rgba(var(--rgb-roxo),.15); }
+        .ac-papel.teal { color:var(--txt-teal); background:rgba(var(--rgb-teal),.15); }
+        .ac-papel.azul { color:var(--txt-azul); background:rgba(var(--rgb-azul),.15); }
+        .ac-papel.ambar { color:var(--txt-ambar); background:rgba(var(--rgb-ambar),.15); }
+        .ac-off { font-size:9.5px; font-weight:700; letter-spacing:.4px;
+                  text-transform:uppercase; color:var(--accent-red);
+                  background:rgba(var(--rgb-vermelho),.12); border-radius:5px;
+                  padding:2px 7px; display:inline-block; }
+        .ac-perms { display:flex; flex-wrap:wrap; gap:5px; margin-top:11px; }
+        .ac-perms span { font-size:10px; color:var(--text-2);
+                         background:rgba(var(--rgb-tinta),.06); border-radius:5px;
+                         padding:2px 7px; }
+        .ac-perms span.vazio { color:var(--text-3); font-style:italic; }
+        /* o que o tipo escolhido libera, mostrado na hora de escolher */
+        .ac-resumo { display:flex; flex-wrap:wrap; gap:5px; margin:-6px 0 10px; }
+        .ac-resumo span { font-size:10px; color:var(--txt-teal);
+                          background:rgba(var(--rgb-teal),.12); border-radius:5px;
+                          padding:2px 8px; }
 
         /* o selo do papel: mesma familia de cor nos dois lugares onde aparece */
         .sb-papel, .pf-papel { font-size:9.5px; font-weight:800; letter-spacing:.5px;
@@ -4092,11 +4167,16 @@ def classe_avanco(pct: float) -> str:
 def dados_por_area(tags: pd.DataFrame, resumo: pd.DataFrame,
                    locacao: pd.DataFrame,
                    aux: pd.DataFrame) -> tuple[dict, dict, pd.DataFrame]:
-    """Quanto cada area ja montou, e que desenho pertence a que area.
+    """Quanto cada area e cada planta ja montaram.
 
-    A TAG e localizada por area, nao por desenho -- a base nao tem coluna de
-    desenho por instrumento. Por isso o numero e sempre da area: duas zonas da
-    mesma area mostram o mesmo percentual, e isso e o dado, nao um arredondamento.
+    A coluna LOCACAO da 05_BASE_LOCACAO diz em QUE DESENHO a TAG esta -- sao
+    2.113 instrumentos apontando para 20 plantas. Enquanto isso passou
+    despercebido, o numero mostrado era o da AREA, e as ate nove plantas de
+    uma mesma area repetiam o mesmo previsto e o mesmo executado, como se
+    fossem uma so.
+
+    Agora cada planta tem o proprio numero, e a area continua existindo para
+    as TAGs sem LOCACAO preenchida e para a ficha da area.
 
     Os desenhos marcados como gerais (CHZ-113 e CHZ-302, que atravessam a
     unidade) ficam de fora do mapa desenho->area: eles nao delimitam zona.
@@ -4107,6 +4187,14 @@ def dados_por_area(tags: pd.DataFrame, resumo: pd.DataFrame,
     area_da_tag = (locacao.dropna(subset=["AREA"])
                    .assign(AREA=lambda d: d["AREA"].astype(str).str.strip())
                    .set_index("TAG")["AREA"].to_dict())
+    # LOCACAO ja vem no formato do desenho ("800-CHZ-322"), o mesmo da
+    # 05_AUX_AREAS -- da para cruzar direto, sem normalizar nada
+    desenho_da_tag = {}
+    if "LOCACAO" in locacao.columns:
+        for tag, d in zip(locacao["TAG"], locacao["LOCACAO"]):
+            texto = str(d).strip()
+            if texto and texto not in ("-", "nan"):
+                desenho_da_tag[tag] = texto
 
     nome, area_do_desenho = {}, {}
     if not aux.empty:
@@ -4140,8 +4228,9 @@ def dados_por_area(tags: pd.DataFrame, resumo: pd.DataFrame,
     if "GRUPO_REGRA" in r.columns:
         t["GRUPO_REGRA"] = t["TAG"].map(r["GRUPO_REGRA"])
 
-    areas = {}
-    for a, sub in t.groupby("_area"):
+    t["_desenho"] = t["TAG"].map(desenho_da_tag)
+
+    def resumir(sub, rotulo, nome_longo):
         qtd = len(sub)
         mont = int(sub["_montado"].sum())
         # O que ja foi montado se divide em duas partes que somam o todo: o que
@@ -4149,8 +4238,8 @@ def dados_por_area(tags: pd.DataFrame, resumo: pd.DataFrame,
         # basta -- so o aprovado conta, que e o que MEDIDO_GITEC ja diz.
         montado = sub["_montado"]
         medido = montado & (sub["_medido"] == "SIM")
-        areas[a] = {
-            "area": a, "nome": nome.get(a, "—"), "tags": qtd, "montados": mont,
+        return {
+            "area": rotulo, "nome": nome_longo, "tags": qtd, "montados": mont,
             "pct": round(mont / qtd * 100, 1) if qtd else 0.0,
             "doc": round(sub["_docfrac"].mean() * 100, 1),
             "valor": float(sub["_preco"].sum()),
@@ -4158,7 +4247,39 @@ def dados_por_area(tags: pd.DataFrame, resumo: pd.DataFrame,
             "valor_medido": float(sub.loc[medido, "_preco"].sum()),
             "montados_medidos": int(medido.sum()),
         }
-    return areas, area_do_desenho, t
+
+    areas = {a: resumir(sub, a, nome.get(a, "—"))
+             for a, sub in t.groupby("_area")}
+    # a planta herda o nome da area a que pertence: e o rotulo que a ficha usa
+    plantas = {d: resumir(sub, d, nome.get(area_do_desenho.get(d, ""), "—"))
+               for d, sub in t.groupby("_desenho")}
+    return areas, plantas, area_do_desenho, t
+
+
+def dados_da_zona(zona: dict, areas: dict, plantas: dict,
+                  area_do_desenho: dict) -> dict | None:
+    """O numero que a zona mostra.
+
+    Vem das plantas da zona, somadas. So cai para o numero da area quando
+    nenhuma planta dela tem TAG com LOCACAO preenchida -- e nesse caso as
+    zonas irmas repetem o mesmo valor, porque e o unico que existe.
+    """
+    proprias = [plantas[d] for d in zona.get("desenhos", []) if d in plantas]
+    if proprias:
+        somado = {c: sum(p[c] for p in proprias)
+                  for c in ("tags", "montados", "montados_medidos",
+                            "valor", "valor_montado", "valor_medido")}
+        qtd = somado["tags"]
+        return {**proprias[0], **somado,
+                "pct": round(somado["montados"] / qtd * 100, 1) if qtd else 0.0,
+                # media ponderada pelo tamanho de cada planta, e nao media das
+                # medias: planta de 3 TAGs pesaria igual a de 300
+                "doc": round(sum(p["doc"] * p["tags"] for p in proprias) / qtd, 1)
+                if qtd else 0.0,
+                "por_planta": True}
+    a = zona_area(zona, area_do_desenho)
+    dados = areas.get(a or "")
+    return {**dados, "por_planta": False} if dados else None
 
 
 def zona_area(zona: dict, area_do_desenho: dict) -> str | None:
@@ -4182,12 +4303,13 @@ def codigos_da_zona(zona: dict) -> str:
 PLANTA_LARGURA = {"principal": 1500, "piperack": 1160, "se1200": 270}
 
 
-def planta_zonas_html(prancha: dict, areas: dict, area_do_desenho: dict) -> str:
+def planta_zonas_html(prancha: dict, areas: dict, plantas: dict,
+                      area_do_desenho: dict) -> str:
     largura = PLANTA_LARGURA.get(prancha["id"], 1500)
     altura = largura * prancha["prop"] / 100
     partes = []
     for z in prancha["zonas"]:
-        a = areas.get(zona_area(z, area_do_desenho) or "")
+        a = dados_da_zona(z, areas, plantas, area_do_desenho)
         if not a:
             continue
         rotulo = codigos_da_zona(z)
@@ -4215,11 +4337,25 @@ def planta_zonas_html(prancha: dict, areas: dict, area_do_desenho: dict) -> str:
     return "".join(partes)
 
 
-def planta_prancha_html(prancha: dict, areas: dict, area_do_desenho: dict) -> str:
-    vistas = {z for z in (zona_area(z, area_do_desenho) for z in prancha["zonas"])
-              if z and z in areas}
-    qtd = sum(areas[a]["tags"] for a in vistas)
-    mont = sum(areas[a]["montados"] for a in vistas)
+def planta_prancha_html(prancha: dict, areas: dict, plantas: dict,
+                        area_do_desenho: dict) -> str:
+    # O total da prancha soma o que cada zona mostra. Zona que caiu no numero
+    # da area entra uma vez so: duas zonas irmas sem planta propria repetem o
+    # mesmo numero, e soma-lo duas vezes inventaria instrumento.
+    qtd = mont = 0
+    areas_ja_contadas = set()
+    for z in prancha["zonas"]:
+        d = dados_da_zona(z, areas, plantas, area_do_desenho)
+        if not d:
+            continue
+        if not d["por_planta"]:
+            if d["area"] in areas_ja_contadas:
+                continue
+            areas_ja_contadas.add(d["area"])
+        qtd += d["tags"]
+        mont += d["montados"]
+    vistas = {a for a in (zona_area(z, area_do_desenho) for z in prancha["zonas"])
+              if a and a in areas}
     pct = mont / qtd * 100 if qtd else 0.0
     return (
         '<div class="gplan-panel pl-pn">'
@@ -4229,7 +4365,7 @@ def planta_prancha_html(prancha: dict, areas: dict, area_do_desenho: dict) -> st
         f'<b class="{classe_avanco(pct)}">{br_pct(pct)}</b></span></div>'
         f'<div class="pl-tela" style="padding-top:{prancha["prop"]:.3f}%">'
         f'<img src="{prancha["uri"]}" alt="Planta — {esc(prancha["rotulo"])}">'
-        + planta_zonas_html(prancha, areas, area_do_desenho)
+        + planta_zonas_html(prancha, areas, plantas, area_do_desenho)
         + "</div></div>")
 
 
@@ -6309,7 +6445,7 @@ def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFram
     render_header("Planta")
 
     mapa = carregar_mapa()
-    areas, area_do_desenho, base = dados_por_area(tags, resumo, locacao, aux)
+    areas, plantas, area_do_desenho, base = dados_por_area(tags, resumo, locacao, aux)
 
     if not mapa["pranchas"]:
         render_html('<div class="gplan-panel"><div class="gtbl-empty">'
@@ -6369,7 +6505,7 @@ def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFram
 
     por_id = {p["id"]: p for p in mapa["pranchas"]}
     if "principal" in por_id:
-        render_html_pesado(planta_prancha_html(por_id["principal"], areas, area_do_desenho))
+        render_html_pesado(planta_prancha_html(por_id["principal"], areas, plantas, area_do_desenho))
 
     # As pranchas deitadas ficam embaixo da principal, na largura toda; a
     # subestacao e um desenho em pe -- numa faixa larga ela viraria uma torre
@@ -6384,16 +6520,16 @@ def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFram
         col_a, col_b = st.container(), None
     with col_a:
         for p in largas:
-            render_html_pesado(planta_prancha_html(p, areas, area_do_desenho))
+            render_html_pesado(planta_prancha_html(p, areas, plantas, area_do_desenho))
         render_html(planta_legenda_html(faixas, contagem))
     if col_b is not None:
         with col_b:
             for p in altas:
-                render_html_pesado(planta_prancha_html(p, areas, area_do_desenho))
+                render_html_pesado(planta_prancha_html(p, areas, plantas, area_do_desenho))
 
     # As fichas ficam no fim da pagina, fechadas: o :target so abre a que a
     # zona clicada aponta. Sem todas geradas, o clique cairia no vazio.
-    render_html_pesado(planta_fichas_html(mapa, areas, area_do_desenho, base))
+    render_html_pesado(planta_fichas_html(mapa, areas, plantas, area_do_desenho, base))
     # E as fichas das TAGs listadas dentro delas: sem estas na pagina, clicar
     # num instrumento da planta nao teria para onde abrir e viraria ida para
     # outra aba.
@@ -6624,7 +6760,7 @@ def planta_area_ficha_html(area: dict, sub: pd.DataFrame, zonas: list[str]) -> s
     )
 
 
-def planta_fichas_html(mapa: dict, areas: dict, area_do_desenho: dict,
+def planta_fichas_html(mapa: dict, areas: dict, plantas: dict, area_do_desenho: dict,
                        base: pd.DataFrame) -> str:
     """Uma ficha por zona marcada, todas fechadas.
 
@@ -7612,12 +7748,134 @@ def render_perfil_lateral():
         dialogo_perfil()
 
 
+def campos_do_papel(prefixo: str, papel_inicial: str, marcadas: list[str]):
+    """A caixa que define o usuário, e as permissões que vêm com ela.
+
+    O papel é a escolha que a pessoa faz; a permissão é o detalhe que quase
+    nunca se mexe. Por isso o papel vem primeiro e em destaque, e as
+    permissões ficam recolhidas -- abrir só quem precisa fugir do padrão.
+    """
+    papel = st.selectbox(
+        "Tipo de usuário", list(acesso.PAPEIS),
+        index=list(acesso.PAPEIS).index(papel_inicial), key=f"{prefixo}_papel")
+    render_html(
+        '<div class="ac-resumo">'
+        + "".join(f'<span>{esc(acesso.PERMISSOES[p])}</span>'
+                  for p in acesso.PAPEIS[papel])
+        + "</div>")
+    trocou = papel != papel_inicial
+    with st.expander("Ajustar permissões uma a uma"):
+        if trocou:
+            st.caption(f"Ao salvar, valem as permissões de {papel}. "
+                       "Mexer aqui só faz efeito se você mantiver o tipo.")
+        perms = st.multiselect(
+            "Permissões", acesso.TODAS,
+            default=list(acesso.PAPEIS[papel]) if trocou else marcadas,
+            format_func=lambda p: acesso.PERMISSOES[p], key=f"{prefixo}_perms")
+    return papel, (list(acesso.PAPEIS[papel]) if trocou else perms)
+
+
+@st.dialog("Novo login", width="large")
+def dialogo_novo_login():
+    """Cadastrar é coisa de vez em quando: não pode ocupar a tela que serve
+    para olhar quem já existe."""
+    e1, e2 = st.columns(2)
+    email = e1.text_input("E-mail", key="nv_email")
+    nome = e2.text_input("Nome", key="nv_nome")
+    senha = st.text_input("Senha", type="password", key="nv_senha",
+                          help=acesso.REGRA_SENHA)
+    st.caption(acesso.REGRA_SENHA)
+    papel, perms = campos_do_papel("nv", acesso.PAPEL_PADRAO,
+                                   list(acesso.PAPEIS[acesso.PAPEL_PADRAO]))
+    if st.button("Criar login", type="primary", use_container_width=True,
+                 key="nv_criar"):
+        if not email.strip() or not senha:
+            st.error("E-mail e senha são obrigatórios.")
+        elif (falta := acesso.problema_na_senha(senha)):
+            st.error(falta)
+        else:
+            try:
+                acesso.criar(email, senha, nome, papel, perms)
+                st.rerun()
+            except Exception as erro:
+                avisar_erro("criar o login", erro)
+
+
+@st.dialog("Editar login", width="large")
+def dialogo_editar_login(uid: str):
+    eu = st.session_state.get("gplan_usuario") or {}
+    try:
+        usuarios = acesso.listar()
+    except Exception as erro:
+        avisar_erro("ler os logins", erro)
+        return
+    u = next((x for x in usuarios if x["id"] == uid), None)
+    if not u:
+        st.error("Esse login não existe mais.")
+        return
+    sou_eu = u["id"] == eu.get("id")
+    papel_atual = acesso.papel_de(u)
+
+    render_html(
+        '<div class="pf-topo">'
+        + (f'<img class="pf-foto" src="{u["foto"]}" alt="">' if u["foto"]
+           else f'<span class="pf-ini">'
+                f'{esc(acesso.iniciais(u["nome"], u["email"]))}</span>')
+        + f'<div><div class="pf-nome">{esc(u["nome"] or u["email"])}</div>'
+        f'<div class="pf-login">{esc(u["email"])}</div></div></div>')
+
+    papel, perms = campos_do_papel(f"ed{uid}", papel_atual, u["permissoes"])
+    ativo = st.checkbox("Login ativo", value=u["ativo"], key=f"ed{uid}_ativo",
+                        help="Desativado não entra, e a sessão aberta dele cai.")
+    nova = st.text_input("Trocar a senha (deixe vazio para manter)",
+                         type="password", key=f"ed{uid}_senha",
+                         help=acesso.REGRA_SENHA)
+
+    b1, b2 = st.columns([3, 1])
+    if b1.button("Salvar", type="primary", use_container_width=True,
+                 key=f"ed{uid}_salvar"):
+        # o administrador não pode se trancar do lado de fora: sem ninguém com
+        # "administrar" não há como voltar a esta tela
+        outros = any("administrar" in o["permissoes"] and o["ativo"]
+                     and o["id"] != uid for o in usuarios)
+        if sou_eu and not outros and ("administrar" not in perms or not ativo):
+            st.error("Você é o único administrador ativo. Crie outro antes de "
+                     "tirar a sua permissão ou se desativar.")
+        elif nova and (falta := acesso.problema_na_senha(nova)):
+            st.error(falta)
+        else:
+            try:
+                acesso.salvar_perfil(uid, papel=papel, permissoes=perms,
+                                     ativo=ativo)
+                if nova:
+                    acesso.trocar_senha(uid, nova)
+                if sou_eu:
+                    recarregar_usuario()
+                st.rerun()
+            except Exception as erro:
+                avisar_erro("salvar o login", erro)
+
+    if sou_eu:
+        b2.button("Remover", disabled=True, use_container_width=True,
+                  key=f"ed{uid}_rm", help="Não dá para remover o próprio login.")
+    elif b2.button("Remover", use_container_width=True, key=f"ed{uid}_rm"):
+        try:
+            acesso.remover(uid)
+            st.rerun()
+        except Exception as erro:
+            avisar_erro("remover o login", erro)
+
+
 def render_acessos():
     """Quem entra e o que cada um vê. Só o administrador chega aqui.
 
-    A tela não mostra senha de ninguém -- não há como: quem guarda é o Auth do
-    Supabase, e de lá não se lê senha de volta. Esquecer significa o
-    administrador gravar outra por cima, ou a pessoa usar o "Esqueci a senha".
+    A página serve para OLHAR: o panorama, o filtro e os cartões de todos.
+    Cadastrar e editar viram janela -- eram dois formulários compridos que
+    empurravam os cartões para fora da tela, e quem abria a aba para conferir
+    um acesso tinha de rolar por eles antes de ver qualquer coisa.
+
+    Nenhuma senha aparece aqui: quem guarda é o Auth do Supabase, e de lá não
+    se lê senha de volta.
     """
     render_header("Acessos")
     eu = st.session_state.get("gplan_usuario") or {}
@@ -7628,90 +7886,70 @@ def render_acessos():
         avisar_erro("listar os logins", erro)
         return
 
-    st.subheader("Logins")
-    for u in usuarios:
-        sou_eu = u["id"] == eu.get("id")
-        papel_atual = acesso.papel_de(u)
-        with st.expander(
-                f"{u['nome'] or u['email']}  ·  {papel_atual}  ·  {u['email']}"
-                + ("" if u["ativo"] else "  ·  desativado")
-                + ("  ·  você" if sou_eu else "")):
-            papel_novo = st.selectbox(
-                "Papel", list(acesso.PAPEIS),
-                index=list(acesso.PAPEIS).index(papel_atual),
-                key=f"papel_{u['id']}",
-                help="Trocar o papel repõe as permissões padrão dele. "
-                     "Depois disso dá para ajustar uma a uma.")
-            marcadas = st.multiselect(
-                "Permissões", acesso.TODAS, default=u["permissoes"],
-                format_func=lambda p: acesso.PERMISSOES[p], key=f"perm_{u['id']}")
-            if papel_novo != papel_atual:
-                st.info("Ao salvar, as permissões passam a ser as de "
-                        f"{papel_novo}: "
-                        + ", ".join(acesso.PERMISSOES[p]
-                                    for p in acesso.PAPEIS[papel_novo]) + ".")
-            ativo = st.checkbox("Ativo", value=u["ativo"], key=f"ativo_{u['id']}")
-            nova = st.text_input("Trocar a senha (deixe vazio para manter)",
-                                 type="password", key=f"senha_{u['id']}",
-                                 help=acesso.REGRA_SENHA)
+    por_papel = collections.Counter(acesso.papel_de(u) for u in usuarios)
+    inativos = sum(1 for u in usuarios if not u["ativo"])
+    render_html(
+        '<div class="ac-topo">'
+        f'<div class="ac-kpi"><span class="n">{len(usuarios)}</span>'
+        f'<span class="r">logins</span></div>'
+        + "".join(
+            f'<div class="ac-kpi {acesso.COR_PAPEL.get(p, "teal")}">'
+            f'<span class="n">{por_papel.get(p, 0)}</span>'
+            f'<span class="r">{esc(p.lower())}</span></div>'
+            for p in acesso.PAPEIS)
+        + (f'<div class="ac-kpi vermelho"><span class="n">{inativos}</span>'
+           f'<span class="r">inativos</span></div>' if inativos else "")
+        + "</div>")
 
-            c1, c2 = st.columns(2)
-            if c1.button("Salvar", key=f"salvar_{u['id']}", type="primary"):
-                # o administrador não pode se trancar do lado de fora: sem
-                # ninguém com "administrar" não há como voltar a esta tela
-                outros_admin = any("administrar" in o["permissoes"] and o["ativo"]
-                                   and o["id"] != u["id"] for o in usuarios)
-                perms = (list(acesso.PAPEIS[papel_novo])
-                         if papel_novo != papel_atual else marcadas)
-                if sou_eu and not outros_admin and ("administrar" not in perms
-                                                    or not ativo):
-                    st.error("Você é o único administrador ativo. Crie outro "
-                             "antes de tirar a sua permissão ou se desativar.")
-                elif nova and (falta := acesso.problema_na_senha(nova)):
-                    st.error(falta)
-                else:
-                    try:
-                        acesso.salvar_perfil(u["id"], papel=papel_novo,
-                                             permissoes=perms, ativo=ativo)
-                        if nova:
-                            acesso.trocar_senha(u["id"], nova)
-                        if sou_eu:
-                            recarregar_usuario()
-                        st.success("Salvo.")
-                        st.rerun()
-                    except Exception as erro:
-                        avisar_erro("salvar o login", erro)
+    c1, c2, c3 = st.columns([3, 2, 1.4])
+    busca = c1.text_input("Procurar por nome ou e-mail",
+                          key="ac_busca").strip().lower()
+    filtro = c2.selectbox("Tipo de usuário", ["Todos"] + list(acesso.PAPEIS),
+                          key="ac_papel")
+    c3.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+    if c3.button("Novo login", type="primary", use_container_width=True,
+                 key="ac_novo"):
+        dialogo_novo_login()
 
-            if not sou_eu and c2.button("Remover", key=f"remover_{u['id']}"):
-                try:
-                    acesso.remover(u["id"])
-                    st.rerun()
-                except Exception as erro:
-                    avisar_erro("remover o login", erro)
+    def cabe(u):
+        if filtro != "Todos" and acesso.papel_de(u) != filtro:
+            return False
+        return not busca or busca in (u["nome"] + " " + u["email"]).lower()
 
-    st.subheader("Novo login")
-    with st.form("novo_login"):
-        email = st.text_input("E-mail")
-        nome = st.text_input("Nome")
-        senha = st.text_input("Senha", type="password", help=acesso.REGRA_SENHA)
-        st.caption(acesso.REGRA_SENHA)
-        papel = st.selectbox("Papel", list(acesso.PAPEIS),
-                             index=list(acesso.PAPEIS).index(acesso.PAPEL_PADRAO))
-        st.caption("Permissões do papel: "
-                   + ", ".join(acesso.PERMISSOES[p] for p in acesso.PAPEIS[papel])
-                   + ". Dá para ajustar depois, no login criado.")
-        if st.form_submit_button("Criar", type="primary"):
-            if not email.strip() or not senha:
-                st.error("E-mail e senha são obrigatórios.")
-            elif (falta := acesso.problema_na_senha(senha)):
-                st.error(falta)
-            else:
-                try:
-                    acesso.criar(email, senha, nome, papel)
-                    st.success(f"Login {email.strip().lower()} criado.")
-                    st.rerun()
-                except Exception as erro:
-                    avisar_erro("criar o login", erro)
+    visiveis = [u for u in usuarios if cabe(u)]
+    if not visiveis:
+        render_html('<div class="gtbl-empty">Nenhum login com esse recorte.</div>')
+        return
+
+    # Um cartão por login, e ao lado de cada um o botão que abre a janela de
+    # edição. O botão é do Streamlit porque precisa disparar o diálogo; o
+    # cartão é HTML porque precisa da foto e dos selos.
+    for u in visiveis:
+        papel = acesso.papel_de(u)
+        perms = [acesso.PERMISSOES[p] for p in u["permissoes"]
+                 if p in acesso.PERMISSOES]
+        col_card, col_bt = st.columns([9, 1.3])
+        with col_card:
+            render_html(
+                f'<div class="ac-card{"" if u["ativo"] else " off"}">'
+                '<div class="ac-cab">'
+                + (f'<img class="ac-foto" src="{u["foto"]}" alt="">' if u["foto"]
+                   else f'<span class="ac-ini">'
+                        f'{esc(acesso.iniciais(u["nome"], u["email"]))}</span>')
+                + f'<div class="ac-id"><b>{esc(u["nome"] or u["email"])}'
+                + ('<em class="ac-eu">você</em>' if u["id"] == eu.get("id") else "")
+                + f'</b><i>{esc(u["email"])}</i></div>'
+                + ('' if u["ativo"] else '<span class="ac-off">desativado</span>')
+                + f'<span class="ac-papel {acesso.COR_PAPEL.get(papel, "teal")}">'
+                f'{esc(papel)}</span></div>'
+                '<div class="ac-perms">'
+                + "".join(f'<span>{esc(x)}</span>' for x in perms)
+                + ('<span class="vazio">sem permissões</span>' if not perms else "")
+                + "</div></div>")
+        with col_bt:
+            st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+            if st.button("Editar", key=f"ed_{u['id']}", use_container_width=True):
+                dialogo_editar_login(u["id"])
 
 
 def main():
@@ -7727,6 +7965,14 @@ def main():
     lembrar_tema(tema_ativo())
     # antes de qualquer dado: sem login não se carrega planilha nem se desenha
     exigir_login()
+    # O cookie é reescrito a CADA desenho, e não só no momento de entrar.
+    # Escrever só no login não funcionava: o st.rerun() logo em seguida aborta
+    # a execução antes de o componente que roda o script chegar a existir, e o
+    # cookie nunca era gravado -- o F5 seguinte caía na tela de login. É o
+    # mesmo caminho que o tema já usava, pelo mesmo motivo. De quebra, o
+    # refresh_token do Supabase gira a cada retomada, e reescrever sempre é o
+    # que mantém no navegador o token que ainda vale.
+    lembrar_sessao(st.session_state.get("gplan_token", ""))
 
     # O carimbo da planilha e a chave de cache sao coisas diferentes: a chave
     # leva a versao da regra colada no fim, e quem le a data precisa do valor
