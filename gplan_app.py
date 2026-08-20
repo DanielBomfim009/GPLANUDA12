@@ -5354,13 +5354,25 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                 s["m"] += c["m"]
                 s["real"] += c["m_real"]
         if segs:
-            # Mais avançado primeiro. A primeira versão ordenava do pior para o
-            # melhor e a tela abria com onze barras vazias em 0,0% -- o avanço,
-            # que é o assunto do painel, ficava fora da primeira tela. Empate
-            # desempata pelo maior previsto, que é o segmento que mais pesa.
-            ordem = sorted(segs.items(),
-                           key=lambda kv: (-(kv[1]["real"] / kv[1]["m"] * 100
-                                             if kv[1]["m"] else 0.0), -kv[1]["m"]))
+            # Em andamento no topo, do mais adiantado para o menos: é o grupo
+            # em que olhar muda alguma coisa. Depois os não iniciados, pelo
+            # maior previsto -- é o trabalho que ainda vai vir, e o tamanho diz
+            # quanto pesa. Concluídos por último: já não pedem nada.
+            # As duas ordens anteriores erravam pelo mesmo motivo, cada uma
+            # numa direção: pior primeiro abria a tela com barras zeradas, e
+            # melhor primeiro abria com barras cheias.
+            def por_atencao(kv):
+                s = kv[1]
+                p = s["real"] / s["m"] * 100 if s["m"] else 0.0
+                if p >= 99.5:
+                    return (2, 0.0, -s["m"])
+                if p > 0:
+                    return (0, -p, -s["m"])
+                return (1, 0.0, -s["m"])
+
+            ordem = sorted(segs.items(), key=por_atencao)
+            andando = sum(1 for _, s in ordem
+                          if s["m"] and 0 < s["real"] / s["m"] * 100 < 99.5)
             prontos = sum(1 for _, s in ordem
                           if s["m"] and s["real"] / s["m"] * 100 >= 99.5)
             # O metro já vem capado no previsto pelo cert_metro_real, que é a
@@ -5382,6 +5394,7 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                 'Avanço do cabo por segmento'
                 f'<span class="pl-res">{br_num(len(ordem))} '
                 f'segmento{"s" if len(ordem) > 1 else ""} · '
+                f'<b class="andando">{br_num(andando)}</b> em andamento · '
                 f'<b class="feito">{br_num(prontos)}</b> com cabo pronto'
                 f'</span></div><div class="cs-lista">{"".join(linhas_seg)}</div></div>')
     # Um recorte vazio não pode apagar a tela: "TAG apta" hoje tem zero, e a
