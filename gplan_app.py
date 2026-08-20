@@ -4127,6 +4127,30 @@ def cert_circuitos_por_tag(lanc: pd.DataFrame, cache_key: str) -> dict:
     return saida
 
 
+@st.cache_data(show_spinner=False, max_entries=3)
+def cert_metros_por_origem(lanc: pd.DataFrame, cache_key: str) -> dict:
+    """Previsto e lançado de cada ponta de ORIGEM -- TAG ou caixa.
+
+    O avanço por segmento precisa das duas: o ramal que sai do instrumento e o
+    tronco que sai da caixa. O cert_circuitos_por_tag só devolve o primeiro,
+    porque descarta origem que não seja TAG -- e era por isso que o segmento
+    aparecia pronto com o cabo entre caixas por lançar.
+
+    Somar pela ORIGEM não duplica: todo circuito tem uma origem só.
+    """
+    if lanc.empty:
+        return {}
+    saida: dict[str, list[float]] = {}
+    for r in lanc.to_dict("records"):
+        org = str(r["ORIGEM"]).strip()
+        if org in ("", "nan"):
+            continue
+        acc = saida.setdefault(org, [0.0, 0.0])
+        acc[0] += cert_num(r["METROS"])
+        acc[1] += cert_metro_real(r)  # já vem capado no previsto
+    return saida
+
+
 # Os quatro campos da 01_BASE_TAGS que recortam a Certificação. A ordem é a
 # da cadeia física, do painel para a ponta: painel -> caixa -> segmento H1 ->
 # malha. CFF e PAINEL só existem na planilha depois do pipeline que os
@@ -5341,18 +5365,48 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     # painel, o gráfico compara os segmentos DELE -- é a pergunta que a aba
     # não respondia, e que obrigava a abrir caixa por caixa.
     if any(c == "SEGMENTO" for c, _ in campos):
-        circuitos_tag = cert_circuitos_por_tag(lanc, cache_key)
+        # O segmento é uma coisa física inteira: o tronco que sai do painel, os
+        # troncos entre as caixas e os ramais até os instrumentos. A caixa não
+        # tem coluna de segmento, mas a caixa É do segmento -- quem diz isso é
+        # a coluna CFF da 01_BASE_TAGS, e é dela que sai este mapa.
+        #
+        # Sem os troncos o H1-0057 aparecia 100% com o cabo da CFF-12-0057C
+        # para a CFF-12-0057B por lançar. São 290 troncos e 48.846 m que
+        # ficavam de fora, 152 deles não concluídos.
+        metros_org = cert_metros_por_origem(lanc, cache_key)
+        caixa_seg = {}
+        for v in atrib.values():
+            cx, sg = v.get("CFF", ""), v.get("SEGMENTO", "")
+            # exige que a caixa realmente origine circuito: descarta o "N.A."
+            # que a base usa como preenchimento em 6 segmentos
+            if cx and sg and cx in metros_org:
+                caixa_seg[cx] = sg
+
+        # O filtro escolhe QUAIS segmentos aparecem; o número de cada um é
+        # sempre do segmento inteiro. Recortar o segmento pelo filtro daria um
+        # tronco inteiro dividido por meia dúzia de ramais, que não é o avanço
+        # de nada.
+        visiveis = {atrib[t].get("SEGMENTO", "") for t in universo_f
+                    if atrib.get(t, {}).get("SEGMENTO")}
         segs: dict[str, dict] = {}
-        for t in universo_f:
-            nome_seg = atrib.get(t, {}).get("SEGMENTO", "")
-            if not nome_seg:
+        for tag, v in atrib.items():
+            nome_seg = v.get("SEGMENTO", "")
+            if nome_seg not in visiveis:
                 continue
-            s = segs.setdefault(nome_seg, {"m": 0.0, "real": 0.0, "tags": 0, "aptas": 0})
+            s = segs.setdefault(nome_seg,
+                                {"m": 0.0, "real": 0.0, "tags": 0, "caixas": set()})
             s["tags"] += 1
-            s["aptas"] += 1 if por_tag[t]["cabo"] else 0
-            for c in circuitos_tag.get(t, []):
-                s["m"] += c["m"]
-                s["real"] += c["m_real"]
+            prev, real = metros_org.get(tag, (0.0, 0.0))
+            s["m"] += prev
+            s["real"] += real
+        for cx, sg in caixa_seg.items():
+            if sg in segs:
+                segs[sg]["caixas"].add(cx)
+        for s in segs.values():
+            for cx in s["caixas"]:
+                prev, real = metros_org[cx]
+                s["m"] += prev
+                s["real"] += real
         if segs:
             # Em andamento no topo, do mais adiantado para o menos: é o grupo
             # em que olhar muda alguma coisa. Depois os não iniciados, pelo
@@ -5388,6 +5442,7 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                     f'style="width:{min(max(p, 0), 100):.1f}%"></i></div>'
                     f'<span class="cs-num"><b class="{classe_avanco(p)}">{br_pct(p)}</b>'
                     f' · {br_num(int(s["real"]))}/{br_num(int(s["m"]))} m'
+                    f' · {br_num(len(s["caixas"]))} cx'
                     f' · {br_num(s["tags"])} TAG{"s" if s["tags"] > 1 else ""}</span></div>')
             render_html(
                 '<div class="gplan-panel pl-pn"><div class="gplan-panel-title">'
