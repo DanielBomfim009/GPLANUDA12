@@ -1994,7 +1994,15 @@ def inject_css():
                   font-family:ui-monospace,'Cascadia Mono',Consolas,monospace; }
         .cs-trilho { height:14px; border-radius:4px; overflow:hidden;
                      background:rgba(var(--rgb-tinta),.07); }
-        .cs-trilho i { display:block; height:100%; border-radius:4px; }
+        /* A cor vai no background, e nao no color: as classes feito/andando/
+           parado do projeto pintam texto, e a barra herdava um color que
+           nunca aparecia -- ela saia sem preenchimento nenhum. Mesmo par de
+           regras da .pl-barra, que e a barra dos cartoes. */
+        .cs-trilho i { display:block; height:100%; border-radius:4px;
+                       background:var(--neutro); }
+        .cs-trilho i.feito { background:var(--accent-teal); }
+        .cs-trilho i.andando { background:var(--accent-amber); }
+        .cs-trilho i.parado { background:var(--accent-red); }
         .cs-num { font-size:11px; color:var(--text-3); text-align:right;
                   font-variant-numeric:tabular-nums; white-space:nowrap; }
         .cs-num b { font-size:12.5px; font-weight:800; }
@@ -5019,15 +5027,16 @@ svg.cena{{width:100%;height:auto;display:block}}
 .eq-rot{{fill:var(--t3);font-size:8.5px;letter-spacing:.7px;font-weight:700}}
 .rot-tk{{fill:var(--and);font-weight:800;letter-spacing:.5px}}
 .chip-bg{{fill:var(--metal2);stroke:rgba(var(--rgb-tinta),.14)}}
-.chip-sub{{fill:var(--t3);font-size:6.4px;letter-spacing:.2px;
+/* Segmento e malha usam a mesma fonte: sao a mesma classe de informacao, e
+   duas escalas de letra no mesmo desenho leem como hierarquia que nao existe. */
+.chip-sub,.rot-malha{{fill:var(--t3);font-size:6.4px;letter-spacing:.2px;
   font-family:ui-monospace,Consolas,monospace}}
-/* A malha e escrita sobre o desenho, e o cabo ondula justamente por onde ela
-   passa. O contorno na cor do fundo abre um vao em volta da letra -- sem ele
-   o texto some dentro do tracado. paint-order manda pintar o contorno ANTES
-   do preenchimento, senao a borda come a letra por dentro. */
-.rot-malha{{fill:var(--t2);font-size:6px;letter-spacing:.15px;font-weight:600;
-  font-family:ui-monospace,Consolas,monospace;
-  paint-order:stroke;stroke:var(--bg);stroke-width:2.2px;
+/* So a malha leva contorno: ela e escrita sobre o desenho, e o cabo ondula
+   justamente por onde ela passa. O contorno na cor do fundo abre um vao em
+   volta da letra -- sem ele o texto some dentro do tracado. paint-order manda
+   pintar o contorno ANTES do preenchimento, senao a borda come a letra por
+   dentro. O segmento nao precisa: mora no cartao, que ja e chapado. */
+.rot-malha{{paint-order:stroke;stroke:var(--bg);stroke-width:2.4px;
   stroke-linejoin:round}}
 .inst.sel .chip-bg{{stroke:var(--azul);stroke-width:2.5}}
 .inst:hover .chip-bg{{stroke:var(--t2)}}
