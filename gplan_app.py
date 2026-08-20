@@ -3926,11 +3926,18 @@ def cert_metro_real(linha) -> float:
     A coluna COMPR.(M) CAMPO REALIZADO só existe na base nova. Sem ela -- e nas
     linhas em que ela está vazia -- o proporcional do percentual é a melhor
     conta que há. Zerar seria dizer que nada foi lançado, o que é falso.
+
+    O medido é capado no previsto. Em 1.130 dos 4.375 circuitos o campo mediu
+    mais metro do que a estimativa previa, e sem teto o avanço passava de
+    100% -- 300% no pior segmento. Avanço é quanto do previsto já foi feito; o
+    metro que sobra é erro de estimativa, não obra a mais. Circuito sem
+    previsto não tem teto a aplicar: ali o medido é tudo o que se sabe.
     """
+    previsto = cert_num(linha.get("METROS"))
     real = cert_num(linha.get("METROS_REAL"))
     if real > 0:
-        return real
-    return round(cert_num(linha.get("METROS")) * cert_num(linha.get("PCT")) / 100, 1)
+        return min(real, previsto) if previsto > 0 else real
+    return round(previsto * cert_num(linha.get("PCT")) / 100, 1)
 
 
 def cert_txt(serie: pd.Series) -> pd.Series:
@@ -5124,13 +5131,19 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
                             # isso mais o instrumento no lugar
                             "cabo": tom == "ok", "apta": tom == "ok" and montada}
 
-    metros = float(lanc["METROS"].fillna(0).sum())
+    previsto = lanc["METROS"].fillna(0)
+    metros = float(previsto.sum())
     # o metro que o campo mediu, e não o proporcional do percentual: quando a
     # coluna existe ela é o número que vale
-    proporcional = lanc["METROS"].fillna(0) * lanc["PCT"].fillna(0) / 100
+    proporcional = previsto * lanc["PCT"].fillna(0) / 100
     real = (lanc["METROS_REAL"].fillna(0) if "METROS_REAL" in lanc
             else pd.Series(0.0, index=lanc.index))
-    lancado = float(real.where(real > 0, proporcional).sum())
+    # mesmo teto do cert_metro_real, aplicado circuito a circuito: o medido não
+    # passa do previsto. Somar primeiro e capar no fim deixaria um circuito
+    # medido a mais cobrir o atraso de outro. Sem previsto não há teto -- ali o
+    # teto vira o próprio valor, e o clip não faz nada.
+    valor = real.where(real > 0, proporcional)
+    lancado = float(valor.clip(upper=previsto.where(previsto > 0, valor)).sum())
     pontas = cert_txt(pd.concat([lanc["ORIGEM"], lanc["DESTINO"]]))
     caixas = {p for p in pontas if p.startswith(CAIXA_PREFIXOS)}
     return {"circuitos": int(len(lanc)), "metros": metros, "lancado": lancado,
@@ -5303,12 +5316,10 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                                            if kv[1]["m"] else 0.0, -kv[1]["m"]))
             prontos = sum(1 for _, s in ordem
                           if s["m"] and s["real"] / s["m"] * 100 >= 99.5)
-            # 1.130 dos 4.375 circuitos têm METROS_REAL maior que METROS: o
-            # campo mediu mais do que a estimativa previa. A conta é a mesma
-            # do cartão "Avanço do cabo" -- recalcular com o metro capado
-            # daria uma segunda resposta para a mesma pergunta na mesma tela
-            # -- então o percentual passa de 100 nesses, e a barra é que para.
-            acima = sum(1 for _, s in ordem if s["m"] and s["real"] > s["m"])
+            # O metro já vem capado no previsto pelo cert_metro_real, que é a
+            # mesma fonte do cartão "Avanço do cabo" -- então este percentual
+            # não passa de 100 e não é uma segunda resposta para a pergunta
+            # que o cartão já responde.
             linhas_seg = []
             for nome_seg, s in ordem:
                 p = s["real"] / s["m"] * 100 if s["m"] else 0.0
@@ -5325,9 +5336,7 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                 f'<span class="pl-res">{br_num(len(ordem))} '
                 f'segmento{"s" if len(ordem) > 1 else ""} · '
                 f'<b class="feito">{br_num(prontos)}</b> com cabo pronto'
-                + (f' · <b class="andando">{br_num(acima)}</b> medidos acima do previsto'
-                   if acima else "")
-                + f'</span></div><div class="cs-lista">{"".join(linhas_seg)}</div></div>')
+                f'</span></div><div class="cs-lista">{"".join(linhas_seg)}</div></div>')
     # Um recorte vazio não pode apagar a tela: "TAG apta" hoje tem zero, e a
     # aba inteira sumia junto. A busca cai de volta para todas, e quem explica
     # o vazio é a tabela, no lugar dela.
