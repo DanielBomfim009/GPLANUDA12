@@ -5382,15 +5382,19 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
             if cx and sg and cx in metros_org:
                 caixa_seg[cx] = sg
 
-        # O filtro escolhe QUAIS segmentos aparecem; o número de cada um é
-        # sempre do segmento inteiro. Recortar o segmento pelo filtro daria um
-        # tronco inteiro dividido por meia dúzia de ramais, que não é o avanço
-        # de nada.
+        # Só entra o que está mapeado na lógica: TAG com cadeia de cabo até uma
+        # caixa. TAG que a base dá como pronta e que não aparece aqui é defeito
+        # de base a corrigir, e somá-la escondia exatamente o defeito -- por
+        # isso o universo, e não a 01_BASE_TAGS inteira.
+        #
+        # O filtro escolhe QUAIS segmentos aparecem; o número de cada um sai do
+        # segmento inteiro. Recortar o segmento pelo filtro daria um tronco
+        # inteiro dividido por meia dúzia de ramais, que não é o avanço de nada.
         visiveis = {atrib[t].get("SEGMENTO", "") for t in universo_f
                     if atrib.get(t, {}).get("SEGMENTO")}
         segs: dict[str, dict] = {}
-        for tag, v in atrib.items():
-            nome_seg = v.get("SEGMENTO", "")
+        for tag in universo:
+            nome_seg = atrib.get(tag, {}).get("SEGMENTO", "")
             if nome_seg not in visiveis:
                 continue
             s = segs.setdefault(nome_seg,
