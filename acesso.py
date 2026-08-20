@@ -28,7 +28,14 @@ import secrets
 import time
 
 ARQUIVO = "gplan-acesso.json"
-LOCAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".acesso.json")
+# O caminho do cofre local é sobrescritível por variável de ambiente, e isso
+# não é conveniência: um teste que grava direto no cofre de verdade apaga os
+# logins reais de quem estiver usando a máquina. Aconteceu em 20/08/2026 --
+# o administrador recém-criado foi por cima. Teste aponta para o seu próprio
+# arquivo; sem a variável, o caminho é o de sempre.
+LOCAL = os.environ.get(
+    "GPLAN_ACESSO_ARQUIVO",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), ".acesso.json"))
 VALIDADE = 12 * 3600  # a sessão dura um dia de trabalho
 
 # O catálogo é o contrato: a tela pergunta por estes nomes e a administração
@@ -42,10 +49,69 @@ PERMISSOES = {
 }
 TODAS = list(PERMISSOES)
 
+# O papel é o atalho: escolhe um e as permissões vêm prontas. Depois disso
+# elas continuam editáveis uma a uma -- o papel é o ponto de partida e o
+# rótulo que aparece na tela, não uma jaula.
+PAPEIS = {
+    "Administrador": TODAS,
+    "Colaborador": ["ver_valores", "ver_gitec", "ver_certificacao", "ver_planta"],
+    "Visualizador": ["ver_valores", "ver_certificacao", "ver_planta"],
+    "Apresentador": ["ver_certificacao", "ver_planta"],
+}
+PAPEL_PADRAO = "Colaborador"
+
+# a cor do selo: administrador se distingue de longe, apresentador avisa que
+# aquela sessão está sem valores
+COR_PAPEL = {"Administrador": "roxo", "Colaborador": "teal",
+             "Visualizador": "azul", "Apresentador": "ambar"}
+
+
+def papel_de(usuario: dict | None) -> str:
+    """O papel gravado; na falta dele, o que as permissões dizem.
+
+    Login criado antes de existir papel não fica sem rótulo: a permissão de
+    administrar já denuncia o administrador, e ver_valores separa quem
+    apresenta de quem trabalha.
+    """
+    if not usuario:
+        return ""
+    if usuario.get("papel") in PAPEIS:
+        return usuario["papel"]
+    perms = usuario.get("permissoes") or []
+    if "administrar" in perms:
+        return "Administrador"
+    if "ver_valores" not in perms:
+        return "Apresentador"
+    return "Colaborador"
+
 
 # ===================================================================== #
 # Senha                                                                 #
 # ===================================================================== #
+
+ESPECIAIS = "!@#$%¨&*()-_=+[]{}^~/\\|;:,.<>?'\"`´"
+
+REGRA_SENHA = ("Mínimo de 8 caracteres, com letra maiúscula, letra minúscula "
+               "e caractere especial.")
+
+
+def problema_na_senha(senha: str) -> str | None:
+    """A senha serve? Devolve o que falta, ou None quando está boa.
+
+    Uma reclamação de cada vez, na ordem em que se digita: listar as quatro
+    de uma vez faz a pessoa relerem tudo para achar a que a pegou.
+    """
+    if len(senha) < 8:
+        return "A senha precisa ter pelo menos 8 caracteres."
+    if not any(c.isupper() for c in senha):
+        return "A senha precisa ter pelo menos uma letra maiúscula."
+    if not any(c.islower() for c in senha):
+        return "A senha precisa ter pelo menos uma letra minúscula."
+    if not any(c in ESPECIAIS for c in senha):
+        return ("A senha precisa ter pelo menos um caractere especial "
+                "(por exemplo ! @ # $ % & *).")
+    return None
+
 
 def cifrar(senha: str) -> str:
     """scrypt com sal novo a cada senha. n=2**14 é o custo recomendado para
@@ -139,11 +205,24 @@ def segredo(cofre: dict) -> str:
 # Usuários                                                              #
 # ===================================================================== #
 
-def novo_usuario(login: str, senha: str, nome: str, permissoes: list[str]) -> dict:
+def novo_usuario(login: str, senha: str, nome: str, permissoes: list[str],
+                 email: str = "", papel: str = PAPEL_PADRAO) -> dict:
     return {"nome": nome or login,
+            "email": (email or "").strip(),
+            "papel": papel if papel in PAPEIS else PAPEL_PADRAO,
+            "foto": "",  # data URI, gravado pelo próprio dono no perfil
             "senha": cifrar(senha),
             "permissoes": [p for p in permissoes if p in PERMISSOES],
             "ativo": True}
+
+
+def iniciais(nome: str, login: str = "") -> str:
+    partes = [p for p in (nome or login or "?").split() if p]
+    if not partes:
+        return "?"
+    if len(partes) == 1:
+        return partes[0][:2].upper()
+    return (partes[0][0] + partes[-1][0]).upper()
 
 
 def autenticar(cofre: dict, login: str, senha: str) -> dict | None:

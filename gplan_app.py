@@ -721,6 +721,29 @@ def pode(permissao: str) -> bool:
     return acesso.pode(st.session_state.get("gplan_usuario"), permissao)
 
 
+def guardar_cofre(cofre: dict) -> bool:
+    """Grava o cofre e diz o que houve quando não dá.
+
+    O modo de falha que importa é um só: a chave do Supabase ler mas não
+    escrever. Sem esta mensagem, criar o administrador estoura um traceback
+    de biblioteca e ninguém liga a causa à permissão do bucket -- e o sistema
+    fica sem ninguém dentro, que é o pior momento para adivinhar.
+    """
+    try:
+        acesso.gravar(cofre)
+        st.session_state["gplan_cofre"] = cofre
+        return True
+    except Exception as erro:
+        st.error(
+            "Não consegui gravar os logins no Supabase Storage "
+            f"(bucket `{SUPABASE_BUCKET}`, arquivo `{acesso.ARQUIVO}`).\n\n"
+            "A causa quase sempre é a chave do projeto ter permissão de "
+            "leitura mas não de escrita. Nada foi salvo — o login que você "
+            "acabou de criar não existe.\n\n"
+            f"Detalhe técnico: {type(erro).__name__}: {erro}")
+        return False
+
+
 # A entrada é a primeira tela que o cliente vê, e às vezes a única antes da
 # reunião começar. O movimento aqui é de chegada -- a marca aparece, o cartão
 # sobe -- e para depois: animação que fica repetindo em tela de login vira
@@ -793,6 +816,31 @@ svg.lg-mark { width:44px; height:44px; flex:none;
 """
 
 
+def traduzir_campos_de_senha() -> None:
+    """O botão de mostrar a senha vem do Streamlit, e vem em inglês.
+
+    Não há parâmetro para trocar esse rótulo, e ele é recriado a cada
+    redesenho -- por isso um observador, e não uma passada única. Roda dentro
+    do iframe de components e alcança o documento de fora por parent.
+    """
+    st.components.v1.html("""
+<script>
+try {
+  const doc = parent.document;
+  const NOMES = {"Show password": "Mostrar a senha",
+                 "Hide password": "Ocultar a senha"};
+  const traduz = () => {
+    doc.querySelectorAll('button[aria-label]').forEach(b => {
+      const novo = NOMES[b.getAttribute('aria-label')];
+      if (novo) { b.setAttribute('aria-label', novo); b.title = novo; }
+    });
+  };
+  traduz();
+  new MutationObserver(traduz).observe(doc.body, {childList: true, subtree: true});
+} catch (e) {}
+</script>""", height=0)
+
+
 def exigir_login() -> dict:
     """Sem login não desenha nada. Devolve o usuário ou para a execução.
 
@@ -810,6 +858,7 @@ def exigir_login() -> dict:
     # formata o stForm inteiro -- na folha global pegaria também os
     # formulários da aba Acessos, que são outra coisa.
     render_html(ENTRADA_CSS)
+    traduzir_campos_de_senha()
     render_html(
         '<div class="lg-halo"></div>'
         '<div class="lg-caixa"><div class="lg-marca">'
@@ -827,22 +876,25 @@ def exigir_login() -> dict:
         with st.form("criar_admin"):
             login = st.text_input("Login do administrador").strip().lower()
             nome = st.text_input("Nome")
-            senha = st.text_input("Senha", type="password")
+            senha = st.text_input("Senha", type="password",
+                                  help=acesso.REGRA_SENHA)
             repete = st.text_input("Repita a senha", type="password")
+            st.caption(acesso.REGRA_SENHA)
             if st.form_submit_button("Criar administrador", type="primary"):
                 if not login or not senha:
                     st.error("Login e senha são obrigatórios.")
                 elif senha != repete:
                     st.error("As senhas não conferem.")
-                elif len(senha) < 8:
-                    st.error("A senha precisa de pelo menos 8 caracteres.")
+                elif (falta := acesso.problema_na_senha(senha)):
+                    st.error(falta)
                 else:
                     cofre.setdefault("usuarios", {})[login] = acesso.novo_usuario(
                         login, senha, nome, acesso.TODAS)
-                    acesso.gravar(cofre)
-                    st.session_state["gplan_cofre"] = cofre
-                    st.success("Administrador criado. Entre com ele agora.")
-                    st.rerun()
+                    if guardar_cofre(cofre):
+                        st.success("Administrador criado. Entre com ele agora.")
+                        st.rerun()
+                    else:
+                        cofre["usuarios"].pop(login, None)
         st.stop()
 
     with st.form("entrar"):
@@ -2189,19 +2241,69 @@ def inject_css():
         .pl-kpis.cinco .pl-kpi .v { font-size:25px; }
         .pl-kpis.tres { grid-template-columns:repeat(3,1fr); }
 
-        /* quem esta logado, na lateral */
-        .sb-eu { display:flex; align-items:center; gap:9px; flex-wrap:wrap;
-                 padding:9px 11px; margin:2px 0 8px; border-radius:11px;
-                 background:var(--dark-card-2); border:1px solid var(--border-color); }
-        .sb-ini { width:26px; height:26px; flex:none; border-radius:50%;
-                  display:grid; place-items:center; font-size:10.5px; font-weight:800;
+        /* O perfil mora no rodape da lateral. O conteudo da sidebar vira uma
+           coluna e o ultimo bloco e empurrado para baixo -- assim ele fica
+           colado no pe da tela por mais curto que o menu seja, sem position
+           fixed, que brigaria com a rolagem do proprio menu. */
+        [data-testid="stSidebarUserContent"] { display:flex; flex-direction:column;
+                                               min-height:calc(100vh - 150px); }
+        [data-testid="stSidebarUserContent"] .sb-perfil { margin-top:auto; }
+
+        .sb-perfil { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+                     padding:9px 11px; margin:14px 0 6px; border-radius:12px;
+                     background:var(--dark-card-2);
+                     border:1px solid var(--border-color); }
+        .sb-ini, .sb-foto { width:30px; height:30px; flex:none; border-radius:50%; }
+        .sb-ini { display:grid; place-items:center; font-size:11px; font-weight:800;
                   color:var(--sobre-cor); background:var(--accent-teal); }
-        .sb-nome { font-size:12px; font-weight:650; color:var(--text-2);
-                   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .sb-foto { object-fit:cover; border:1px solid var(--border-strong); }
+        .sb-txt { min-width:0; display:flex; flex-direction:column; line-height:1.25; }
+        .sb-txt b { font-size:12px; font-weight:700; color:var(--text-1);
+                    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .sb-txt i { font-style:normal; font-size:10.5px; color:var(--text-3);
+                    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .sb-oculto { width:100%; font-size:9.5px; font-weight:700; letter-spacing:.4px;
                      text-transform:uppercase; color:var(--accent-amber);
                      background:rgba(var(--rgb-ambar),.13); border-radius:5px;
-                     padding:2px 6px; }
+                     padding:2px 6px; text-align:center; }
+        /* o "Meu perfil" e uma continuacao do cartao, nao um botao a mais */
+        [data-testid="stSidebarUserContent"] .stButton button {
+            border:1px solid var(--border-color); background:transparent;
+            color:var(--text-3); font-size:11.5px; font-weight:600;
+            border-radius:10px; padding:5px 10px; }
+        [data-testid="stSidebarUserContent"] .stButton button:hover {
+            color:var(--text-1); border-color:var(--border-strong);
+            background:var(--dark-card-2); }
+
+        /* dialogo do perfil */
+        .pf-topo { display:flex; align-items:center; gap:13px; margin-bottom:14px; }
+        .pf-ini, .pf-foto { width:52px; height:52px; flex:none; border-radius:50%; }
+        .pf-ini { display:grid; place-items:center; font-size:18px; font-weight:800;
+                  color:var(--sobre-cor); background:var(--accent-teal); }
+        .pf-foto { object-fit:cover; border:1px solid var(--border-strong); }
+        .pf-nome { font-size:17px; font-weight:800; color:var(--text-1);
+                   letter-spacing:-.3px; }
+        .pf-login { font-size:12px; color:var(--text-3); margin-top:2px; }
+        .pf-perms { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px; }
+        .pf-tag { font-size:10.5px; font-weight:650; color:var(--txt-teal);
+                  background:rgba(var(--rgb-teal),.12); border-radius:6px;
+                  padding:3px 8px; }
+        .pf-tag.vazio { color:var(--text-3); background:rgba(var(--rgb-tinta),.07); }
+
+        /* o selo do papel: mesma familia de cor nos dois lugares onde aparece */
+        .sb-papel, .pf-papel { font-size:9.5px; font-weight:800; letter-spacing:.5px;
+                               text-transform:uppercase; border-radius:5px;
+                               padding:2px 7px; white-space:nowrap; }
+        .sb-papel { width:100%; text-align:center; }
+        .pf-papel { margin-left:9px; vertical-align:middle; }
+        .sb-papel.roxo,  .pf-papel.roxo  { color:var(--txt-roxo);
+            background:rgba(var(--rgb-roxo),.15); }
+        .sb-papel.teal,  .pf-papel.teal  { color:var(--txt-teal);
+            background:rgba(var(--rgb-teal),.15); }
+        .sb-papel.azul,  .pf-papel.azul  { color:var(--txt-azul);
+            background:rgba(var(--rgb-azul),.15); }
+        .sb-papel.ambar, .pf-papel.ambar { color:var(--txt-ambar);
+            background:rgba(var(--rgb-ambar),.15); }
 
         /* Avanco por segmento: uma barra por segmento H1, a pior em cima.
            Trilho de largura fixa e o metro ao lado -- com 142 segmentos a
@@ -7400,6 +7502,112 @@ def aplicar_filtros(escolhas: dict, tags: pd.DataFrame, resumo: pd.DataFrame,
             esperados[esperados["TAG"].isin(ids)].copy())
 
 
+@st.dialog("Meu perfil")
+def dialogo_perfil():
+    """Foto, e-mail, senha e a saída -- tudo do próprio dono.
+
+    Fica num diálogo, e não numa página, porque perfil não é destino: a pessoa
+    troca a foto e volta para onde estava, sem perder a aba aberta.
+    """
+    cofre = cofre_acesso()
+    eu = st.session_state.get("gplan_usuario", {})
+    login = eu.get("login", "")
+    u = cofre.get("usuarios", {}).get(login)
+    if not u:
+        st.error("Sessão expirada. Entre de novo.")
+        return
+
+    render_html(
+        '<div class="pf-topo">'
+        + (f'<img class="pf-foto" src="{u["foto"]}" alt="">' if u.get("foto")
+           else f'<span class="pf-ini">{esc(acesso.iniciais(u.get("nome",""), login))}</span>')
+        + f'<div><div class="pf-nome">{esc(u.get("nome") or login)}</div>'
+        f'<div class="pf-login">{esc(login)}'
+        + (f' · {esc(u["email"])}' if u.get("email") else "")
+        + "</div></div></div>")
+
+    permitidas = [acesso.PERMISSOES[p] for p in u.get("permissoes", [])
+                  if p in acesso.PERMISSOES]
+    render_html('<div class="pf-perms">'
+                + "".join(f'<span class="pf-tag">{esc(p)}</span>' for p in permitidas)
+                + ("" if permitidas else
+                   '<span class="pf-tag vazio">sem permissões</span>')
+                + "</div>")
+
+    with st.expander("Dados e foto"):
+        nome = st.text_input("Nome", value=u.get("nome", ""), key="pf_nome")
+        email = st.text_input("E-mail", value=u.get("email", ""), key="pf_email")
+        foto = st.file_uploader("Foto", type=["png", "jpg", "jpeg"], key="pf_foto")
+        if st.button("Salvar dados", type="primary", key="pf_salvar"):
+            if foto is not None:
+                bruto = foto.getvalue()
+                # o cofre é um JSON que sobe inteiro a cada gravação: foto
+                # grande deixaria o login lento para todo mundo
+                if len(bruto) > 400_000:
+                    st.error("A foto precisa ter menos de 400 KB.")
+                    st.stop()
+                u["foto"] = ("data:" + (foto.type or "image/png") + ";base64,"
+                             + base64.b64encode(bruto).decode())
+            u["nome"] = nome.strip() or login
+            u["email"] = email.strip()
+            if guardar_cofre(cofre):
+                st.session_state["gplan_usuario"] = dict(u, login=login)
+                st.rerun()
+
+    with st.expander("Trocar a senha"):
+        atual = st.text_input("Senha atual", type="password", key="pf_atual")
+        nova = st.text_input("Nova senha", type="password", key="pf_nova",
+                             help=acesso.REGRA_SENHA)
+        repete = st.text_input("Repita a nova senha", type="password", key="pf_rep")
+        st.caption(acesso.REGRA_SENHA)
+        if st.button("Trocar a senha", type="primary", key="pf_trocar"):
+            # exige a atual mesmo já estando logado: sessão aberta e esquecida
+            # numa máquina não pode virar troca de senha por quem passar
+            if not acesso.confere(atual, u.get("senha", "")):
+                st.error("A senha atual não confere.")
+            elif nova != repete:
+                st.error("As senhas não conferem.")
+            elif (falta := acesso.problema_na_senha(nova)):
+                st.error(falta)
+            else:
+                u["senha"] = acesso.cifrar(nova)
+                if guardar_cofre(cofre):
+                    st.success("Senha trocada.")
+
+    if st.button("Sair da conta", key="pf_sair", use_container_width=True):
+        esquecer_sessao()
+        st.session_state.pop("gplan_usuario", None)
+        st.session_state.pop("gplan_cofre", None)
+        st.rerun()
+
+
+def render_perfil_lateral():
+    """O perfil no rodapé da lateral: foto, nome e o caminho para o resto.
+
+    Sair saiu da lateral. Era um botão do tamanho do menu para uma ação que se
+    usa uma vez por dia, competindo com as abas -- agora mora dentro do
+    perfil, junto com foto e senha, que é onde se procura.
+    """
+    eu = st.session_state.get("gplan_usuario", {})
+    login = eu.get("login", "")
+    papel = acesso.papel_de(eu)
+    render_html(
+        '<div class="sb-perfil">'
+        + (f'<img class="sb-foto" src="{eu["foto"]}" alt="">' if eu.get("foto")
+           else f'<span class="sb-ini">{esc(acesso.iniciais(eu.get("nome",""), login))}</span>')
+        + '<span class="sb-txt">'
+        f'<b>{esc(eu.get("nome") or login)}</b>'
+        + (f'<i>{esc(eu.get("email") or login)}</i>')
+        + "</span>"
+        + f'<span class="sb-papel {acesso.COR_PAPEL.get(papel, "teal")}">{esc(papel)}</span>' 
+        + ("" if pode("ver_valores")
+           else '<span class="sb-oculto" title="Este login não vê valores em '
+                'reais">valores ocultos</span>')
+        + "</div>")
+    if st.button("Meu perfil", key="abrir_perfil", use_container_width=True):
+        dialogo_perfil()
+
+
 def render_acessos():
     """Quem entra e o que cada um vê. Só o administrador chega aqui.
 
@@ -7412,23 +7620,35 @@ def render_acessos():
     usuarios = cofre.setdefault("usuarios", {})
     eu = st.session_state.get("gplan_usuario", {}).get("login", "")
 
-    def salvar():
-        acesso.gravar(cofre)
-        st.session_state["gplan_cofre"] = cofre
+    def salvar() -> bool:
+        return guardar_cofre(cofre)
 
     st.subheader("Logins")
     for login, u in sorted(usuarios.items()):
         with st.expander(
-                f"{u.get('nome') or login}  ·  {login}"
+                f"{u.get('nome') or login}  ·  {acesso.papel_de(u)}  ·  {login}"
                 + ("" if u.get("ativo", True) else "  ·  desativado")
                 + ("  ·  você" if login == eu else "")):
             marcadas = st.multiselect(
                 "Permissões", acesso.TODAS,
                 default=[p for p in u.get("permissoes", []) if p in acesso.PERMISSOES],
                 format_func=lambda p: acesso.PERMISSOES[p], key=f"perm_{login}")
+            papel_atual = acesso.papel_de(u)
+            papel_novo = st.selectbox(
+                "Papel", list(acesso.PAPEIS),
+                index=list(acesso.PAPEIS).index(papel_atual),
+                key=f"papel_{login}",
+                help="Trocar o papel repõe as permissões padrão dele. "
+                     "Depois disso dá para ajustar uma a uma.")
+            if papel_novo != papel_atual:
+                st.info(f"Ao salvar, as permissões passam a ser as de "
+                        f"{papel_novo}: "
+                        + ", ".join(acesso.PERMISSOES[p]
+                                    for p in acesso.PAPEIS[papel_novo]) + ".")
             ativo = st.checkbox("Ativo", value=u.get("ativo", True), key=f"ativo_{login}")
             nova = st.text_input("Trocar a senha (deixe vazio para manter)",
-                                 type="password", key=f"senha_{login}")
+                                 type="password", key=f"senha_{login}",
+                                 help=acesso.REGRA_SENHA)
             c1, c2 = st.columns(2)
             if c1.button("Salvar", key=f"salvar_{login}", type="primary"):
                 # o administrador não pode se trancar do lado de fora: sem
@@ -7440,40 +7660,55 @@ def render_acessos():
                         "administrar" not in marcadas or not ativo):
                     st.error("Você é o único administrador ativo. Crie outro antes "
                              "de tirar a sua permissão ou se desativar.")
-                elif nova and len(nova) < 8:
-                    st.error("A senha precisa de pelo menos 8 caracteres.")
+                elif nova and (falta := acesso.problema_na_senha(nova)):
+                    st.error(falta)
                 else:
-                    u["permissoes"] = marcadas
+                    # trocar o papel repoe as permissoes dele; manter o papel
+                    # respeita o que a pessoa marcou a mao
+                    u["permissoes"] = (list(acesso.PAPEIS[papel_novo])
+                                       if papel_novo != papel_atual else marcadas)
+                    u["papel"] = papel_novo
                     u["ativo"] = ativo
                     if nova:
                         u["senha"] = acesso.cifrar(nova)
-                    salvar()
-                    st.success("Salvo.")
-                    st.rerun()
+                    if salvar():
+                        st.success("Salvo.")
+                        st.rerun()
             if login != eu and c2.button("Remover", key=f"remover_{login}"):
+                guardado = dict(usuarios[login])
                 del usuarios[login]
-                salvar()
-                st.rerun()
+                if salvar():
+                    st.rerun()
+                else:
+                    usuarios[login] = guardado
 
     st.subheader("Novo login")
     with st.form("novo_login"):
         login = st.text_input("Login").strip().lower()
         nome = st.text_input("Nome")
-        senha = st.text_input("Senha", type="password")
-        perms = st.multiselect("Permissões", acesso.TODAS,
-                               format_func=lambda p: acesso.PERMISSOES[p])
+        email = st.text_input("E-mail")
+        senha = st.text_input("Senha", type="password", help=acesso.REGRA_SENHA)
+        st.caption(acesso.REGRA_SENHA)
+        papel = st.selectbox("Papel", list(acesso.PAPEIS),
+                             index=list(acesso.PAPEIS).index(acesso.PAPEL_PADRAO))
+        st.caption("Permissões do papel: "
+                   + ", ".join(acesso.PERMISSOES[p] for p in acesso.PAPEIS[papel])
+                   + ". Dá para ajustar depois, no login criado.")
         if st.form_submit_button("Criar", type="primary"):
             if not login or not senha:
                 st.error("Login e senha são obrigatórios.")
-            elif len(senha) < 8:
-                st.error("A senha precisa de pelo menos 8 caracteres.")
+            elif (falta := acesso.problema_na_senha(senha)):
+                st.error(falta)
             elif login in usuarios:
                 st.error("Já existe um login com esse nome.")
             else:
-                usuarios[login] = acesso.novo_usuario(login, senha, nome, perms)
-                salvar()
-                st.success(f"Login {login} criado.")
-                st.rerun()
+                usuarios[login] = acesso.novo_usuario(
+                    login, senha, nome, acesso.PAPEIS[papel], email, papel)
+                if salvar():
+                    st.success(f"Login {login} criado.")
+                    st.rerun()
+                else:
+                    usuarios.pop(login, None)
 
 
 def main():
@@ -7520,22 +7755,7 @@ def main():
             '<div class="gplan-brand-sub">Instrumentação · U-12</div>'
             "</div></div>"
         )
-        eu = st.session_state.get("gplan_usuario", {})
-        iniciais = "".join(p[0] for p in (eu.get("nome") or "?").split()[:2]).upper()
-        # o selo de valores ocultos é o que evita o susto na reunião: sem ele,
-        # o traço no lugar do dinheiro se lê como dado faltando
-        render_html(
-            '<div class="sb-eu"><span class="sb-ini">' + esc(iniciais) + "</span>"
-            '<span class="sb-nome">' + esc(eu.get("nome") or eu.get("login", "")) + "</span>"
-            + ("" if pode("ver_valores")
-               else '<span class="sb-oculto" title="Este login não vê valores '
-                    'em reais">valores ocultos</span>')
-            + "</div>")
-        if st.button("Sair", key="sair", use_container_width=True):
-            esquecer_sessao()
-            st.session_state.pop("gplan_usuario", None)
-            st.session_state.pop("gplan_cofre", None)
-            st.rerun()
+        render_perfil_lateral()
 
     escolhas = filtros_da_url(tags, resumo, esperados)
     tags, resumo, esperados = aplicar_filtros(escolhas, tags, resumo, esperados)
