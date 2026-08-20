@@ -1,42 +1,30 @@
 # -*- coding: utf-8 -*-
 """Quem entra no Gplan e o que cada um pode ver.
 
-O problema que originou isto é concreto: apresentar o sistema para o cliente
-sem mostrar valor em reais. Um botão de "modo apresentação" resolveria a tela,
-mas não resolve o controle -- qualquer um clica de volta, inclusive na frente
-do cliente. Então o que a tela mostra passa a ser consequência de quem entrou.
+Quem autentica é o Auth do Supabase. Não há senha guardada por este código,
+nem hash, nem sal, nem token assinado à mão -- tudo isso é do Supabase, que
+faz disso o ofício. O que sobra aqui é o que é do Gplan: papel e permissão,
+numa tabela `perfis` ligada por id ao usuário do Auth.
 
-ONDE OS USUÁRIOS MORAM. No mesmo bucket do Supabase onde já mora a planilha,
-num JSON. Não é banco, e para meia dúzia de logins não precisa ser: usa a
-credencial que o app já tem, não pede migração de schema e não depende do
-disco do Render, que é apagado a cada deploy. Em desenvolvimento
-(GPLAN_LOCAL=1) o mesmo JSON fica num arquivo ao lado do app.
+A versão anterior guardava os logins num JSON no bucket e cifrava a senha
+com scrypt. Funcionava, mas escrevia o arquivo inteiro a cada mudança -- dois
+administradores editando ao mesmo tempo se sobrescreviam -- e a biblioteca
+devolvia erro de escrita em vez de levantar, o que fez a tela anunciar um
+administrador que nunca foi gravado. Numa tabela isso não acontece, e quem
+esquece a senha passa a poder recuperá-la por e-mail em vez de depender de
+alguém.
 
-SENHA NUNCA É GRAVADA. O que fica guardado é o resultado do scrypt com sal
-por usuário; a conferência é feita com compare_digest, que não vaza o
-tamanho do acerto pelo tempo de resposta. Não existe caminho no código que
-leia a senha de volta -- esquecer significa o administrador cadastrar outra.
+O que o Supabase precisa ter (feito em 20/08/2026):
+  - tabela public.perfis, com RLS ligado e SEM política -- só a service_role
+    enxerga, a API pública fica fechada;
+  - gatilho ao_criar_usuario, que cria o perfil junto com a conta;
+  - "Enable sign-ups" DESLIGADO: quem cria login é o administrador, pela tela.
 """
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
-import json
 import os
-import secrets
-import time
 
-ARQUIVO = "gplan-acesso.json"
-# O caminho do cofre local é sobrescritível por variável de ambiente, e isso
-# não é conveniência: um teste que grava direto no cofre de verdade apaga os
-# logins reais de quem estiver usando a máquina. Aconteceu em 20/08/2026 --
-# o administrador recém-criado foi por cima. Teste aponta para o seu próprio
-# arquivo; sem a variável, o caminho é o de sempre.
-LOCAL = os.environ.get(
-    "GPLAN_ACESSO_ARQUIVO",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), ".acesso.json"))
-VALIDADE = 12 * 3600  # a sessão dura um dia de trabalho
+TABELA = "perfis"
 
 # O catálogo é o contrato: a tela pergunta por estes nomes e a administração
 # oferece exatamente estes. Permissão que não está aqui não existe.
@@ -59,47 +47,25 @@ PAPEIS = {
     "Apresentador": ["ver_certificacao", "ver_planta"],
 }
 PAPEL_PADRAO = "Colaborador"
-
-# a cor do selo: administrador se distingue de longe, apresentador avisa que
-# aquela sessão está sem valores
 COR_PAPEL = {"Administrador": "roxo", "Colaborador": "teal",
              "Visualizador": "azul", "Apresentador": "ambar"}
 
-
-def papel_de(usuario: dict | None) -> str:
-    """O papel gravado; na falta dele, o que as permissões dizem.
-
-    Login criado antes de existir papel não fica sem rótulo: a permissão de
-    administrar já denuncia o administrador, e ver_valores separa quem
-    apresenta de quem trabalha.
-    """
-    if not usuario:
-        return ""
-    if usuario.get("papel") in PAPEIS:
-        return usuario["papel"]
-    perms = usuario.get("permissoes") or []
-    if "administrar" in perms:
-        return "Administrador"
-    if "ver_valores" not in perms:
-        return "Apresentador"
-    return "Colaborador"
-
-
-# ===================================================================== #
-# Senha                                                                 #
-# ===================================================================== #
-
 ESPECIAIS = "!@#$%¨&*()-_=+[]{}^~/\\|;:,.<>?'\"`´"
-
 REGRA_SENHA = ("Mínimo de 8 caracteres, com letra maiúscula, letra minúscula "
                "e caractere especial.")
+
+
+class SemSupabase(RuntimeError):
+    """Faltou credencial. É erro de configuração, não de senha."""
 
 
 def problema_na_senha(senha: str) -> str | None:
     """A senha serve? Devolve o que falta, ou None quando está boa.
 
-    Uma reclamação de cada vez, na ordem em que se digita: listar as quatro
-    de uma vez faz a pessoa relerem tudo para achar a que a pegou.
+    Uma reclamação de cada vez, na ordem em que se digita: listar as quatro de
+    uma vez faz a pessoa reler tudo para achar a que a pegou. O Supabase tem a
+    própria exigência mínima; esta é a da casa, e a que dá a mensagem em
+    português.
     """
     if len(senha) < 8:
         return "A senha precisa ter pelo menos 8 caracteres."
@@ -113,45 +79,47 @@ def problema_na_senha(senha: str) -> str | None:
     return None
 
 
-def cifrar(senha: str) -> str:
-    """scrypt com sal novo a cada senha. n=2**14 é o custo recomendado para
-    uso interativo -- alto o bastante para atrapalhar força bruta, baixo o
-    bastante para o login não pesar."""
-    sal = secrets.token_bytes(16)
-    bruto = hashlib.scrypt(senha.encode("utf-8"), salt=sal, n=2 ** 14, r=8, p=1,
-                           dklen=32)
-    return f"scrypt${base64.b64encode(sal).decode()}${base64.b64encode(bruto).decode()}"
+def papel_de(usuario: dict | None) -> str:
+    """O papel gravado; na falta dele, o que as permissões dizem."""
+    if not usuario:
+        return ""
+    if usuario.get("papel") in PAPEIS:
+        return usuario["papel"]
+    perms = usuario.get("permissoes") or []
+    if "administrar" in perms:
+        return "Administrador"
+    if "ver_valores" not in perms:
+        return "Apresentador"
+    return "Colaborador"
 
 
-def confere(senha: str, guardado: str) -> bool:
-    try:
-        algoritmo, sal_b64, alvo_b64 = str(guardado).split("$")
-        if algoritmo != "scrypt":
-            return False
-        bruto = hashlib.scrypt(senha.encode("utf-8"),
-                               salt=base64.b64decode(sal_b64),
-                               n=2 ** 14, r=8, p=1, dklen=32)
-    except Exception:
+def iniciais(nome: str, email: str = "") -> str:
+    partes = [p for p in (nome or "").split() if p]
+    if not partes:
+        return (email or "?")[:2].upper()
+    if len(partes) == 1:
+        return partes[0][:2].upper()
+    return (partes[0][0] + partes[-1][0]).upper()
+
+
+def pode(usuario: dict | None, permissao: str) -> bool:
+    if not usuario or not usuario.get("ativo", True):
         return False
-    return hmac.compare_digest(bruto, base64.b64decode(alvo_b64))
+    return permissao in (usuario.get("permissoes") or [])
 
 
 # ===================================================================== #
-# Onde ficam guardados                                                  #
+# Conexão                                                               #
 # ===================================================================== #
 
 def _sem_proxy_para(url: str) -> None:
     """Tira o Supabase do caminho do proxy corporativo.
 
-    A rede da AG exporta HTTPS_PROXY, e o supabase-py (via httpx) obedece.
-    O proxy faz interceptação TLS e apresenta um certificado próprio, que o
-    Python recusa -- o erro que aparece é CERTIFICATE_VERIFY_FAILED, e ele
-    parece problema de credencial quando é de rota. A conexão direta ao
-    Supabase funciona e é verificada de verdade (TLSv1.3), então o certo é
-    não mandar esse tráfego pelo proxy.
-
-    Some sozinho fora da rede corporativa: sem proxy definido, não há nada a
-    contornar e a variável simplesmente não atrapalha.
+    A rede da AG exporta HTTPS_PROXY, e o supabase-py (via httpx) obedece. O
+    proxy faz interceptação TLS e apresenta certificado próprio, que o Python
+    recusa -- o erro é CERTIFICATE_VERIFY_FAILED, e parece problema de
+    credencial quando é de rota. A conexão direta funciona e é verificada de
+    verdade (TLSv1.3). Fora da rede corporativa não há o que contornar.
     """
     try:
         host = url.split("//", 1)[-1].split("/", 1)[0]
@@ -163,18 +131,7 @@ def _sem_proxy_para(url: str) -> None:
             os.environ[nome] = f"{atual},{host}".strip(",")
 
 
-def _cliente():
-    """O cliente do Supabase, ou None quando não há credencial.
-
-    GPLAN_LOCAL=1 NÃO desliga o Supabase aqui, e essa é a diferença que
-    importa: aquela variável quer dizer "leia a planilha do disco", e login é
-    outro assunto. Desenvolver com a planilha local e os usuários de verdade é
-    o caso normal -- sem isso, testar o acesso em localhost exigiria subir o
-    sistema inteiro no Render, que é justamente o que trava.
-
-    Sem credencial nenhuma, cai no arquivo local -- assim quem clonar o
-    projeto ainda consegue rodar.
-    """
+def _credenciais() -> tuple[str, str]:
     url = os.environ.get("SUPABASE_URL")
     chave = os.environ.get("SUPABASE_KEY")
     if not (url and chave):
@@ -185,157 +142,195 @@ def _cliente():
         except Exception:
             pass
     if not (url and chave):
-        return None
+        raise SemSupabase(
+            "SUPABASE_URL e SUPABASE_KEY não estão configuradas. O login "
+            "depende delas: sem as duas não há como autenticar ninguém.")
+    return url, chave
+
+
+def cliente():
+    """Um cliente novo a cada chamada.
+
+    De propósito: o cliente do supabase-py guarda a sessão de quem entrou
+    dentro dele. Reaproveitar um único cliente entre pessoas faria a sessão de
+    uma vazar para a próxima -- o mesmo tipo de contaminação que o cache já
+    causou neste projeto.
+    """
+    url, chave = _credenciais()
     _sem_proxy_para(url)
     from supabase import create_client
     return create_client(url, chave)
 
 
-def ler() -> dict:
-    """O cofre inteiro: usuários e o segredo que assina a sessão.
+# ===================================================================== #
+# Perfil: o que é do Gplan, não do Auth                                 #
+# ===================================================================== #
 
-    A falha de leitura vai em "_erro" em vez de virar cofre vazio calado: sem
-    isso, bucket fora do ar e primeiro uso se parecem na tela -- os dois
-    mostram "crie o administrador" -- e criar por cima apaga quem já existia.
+def _monta(uid: str, email: str, linha: dict | None) -> dict:
+    linha = linha or {}
+    perms = linha.get("permissoes") or []
+    if isinstance(perms, str):
+        import json
+        try:
+            perms = json.loads(perms)
+        except Exception:
+            perms = []
+    return {"id": uid, "login": email, "email": email,
+            "nome": linha.get("nome") or "",
+            "papel": linha.get("papel") or PAPEL_PADRAO,
+            "foto": linha.get("foto") or "",
+            "permissoes": [p for p in perms if p in PERMISSOES],
+            "ativo": bool(linha.get("ativo", True))}
+
+
+def perfil(uid: str, email: str) -> dict:
+    """O perfil da conta, lido SEMPRE com um cliente de serviço.
+
+    Nunca com o cliente que acabou de autenticar: o supabase-py guarda a
+    sessão dentro do cliente, e depois do sign_in ele deixa de falar como
+    service_role e passa a falar como a pessoa. Como a tabela tem RLS ligado e
+    nenhuma política, a linha some da consulta -- o código conclui que não
+    existe, tenta inserir e leva "new row violates row-level security policy".
+    A linha estava lá o tempo todo; quem mudou foi quem perguntou.
+
+    Se o gatilho não tiver criado o perfil, cria agora: conta sem perfil
+    entraria sem permissão nenhuma e pareceria defeito de permissão, quando é
+    linha faltando.
     """
-    cli = _cliente()
-    if cli is None:
-        cofre = {"usuarios": {}, "segredo": ""}
-        if os.path.exists(LOCAL):
-            with open(LOCAL, encoding="utf-8") as f:
-                cofre = json.load(f)
-        cofre["_origem"] = "local"
-        cofre["_erro"] = ""
-        return cofre
+    cli = cliente()
+    achado = cli.table(TABELA).select("*").eq("id", uid).execute().data
+    if not achado:
+        cli.table(TABELA).insert({"id": uid, "nome": ""}).execute()
+        achado = cli.table(TABELA).select("*").eq("id", uid).execute().data
+    return _monta(uid, email, achado[0] if achado else None)
+
+
+# ===================================================================== #
+# Entrar e sair                                                         #
+# ===================================================================== #
+
+def entrar(email: str, senha: str) -> tuple[dict, str] | None:
+    """Autentica no Supabase. Devolve (usuário, refresh_token) ou None.
+
+    O refresh_token é o que sobrevive no cookie: o access_token vence em uma
+    hora, e guardar ele daria sessão que cai no meio do expediente.
+    """
+    cli = cliente()
     try:
-        bruto = cli.storage.from_("gplan-data").download(ARQUIVO)
-        cofre = json.loads(bruto.decode("utf-8"))
-        cofre["_origem"] = "supabase"
-        cofre["_erro"] = ""
-        return cofre
-    except Exception as erro:
-        texto = f"{type(erro).__name__}: {erro}"
-        # "não achei o arquivo" é o primeiro uso de verdade; qualquer outra
-        # coisa é problema de acesso, e aí a tela não pode oferecer criar
-        primeiro_uso = any(p in texto.lower()
-                           for p in ("not_found", "not found", "404",
-                                     "object not found"))
-        return {"usuarios": {}, "segredo": "", "_origem": "supabase",
-                "_erro": "" if primeiro_uso else texto}
+        r = cli.auth.sign_in_with_password(
+            {"email": str(email).strip().lower(), "password": senha})
+    except Exception:
+        return None
+    if not (r and r.user and r.session):
+        return None
+    u = perfil(r.user.id, r.user.email or email)
+    if not u["ativo"]:
+        return None  # desativado entra como se a senha não conferisse
+    return u, r.session.refresh_token
 
 
-def gravar(cofre: dict) -> None:
-    """Grava e CONFERE relendo.
+def retomar(refresh_token: str) -> tuple[dict, str] | None:
+    """Recupera a sessão a partir do cookie, e devolve o token renovado."""
+    if not refresh_token:
+        return None
+    cli = cliente()
+    try:
+        r = cli.auth.refresh_session(refresh_token)
+    except Exception:
+        return None
+    if not (r and r.user and r.session):
+        return None
+    u = perfil(r.user.id, r.user.email or "")
+    if not u["ativo"]:
+        return None
+    return u, r.session.refresh_token
 
-    O supabase-py nem sempre levanta exceção quando a escrita é recusada --
-    em vários casos devolve um erro que, ignorado, faz o código concluir que
-    salvou. Foi o que aconteceu em produção em 20/08/2026: a tela disse
-    "administrador criado" e no arquivo não havia nada. Reler e comparar é o
-    que transforma "mandei gravar" em "está gravado".
+
+def esquecer(refresh_token: str) -> None:
+    """Encerra a sessão do lado do Supabase, e não só no navegador."""
+    try:
+        cli = cliente()
+        cli.auth.refresh_session(refresh_token)
+        cli.auth.sign_out()
+    except Exception:
+        pass
+
+
+def recuperar_senha(email: str) -> None:
+    """Manda o e-mail de redefinição. Exige SMTP configurado no projeto."""
+    cliente().auth.reset_password_for_email(str(email).strip().lower())
+
+
+# ===================================================================== #
+# Administração                                                         #
+# ===================================================================== #
+
+def listar() -> list[dict]:
+    """Todas as contas, já casadas com o perfil de cada uma."""
+    cli = cliente()
+    contas = cli.auth.admin.list_users()
+    linhas = {r["id"]: r for r in cli.table(TABELA).select("*").execute().data}
+    return sorted(
+        (_monta(c.id, c.email or "", linhas.get(c.id)) for c in contas),
+        key=lambda u: (u["nome"] or u["email"]).lower())
+
+
+def criar(email: str, senha: str, nome: str, papel: str,
+          permissoes: list[str] | None = None) -> dict:
+    """Cria a conta já confirmada e grava o perfil.
+
+    email_confirm=True porque quem cria é o administrador: exigir que a
+    pessoa clique num link para existir só atrasaria, e o e-mail nem sempre
+    chega (o mailer embutido do Supabase é limitado).
     """
-    limpo = {k: v for k, v in cofre.items() if not k.startswith("_")}
-    dados = json.dumps(limpo, ensure_ascii=False, indent=2).encode("utf-8")
-    cli = _cliente()
-    if cli is None:
-        with open(LOCAL, "wb") as f:
-            f.write(dados)
+    cli = cliente()
+    r = cli.auth.admin.create_user({
+        "email": str(email).strip().lower(),
+        "password": senha,
+        "email_confirm": True,
+        "user_metadata": {"nome": nome or ""},
+    })
+    uid = r.user.id
+    cli.table(TABELA).upsert({
+        "id": uid, "nome": nome or "",
+        "papel": papel if papel in PAPEIS else PAPEL_PADRAO,
+        "permissoes": list(permissoes if permissoes is not None
+                           else PAPEIS.get(papel, [])),
+        "ativo": True,
+    }).execute()
+    return perfil(uid, r.user.email or email)
+
+
+def salvar_perfil(uid: str, **campos) -> None:
+    """Grava só o que veio, e nada além disso."""
+    dados = {k: v for k, v in campos.items()
+             if k in ("nome", "papel", "foto", "permissoes", "ativo")}
+    if not dados:
         return
-
-    balde = cli.storage.from_("gplan-data")
-    opcoes = {"content-type": "application/json", "upsert": "true"}
-    erros = []
-    for tentativa in (lambda: balde.update(ARQUIVO, dados, opcoes),
-                      lambda: balde.upload(ARQUIVO, dados, opcoes)):
-        try:
-            tentativa()
-        except Exception as erro:
-            erros.append(f"{type(erro).__name__}: {erro}")
-            continue
-        # a prova: releia e veja se os logins bateram
-        try:
-            de_volta = json.loads(balde.download(ARQUIVO).decode("utf-8"))
-        except Exception as erro:
-            erros.append(f"releitura falhou: {type(erro).__name__}: {erro}")
-            continue
-        if set(de_volta.get("usuarios", {})) == set(limpo.get("usuarios", {})):
-            return
-        erros.append("o arquivo relido não tem os logins que acabaram de ser "
-                     "gravados")
-    raise RuntimeError("não consegui gravar o cofre no Supabase Storage. "
-                       + " | ".join(erros))
+    cliente().table(TABELA).update(dados).eq("id", uid).execute()
 
 
-def segredo(cofre: dict) -> str:
-    """A chave que assina o cookie de sessão. Nasce junto com o primeiro
-    login e fica no cofre: trocá-la derruba todas as sessões, que é o
-    comportamento certo se alguém suspeitar de vazamento."""
-    if not cofre.get("segredo"):
-        cofre["segredo"] = secrets.token_hex(32)
-        gravar(cofre)
-    return cofre["segredo"]
+def trocar_senha(uid: str, nova: str) -> None:
+    cliente().auth.admin.update_user_by_id(uid, {"password": nova})
 
 
-# ===================================================================== #
-# Usuários                                                              #
-# ===================================================================== #
+def trocar_minha_senha(email: str, atual: str, nova: str) -> bool:
+    """Troca a própria senha, conferindo a atual.
 
-def novo_usuario(login: str, senha: str, nome: str, permissoes: list[str],
-                 email: str = "", papel: str = PAPEL_PADRAO) -> dict:
-    return {"nome": nome or login,
-            "email": (email or "").strip(),
-            "papel": papel if papel in PAPEIS else PAPEL_PADRAO,
-            "foto": "",  # data URI, gravado pelo próprio dono no perfil
-            "senha": cifrar(senha),
-            "permissoes": [p for p in permissoes if p in PERMISSOES],
-            "ativo": True}
-
-
-def iniciais(nome: str, login: str = "") -> str:
-    partes = [p for p in (nome or login or "?").split() if p]
-    if not partes:
-        return "?"
-    if len(partes) == 1:
-        return partes[0][:2].upper()
-    return (partes[0][0] + partes[-1][0]).upper()
-
-
-def autenticar(cofre: dict, login: str, senha: str) -> dict | None:
-    u = cofre.get("usuarios", {}).get(str(login).strip().lower())
-    if not u or not u.get("ativo", True):
-        return None
-    if not confere(senha, u.get("senha", "")):
-        return None
-    return u
-
-
-def pode(usuario: dict | None, permissao: str) -> bool:
-    if not usuario:
+    Confere entrando de novo com a senha atual: a sessão aberta prova quem é,
+    não prova que a pessoa sabe a senha -- e máquina esquecida destrancada não
+    pode virar troca de senha por quem passar.
+    """
+    if entrar(email, atual) is None:
         return False
-    return permissao in (usuario.get("permissoes") or [])
+    conta = next((c for c in cliente().auth.admin.list_users()
+                  if (c.email or "").lower() == str(email).strip().lower()), None)
+    if conta is None:
+        return False
+    trocar_senha(conta.id, nova)
+    return True
 
 
-# ===================================================================== #
-# Sessão                                                                #
-# ===================================================================== #
-
-def assinar(login: str, chave: str) -> str:
-    """Cookie de sessão: login, validade e a assinatura dos dois. Sem a
-    assinatura daria para trocar o login no navegador e virar outro."""
-    ate = int(time.time()) + VALIDADE
-    corpo = f"{login}|{ate}"
-    marca = hmac.new(chave.encode(), corpo.encode(), hashlib.sha256).hexdigest()
-    return f"{corpo}|{marca}"
-
-
-def conferir_assinatura(token: str, chave: str) -> str | None:
-    try:
-        login, ate, marca = str(token).split("|")
-    except ValueError:
-        return None
-    corpo = f"{login}|{ate}"
-    esperado = hmac.new(chave.encode(), corpo.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(marca, esperado):
-        return None
-    if int(ate) < int(time.time()):
-        return None
-    return login
+def remover(uid: str) -> None:
+    """Apaga a conta. O perfil vai junto, pelo on delete cascade."""
+    cliente().auth.admin.delete_user(uid)

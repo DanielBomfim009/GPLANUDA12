@@ -668,21 +668,18 @@ def trocar_tema():
 COOKIE_SESSAO = "gplan_sessao"
 
 
-def cofre_acesso() -> dict:
-    """Lido uma vez por sessão: são meia dúzia de logins, e reler a cada
-    redesenho custaria uma ida ao Supabase por clique."""
-    if "gplan_cofre" not in st.session_state:
-        st.session_state["gplan_cofre"] = acesso.ler()
-    return st.session_state["gplan_cofre"]
-
-
 def lembrar_sessao(token: str) -> None:
-    """O mesmo mecanismo do tema: cookie lido pelo servidor no primeiro
-    instante. Sem ele, recarregar a página derrubaria o login -- session_state
-    não sobrevive a F5."""
+    """Guarda a sessão no navegador.
+
+    Mesmo mecanismo do tema: cookie lido pelo servidor no primeiro instante.
+    Sem ele, recarregar a página derrubaria o login -- o session_state não
+    sobrevive a um F5. O que vai no cookie é o refresh_token do Supabase, e
+    não o access_token: o access vence em uma hora e a sessão cairia no meio
+    do expediente.
+    """
     st.components.v1.html(
         "<script>try{parent.document.cookie="
-        f"'{COOKIE_SESSAO}={token};path=/;max-age={acesso.VALIDADE};samesite=lax'}}"
+        f"'{COOKIE_SESSAO}={token};path=/;max-age=2592000;samesite=lax'}}"
         "catch(e){}</script>", height=0)
 
 
@@ -694,54 +691,50 @@ def esquecer_sessao() -> None:
 
 
 def usuario_atual() -> dict | None:
-    """Quem está logado: da sessão, ou do cookie assinado."""
+    """Quem está logado: da sessão, ou do cookie.
+
+    Quem valida é o Supabase -- este código não confere senha nem assinatura.
+    Conta desativada ou apagada deixa de retomar sozinha, porque a validação
+    acontece lá e não numa cópia local.
+    """
     if st.session_state.get("gplan_usuario"):
         return st.session_state["gplan_usuario"]
-    cofre = cofre_acesso()
-    if not cofre.get("usuarios"):
-        return None
     try:
         token = st.context.cookies.get(COOKIE_SESSAO)
     except Exception:
         token = None
     if not token:
         return None
-    login = acesso.conferir_assinatura(token, acesso.segredo(cofre))
-    if not login:
+    retomado = acesso.retomar(token)
+    if not retomado:
         return None
-    u = cofre["usuarios"].get(login)
-    if not u or not u.get("ativo", True):
-        return None
-    dados = dict(u, login=login)
-    st.session_state["gplan_usuario"] = dados
-    return dados
+    usuario, novo_token = retomado
+    st.session_state["gplan_usuario"] = usuario
+    st.session_state["gplan_token"] = novo_token
+    return usuario
 
 
 def pode(permissao: str) -> bool:
     return acesso.pode(st.session_state.get("gplan_usuario"), permissao)
 
 
-def guardar_cofre(cofre: dict) -> bool:
-    """Grava o cofre e diz o que houve quando não dá.
+def recarregar_usuario() -> None:
+    """Relê o perfil depois de mexer nele, para a tela não ficar com o
+    anterior -- trocar a própria foto e continuar vendo a antiga parece que
+    não salvou."""
+    st.session_state.pop("gplan_usuario", None)
+    usuario_atual()
 
-    O modo de falha que importa é um só: a chave do Supabase ler mas não
-    escrever. Sem esta mensagem, criar o administrador estoura um traceback
-    de biblioteca e ninguém liga a causa à permissão do bucket -- e o sistema
-    fica sem ninguém dentro, que é o pior momento para adivinhar.
+
+def avisar_erro(acao: str, erro: Exception) -> None:
+    """Erro de Supabase com o nome do que falhou.
+
+    Sem isto o que aparece é um traceback de biblioteca, e ninguém liga a
+    causa à configuração do projeto -- foi assim que "Email logins are
+    disabled" passou por erro de senha.
     """
-    try:
-        acesso.gravar(cofre)
-        st.session_state["gplan_cofre"] = cofre
-        return True
-    except Exception as erro:
-        st.error(
-            "Não consegui gravar os logins no Supabase Storage "
-            f"(bucket `{SUPABASE_BUCKET}`, arquivo `{acesso.ARQUIVO}`).\n\n"
-            "A causa quase sempre é a chave do projeto ter permissão de "
-            "leitura mas não de escrita. Nada foi salvo — o login que você "
-            "acabou de criar não existe.\n\n"
-            f"Detalhe técnico: {type(erro).__name__}: {erro}")
-        return False
+    st.error(f"Não consegui {acao}.\n\n"
+             f"Detalhe do Supabase: {type(erro).__name__}: {erro}")
 
 
 # A entrada é a primeira tela que o cliente vê, e às vezes a única antes da
@@ -844,31 +837,15 @@ try {
 def exigir_login() -> dict:
     """Sem login não desenha nada. Devolve o usuário ou para a execução.
 
-    O primeiro acesso cadastra o administrador: é a única vez em que a tela
-    aceita criar login sem estar logada, e só enquanto o cofre está vazio --
-    depois disso esse caminho deixa de existir.
+    Quem confere a senha é o Auth do Supabase. Não há mais "primeiro acesso"
+    aqui: a primeira conta nasce pelo painel do Supabase, e criar login virou
+    trabalho do administrador, na aba Acessos. Tela de login que aceita criar
+    conta é tela que qualquer um usa para entrar.
     """
     u = usuario_atual()
     if u:
         return u
 
-    cofre = cofre_acesso()
-    # Cofre ilegível não é primeiro uso. Oferecer "crie o administrador" aqui
-    # convidaria a criar um login por cima de um cofre que existe e não foi
-    # lido -- e o que se veria depois é exatamente "login ou senha inválidos".
-    if cofre.get("_erro"):
-        st.error(
-            "Não consegui ler os logins no Supabase Storage "
-            f"(bucket `{SUPABASE_BUCKET}`, arquivo `{acesso.ARQUIVO}`).\n\n"
-            "Enquanto isso não se resolve, ninguém entra — e é de propósito: "
-            "criar um administrador agora gravaria por cima dos logins que "
-            "já existem.\n\n"
-            f"Detalhe técnico: {cofre['_erro']}")
-        st.stop()
-    primeiro = not cofre.get("usuarios")
-    # O CSS da entrada é injetado aqui, e não na folha do app, porque ele
-    # formata o stForm inteiro -- na folha global pegaria também os
-    # formulários da aba Acessos, que são outra coisa.
     render_html(ENTRADA_CSS)
     traduzir_campos_de_senha()
     render_html(
@@ -877,59 +854,43 @@ def exigir_login() -> dict:
         + _logo_svg("Lat").replace("<svg ", '<svg class="lg-mark" ')
         + '<div class="lg-txt"><div class="lg-nome">Gplan</div>'
         '<div class="lg-sub">Instrumentação · U-12</div></div></div>'
-        + ('<div class="lg-chamada">Crie o administrador</div>'
-           '<div class="lg-aviso">Nenhum login cadastrado ainda. '
-           'Este é o único momento em que a tela aceita criar um login sem '
-           'estar logada.</div>' if primeiro else
-           '<div class="lg-chamada">Entrar</div>')
-        + "</div>")
-
-    if primeiro:
-        with st.form("criar_admin"):
-            login = st.text_input("Login do administrador").strip().lower()
-            nome = st.text_input("Nome")
-            senha = st.text_input("Senha", type="password",
-                                  help=acesso.REGRA_SENHA)
-            repete = st.text_input("Repita a senha", type="password")
-            st.caption(acesso.REGRA_SENHA)
-            if st.form_submit_button("Criar administrador", type="primary"):
-                if not login or not senha:
-                    st.error("Login e senha são obrigatórios.")
-                elif senha != repete:
-                    st.error("As senhas não conferem.")
-                elif (falta := acesso.problema_na_senha(senha)):
-                    st.error(falta)
-                else:
-                    cofre.setdefault("usuarios", {})[login] = acesso.novo_usuario(
-                        login, senha, nome, acesso.TODAS)
-                    if guardar_cofre(cofre):
-                        st.success("Administrador criado. Entre com ele agora.")
-                        st.rerun()
-                    else:
-                        cofre["usuarios"].pop(login, None)
-        st.stop()
-
-    # ?diag=1 na URL conta o que a tela sabe do cofre, sem expor nada: quantos
-    # logins existem e de onde vieram. É o que separa "o cofre está vazio" de
-    # "a senha não confere" sem ter de adivinhar.
-    if st.query_params.get("diag") == "1":
-        st.info(f"Cofre lido de **{cofre.get('_origem', '?')}** · "
-                f"**{len(cofre.get('usuarios', {}))}** login(s) cadastrado(s) · "
-                f"segredo de sessão: {'sim' if cofre.get('segredo') else 'ainda não'}")
+        '<div class="lg-chamada">Entrar</div></div>')
 
     with st.form("entrar"):
-        login = st.text_input("Login").strip().lower()
+        email = st.text_input("E-mail").strip().lower()
         senha = st.text_input("Senha", type="password")
         if st.form_submit_button("Entrar", type="primary"):
-            achado = acesso.autenticar(cofre, login, senha)
-            if not achado:
-                # a mesma mensagem para login inexistente e senha errada: dizer
-                # qual dos dois falhou entrega quais logins existem
-                st.error("Login ou senha inválidos.")
+            try:
+                entrou = acesso.entrar(email, senha)
+            except acesso.SemSupabase as erro:
+                st.error(str(erro))
+                st.stop()
+            except Exception as erro:
+                avisar_erro("falar com o Supabase para autenticar", erro)
+                st.stop()
+            if not entrou:
+                # a mesma mensagem para conta inexistente, senha errada e
+                # conta desativada: dizer qual dos três entrega quem existe
+                st.error("E-mail ou senha inválidos.")
             else:
-                st.session_state["gplan_usuario"] = dict(achado, login=login)
-                lembrar_sessao(acesso.assinar(login, acesso.segredo(cofre)))
+                usuario, token = entrou
+                st.session_state["gplan_usuario"] = usuario
+                st.session_state["gplan_token"] = token
+                lembrar_sessao(token)
                 st.rerun()
+
+    with st.expander("Esqueci a senha"):
+        st.caption("Enviamos um link de redefinição para o e-mail cadastrado. "
+                   "Depende de SMTP configurado no projeto do Supabase.")
+        alvo = st.text_input("E-mail para recuperação", key="lg_recuperar")
+        if st.button("Enviar link", key="lg_enviar"):
+            try:
+                acesso.recuperar_senha(alvo)
+                # a resposta não diz se o e-mail existe: isso entregaria
+                # quais contas existem a quem só chutou um endereço
+                st.success("Se esse e-mail estiver cadastrado, o link foi enviado.")
+            except Exception as erro:
+                avisar_erro("enviar o e-mail de recuperação", erro)
     st.stop()
 
 
@@ -7545,50 +7506,50 @@ def dialogo_perfil():
     Fica num diálogo, e não numa página, porque perfil não é destino: a pessoa
     troca a foto e volta para onde estava, sem perder a aba aberta.
     """
-    cofre = cofre_acesso()
-    eu = st.session_state.get("gplan_usuario", {})
-    login = eu.get("login", "")
-    u = cofre.get("usuarios", {}).get(login)
-    if not u:
+    eu = st.session_state.get("gplan_usuario") or {}
+    if not eu:
         st.error("Sessão expirada. Entre de novo.")
         return
 
+    papel = acesso.papel_de(eu)
     render_html(
         '<div class="pf-topo">'
-        + (f'<img class="pf-foto" src="{u["foto"]}" alt="">' if u.get("foto")
-           else f'<span class="pf-ini">{esc(acesso.iniciais(u.get("nome",""), login))}</span>')
-        + f'<div><div class="pf-nome">{esc(u.get("nome") or login)}</div>'
-        f'<div class="pf-login">{esc(login)}'
-        + (f' · {esc(u["email"])}' if u.get("email") else "")
-        + "</div></div></div>")
+        + (f'<img class="pf-foto" src="{eu["foto"]}" alt="">' if eu.get("foto")
+           else f'<span class="pf-ini">'
+                f'{esc(acesso.iniciais(eu.get("nome", ""), eu.get("email", "")))}</span>')
+        + f'<div><div class="pf-nome">{esc(eu.get("nome") or eu.get("email"))}'
+        f'<span class="pf-papel {acesso.COR_PAPEL.get(papel, "teal")}">'
+        f'{esc(papel)}</span></div>'
+        f'<div class="pf-login">{esc(eu.get("email", ""))}</div></div></div>')
 
-    permitidas = [acesso.PERMISSOES[p] for p in u.get("permissoes", [])
+    permitidas = [acesso.PERMISSOES[p] for p in eu.get("permissoes", [])
                   if p in acesso.PERMISSOES]
     render_html('<div class="pf-perms">'
-                + "".join(f'<span class="pf-tag">{esc(p)}</span>' for p in permitidas)
+                + "".join(f'<span class="pf-tag">{esc(x)}</span>' for x in permitidas)
                 + ("" if permitidas else
                    '<span class="pf-tag vazio">sem permissões</span>')
                 + "</div>")
 
     with st.expander("Dados e foto"):
-        nome = st.text_input("Nome", value=u.get("nome", ""), key="pf_nome")
-        email = st.text_input("E-mail", value=u.get("email", ""), key="pf_email")
+        nome = st.text_input("Nome", value=eu.get("nome", ""), key="pf_nome")
         foto = st.file_uploader("Foto", type=["png", "jpg", "jpeg"], key="pf_foto")
         if st.button("Salvar dados", type="primary", key="pf_salvar"):
+            campos = {"nome": nome.strip()}
             if foto is not None:
                 bruto = foto.getvalue()
-                # o cofre é um JSON que sobe inteiro a cada gravação: foto
-                # grande deixaria o login lento para todo mundo
+                # a foto viaja em toda leitura de perfil: grande, deixaria o
+                # login lento para quem só quer entrar
                 if len(bruto) > 400_000:
                     st.error("A foto precisa ter menos de 400 KB.")
                     st.stop()
-                u["foto"] = ("data:" + (foto.type or "image/png") + ";base64,"
-                             + base64.b64encode(bruto).decode())
-            u["nome"] = nome.strip() or login
-            u["email"] = email.strip()
-            if guardar_cofre(cofre):
-                st.session_state["gplan_usuario"] = dict(u, login=login)
+                campos["foto"] = ("data:" + (foto.type or "image/png") + ";base64,"
+                                  + base64.b64encode(bruto).decode())
+            try:
+                acesso.salvar_perfil(eu["id"], **campos)
+                recarregar_usuario()
                 st.rerun()
+            except Exception as erro:
+                avisar_erro("salvar o perfil", erro)
 
     with st.expander("Trocar a senha"):
         atual = st.text_input("Senha atual", type="password", key="pf_atual")
@@ -7597,23 +7558,26 @@ def dialogo_perfil():
         repete = st.text_input("Repita a nova senha", type="password", key="pf_rep")
         st.caption(acesso.REGRA_SENHA)
         if st.button("Trocar a senha", type="primary", key="pf_trocar"):
-            # exige a atual mesmo já estando logado: sessão aberta e esquecida
-            # numa máquina não pode virar troca de senha por quem passar
-            if not acesso.confere(atual, u.get("senha", "")):
-                st.error("A senha atual não confere.")
-            elif nova != repete:
+            if nova != repete:
                 st.error("As senhas não conferem.")
             elif (falta := acesso.problema_na_senha(nova)):
                 st.error(falta)
             else:
-                u["senha"] = acesso.cifrar(nova)
-                if guardar_cofre(cofre):
-                    st.success("Senha trocada.")
+                try:
+                    # conferir a atual é o que impede que uma sessão esquecida
+                    # numa máquina destrancada vire troca de senha por quem passar
+                    if acesso.trocar_minha_senha(eu["email"], atual, nova):
+                        st.success("Senha trocada.")
+                    else:
+                        st.error("A senha atual não confere.")
+                except Exception as erro:
+                    avisar_erro("trocar a senha", erro)
 
     if st.button("Sair da conta", key="pf_sair", use_container_width=True):
+        acesso.esquecer(st.session_state.get("gplan_token", ""))
         esquecer_sessao()
         st.session_state.pop("gplan_usuario", None)
-        st.session_state.pop("gplan_cofre", None)
+        st.session_state.pop("gplan_token", None)
         st.rerun()
 
 
@@ -7624,18 +7588,17 @@ def render_perfil_lateral():
     usa uma vez por dia, competindo com as abas -- agora mora dentro do
     perfil, junto com foto e senha, que é onde se procura.
     """
-    eu = st.session_state.get("gplan_usuario", {})
-    login = eu.get("login", "")
+    eu = st.session_state.get("gplan_usuario") or {}
     papel = acesso.papel_de(eu)
-    dica = ("" if pode("ver_valores")
-            else " · este login não vê valores em reais")
+    dica = "" if pode("ver_valores") else " · este login não vê valores em reais"
     render_html(
         f'<div class="sb-perfil" title="{esc(papel)}{esc(dica)}">'
         + (f'<img class="sb-foto" src="{eu["foto"]}" alt="">' if eu.get("foto")
-           else f'<span class="sb-ini">{esc(acesso.iniciais(eu.get("nome",""), login))}</span>')
+           else f'<span class="sb-ini">'
+                f'{esc(acesso.iniciais(eu.get("nome", ""), eu.get("email", "")))}</span>')
         + '<span class="sb-txt">'
-        f'<b>{esc(eu.get("nome") or login)}</b>'
-        f'<i>{esc(eu.get("email") or login)}</i>'
+        f'<b>{esc(eu.get("nome") or eu.get("email", ""))}</b>'
+        f'<i>{esc(eu.get("email", ""))}</i>'
         f'<em class="sb-papel {acesso.COR_PAPEL.get(papel, "teal")}">{esc(papel)}</em>'
         "</span>"
         '<span class="sb-seta" aria-hidden="true">'
@@ -7643,9 +7606,8 @@ def render_perfil_lateral():
         ' stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>'
         "</span></div>")
     # O botão do Streamlit não aceita HTML no rótulo, então ele vem depois da
-    # linha e é puxado para cima por CSS, transparente, cobrindo-a: o que se
-    # vê é a linha, o que se clica é o botão. Sem isso seria a linha bonita e
-    # um botão "Meu perfil" repetindo embaixo o que a linha já diz.
+    # linha e é puxado por cima dela, transparente: o que se vê é a linha, o
+    # que se clica é o botão.
     if st.button("Abrir o perfil", key="abrir_perfil", use_container_width=True):
         dialogo_perfil()
 
@@ -7653,82 +7615,84 @@ def render_perfil_lateral():
 def render_acessos():
     """Quem entra e o que cada um vê. Só o administrador chega aqui.
 
-    A tela não mostra senha de ninguém -- não há como: o que está guardado é o
-    scrypt, e dele não se volta. Esquecer significa o administrador gravar
-    outra por cima.
+    A tela não mostra senha de ninguém -- não há como: quem guarda é o Auth do
+    Supabase, e de lá não se lê senha de volta. Esquecer significa o
+    administrador gravar outra por cima, ou a pessoa usar o "Esqueci a senha".
     """
     render_header("Acessos")
-    cofre = cofre_acesso()
-    usuarios = cofre.setdefault("usuarios", {})
-    eu = st.session_state.get("gplan_usuario", {}).get("login", "")
+    eu = st.session_state.get("gplan_usuario") or {}
 
-    def salvar() -> bool:
-        return guardar_cofre(cofre)
+    try:
+        usuarios = acesso.listar()
+    except Exception as erro:
+        avisar_erro("listar os logins", erro)
+        return
 
     st.subheader("Logins")
-    for login, u in sorted(usuarios.items()):
+    for u in usuarios:
+        sou_eu = u["id"] == eu.get("id")
+        papel_atual = acesso.papel_de(u)
         with st.expander(
-                f"{u.get('nome') or login}  ·  {acesso.papel_de(u)}  ·  {login}"
-                + ("" if u.get("ativo", True) else "  ·  desativado")
-                + ("  ·  você" if login == eu else "")):
-            marcadas = st.multiselect(
-                "Permissões", acesso.TODAS,
-                default=[p for p in u.get("permissoes", []) if p in acesso.PERMISSOES],
-                format_func=lambda p: acesso.PERMISSOES[p], key=f"perm_{login}")
-            papel_atual = acesso.papel_de(u)
+                f"{u['nome'] or u['email']}  ·  {papel_atual}  ·  {u['email']}"
+                + ("" if u["ativo"] else "  ·  desativado")
+                + ("  ·  você" if sou_eu else "")):
             papel_novo = st.selectbox(
                 "Papel", list(acesso.PAPEIS),
                 index=list(acesso.PAPEIS).index(papel_atual),
-                key=f"papel_{login}",
+                key=f"papel_{u['id']}",
                 help="Trocar o papel repõe as permissões padrão dele. "
                      "Depois disso dá para ajustar uma a uma.")
+            marcadas = st.multiselect(
+                "Permissões", acesso.TODAS, default=u["permissoes"],
+                format_func=lambda p: acesso.PERMISSOES[p], key=f"perm_{u['id']}")
             if papel_novo != papel_atual:
-                st.info(f"Ao salvar, as permissões passam a ser as de "
+                st.info("Ao salvar, as permissões passam a ser as de "
                         f"{papel_novo}: "
                         + ", ".join(acesso.PERMISSOES[p]
                                     for p in acesso.PAPEIS[papel_novo]) + ".")
-            ativo = st.checkbox("Ativo", value=u.get("ativo", True), key=f"ativo_{login}")
+            ativo = st.checkbox("Ativo", value=u["ativo"], key=f"ativo_{u['id']}")
             nova = st.text_input("Trocar a senha (deixe vazio para manter)",
-                                 type="password", key=f"senha_{login}",
+                                 type="password", key=f"senha_{u['id']}",
                                  help=acesso.REGRA_SENHA)
+
             c1, c2 = st.columns(2)
-            if c1.button("Salvar", key=f"salvar_{login}", type="primary"):
+            if c1.button("Salvar", key=f"salvar_{u['id']}", type="primary"):
                 # o administrador não pode se trancar do lado de fora: sem
                 # ninguém com "administrar" não há como voltar a esta tela
-                outros_admin = any("administrar" in v.get("permissoes", [])
-                                   and v.get("ativo", True) and k != login
-                                   for k, v in usuarios.items())
-                if login == eu and not outros_admin and (
-                        "administrar" not in marcadas or not ativo):
-                    st.error("Você é o único administrador ativo. Crie outro antes "
-                             "de tirar a sua permissão ou se desativar.")
+                outros_admin = any("administrar" in o["permissoes"] and o["ativo"]
+                                   and o["id"] != u["id"] for o in usuarios)
+                perms = (list(acesso.PAPEIS[papel_novo])
+                         if papel_novo != papel_atual else marcadas)
+                if sou_eu and not outros_admin and ("administrar" not in perms
+                                                    or not ativo):
+                    st.error("Você é o único administrador ativo. Crie outro "
+                             "antes de tirar a sua permissão ou se desativar.")
                 elif nova and (falta := acesso.problema_na_senha(nova)):
                     st.error(falta)
                 else:
-                    # trocar o papel repoe as permissoes dele; manter o papel
-                    # respeita o que a pessoa marcou a mao
-                    u["permissoes"] = (list(acesso.PAPEIS[papel_novo])
-                                       if papel_novo != papel_atual else marcadas)
-                    u["papel"] = papel_novo
-                    u["ativo"] = ativo
-                    if nova:
-                        u["senha"] = acesso.cifrar(nova)
-                    if salvar():
+                    try:
+                        acesso.salvar_perfil(u["id"], papel=papel_novo,
+                                             permissoes=perms, ativo=ativo)
+                        if nova:
+                            acesso.trocar_senha(u["id"], nova)
+                        if sou_eu:
+                            recarregar_usuario()
                         st.success("Salvo.")
                         st.rerun()
-            if login != eu and c2.button("Remover", key=f"remover_{login}"):
-                guardado = dict(usuarios[login])
-                del usuarios[login]
-                if salvar():
+                    except Exception as erro:
+                        avisar_erro("salvar o login", erro)
+
+            if not sou_eu and c2.button("Remover", key=f"remover_{u['id']}"):
+                try:
+                    acesso.remover(u["id"])
                     st.rerun()
-                else:
-                    usuarios[login] = guardado
+                except Exception as erro:
+                    avisar_erro("remover o login", erro)
 
     st.subheader("Novo login")
     with st.form("novo_login"):
-        login = st.text_input("Login").strip().lower()
-        nome = st.text_input("Nome")
         email = st.text_input("E-mail")
+        nome = st.text_input("Nome")
         senha = st.text_input("Senha", type="password", help=acesso.REGRA_SENHA)
         st.caption(acesso.REGRA_SENHA)
         papel = st.selectbox("Papel", list(acesso.PAPEIS),
@@ -7737,20 +7701,17 @@ def render_acessos():
                    + ", ".join(acesso.PERMISSOES[p] for p in acesso.PAPEIS[papel])
                    + ". Dá para ajustar depois, no login criado.")
         if st.form_submit_button("Criar", type="primary"):
-            if not login or not senha:
-                st.error("Login e senha são obrigatórios.")
+            if not email.strip() or not senha:
+                st.error("E-mail e senha são obrigatórios.")
             elif (falta := acesso.problema_na_senha(senha)):
                 st.error(falta)
-            elif login in usuarios:
-                st.error("Já existe um login com esse nome.")
             else:
-                usuarios[login] = acesso.novo_usuario(
-                    login, senha, nome, acesso.PAPEIS[papel], email, papel)
-                if salvar():
-                    st.success(f"Login {login} criado.")
+                try:
+                    acesso.criar(email, senha, nome, papel)
+                    st.success(f"Login {email.strip().lower()} criado.")
                     st.rerun()
-                else:
-                    usuarios.pop(login, None)
+                except Exception as erro:
+                    avisar_erro("criar o login", erro)
 
 
 def main():
