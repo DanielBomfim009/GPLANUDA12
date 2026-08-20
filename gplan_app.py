@@ -4568,13 +4568,29 @@ function cartaoMini(x, y, t) {
       font-family="ui-monospace,Consolas,monospace">${esc(t.org).slice(0, 12)}</text></g>`;
 }
 
+// O segmento vai no rodape do cartao. So cresce quando ha o que escrever:
+// TAG sem fieldbus continua com o cartao curto de antes.
 function cartao(xi, yi, r) {
   const sel = D.tag === r.org ? ' sel' : '';
+  const alt = 52 + (r.fseg ? 11 : 0);
+  const extra = r.fseg ? `<text x="${xi}" y="${yi + 26}" text-anchor="middle"
+      class="chip-sub">${esc(r.fseg).slice(0, 14)}</text>` : '';
   return `<g class="inst${sel}" data-ficha="${esc(r.ancora || '')}" ${dd(dicaTag(r))}>
-    <rect class="chip-bg" x="${xi - 36}" y="${yi - 30}" width="72" height="52" rx="9"/>
+    <rect class="chip-bg" x="${xi - 36}" y="${yi - 30}" width="72" height="${alt}" rx="9"/>
     ${transmissor(xi, yi - 8, r.mont)}
     <text x="${xi}" y="${yi + 16}" text-anchor="middle" fill="var(--t2)" font-size="7.5"
-      font-family="ui-monospace,Consolas,monospace">${esc(r.org).slice(0, 13)}</text></g>`;
+      font-family="ui-monospace,Consolas,monospace">${esc(r.org).slice(0, 13)}</text>
+    ${extra}</g>`;
+}
+
+// A malha corre ao lado do proprio cabo, deitada e bem pequena. E o que
+// distingue um ramal do outro quando o filtro traz varias malhas no mesmo
+// segmento: no cartao ela competiria com a TAG, no cabo ela nomeia o cabo.
+function malhaDoCabo(x, y1, y2, r) {
+  if (!r.malha) return '';
+  const ym = (y1 + y2) / 2;
+  return `<text class="rot-malha" transform="rotate(-90 ${x + 7} ${ym})"
+    x="${x + 7}" y="${ym}" text-anchor="middle">${esc(r.malha).slice(0, 18)}</text>`;
 }
 
 // O cabo não corre reto: sobra comprimento e ele acompanha a bandeja. A onda
@@ -4623,8 +4639,11 @@ function cena(c) {
               : maiorGrupo <= 8 ? 110 : maiorGrupo <= 16 ? 94 : 78;
   const passoX = maiorGrupo <= 4 ? 104 : maiorGrupo <= 8 ? 94 : 82;
   const fila = queda + 40, yRail = 146;
-  const ALT = ff ? 150 + yRail + queda + (filMax - 1) * fila + 76
-                 : Math.max(460, 190 + 28 + queda + (filMax - 1) * fila + 76);
+  // o cartao cresce 11 px quando tem o rodape do segmento; a malha corre ao
+  // lado do cabo e nao ocupa altura nenhuma
+  const rot = R.some(r => r.fseg) ? 11 : 0;
+  const ALT = ff ? 150 + yRail + queda + (filMax - 1) * fila + 76 + rot
+                 : Math.max(460, 190 + 28 + queda + (filMax - 1) * fila + 76 + rot);
   const base = ff ? 150 : 190;
   const p = [], nos = [], xPain = 150, xPrim = 400;
   let xFim = xPrim + 200;
@@ -4735,6 +4754,7 @@ function cena(c) {
         const xi = xIni + (k % cols) * px, yi = yBar + fl * fila + queda;
         p.push(fio(zigue(xi, yBar + fl * fila, xi, yi - 25, Math.min(9, queda / 12)),
                    r, 2, 'ramal até o instrumento'));
+        p.push(malhaDoCabo(xi, yBar + fl * fila, yi - 25, r));
         p.push(cartao(xi, yi, r));
         xFim = Math.max(xFim, xi + 60);
       });
@@ -4780,6 +4800,7 @@ function cena(c) {
         const yi = y0 + Math.floor(i / colunas) * fila + queda;
         p.push(fio(zigue(xi, y0 + Math.floor(i / colunas) * fila, xi, yi - 25,
                          Math.min(9, queda / 12)), r, 2, 'ramal até o instrumento'));
+        p.push(malhaDoCabo(xi, y0 + Math.floor(i / colunas) * fila, yi - 25, r));
         p.push(cartao(xi, yi, r));
         xFim = Math.max(xFim, xi + 50);
       });
@@ -4995,6 +5016,10 @@ svg.cena{{width:100%;height:auto;display:block}}
 .eq-rot{{fill:var(--t3);font-size:8.5px;letter-spacing:.7px;font-weight:700}}
 .rot-tk{{fill:var(--and);font-weight:800;letter-spacing:.5px}}
 .chip-bg{{fill:var(--metal2);stroke:rgba(var(--rgb-tinta),.14)}}
+.chip-sub{{fill:var(--t3);font-size:6.4px;letter-spacing:.2px;
+  font-family:ui-monospace,Consolas,monospace}}
+.rot-malha{{fill:var(--t3);font-size:5.6px;letter-spacing:.15px;
+  font-family:ui-monospace,Consolas,monospace}}
 .inst.sel .chip-bg{{stroke:var(--azul);stroke-width:2.5}}
 .inst:hover .chip-bg{{stroke:var(--t2)}}
 .hit{{stroke:transparent;fill:none}}
@@ -5175,8 +5200,10 @@ def cert_altura(cad: dict, largura_px: int = 1320) -> int:
              else 94 if maior <= 16 else 78)
     passo_x = 104 if maior <= 4 else 94 if maior <= 8 else 82
     fila = queda + 40
-    alt = ((150 + 146 + queda + (fileiras - 1) * fila + 76) if ff
-           else max(460, 190 + 28 + queda + (fileiras - 1) * fila + 76))
+    # mesmo acréscimo do desenho: 11 px pelo rodapé do segmento no cartão
+    rot = 11 if any(r.get("fseg") for r in cad["ramais"]) else 0
+    alt = ((150 + 146 + queda + (fileiras - 1) * fila + 76 + rot) if ff
+           else max(460, 190 + 28 + queda + (fileiras - 1) * fila + 76 + rot))
     if ff:
         larg = max(400 + (len(cad["segmentos"]) - 1) * 430 + 195,
                    400 + (min(3, maior) - 1) * (passo_x + 6) + 64, 1100)
@@ -5309,11 +5336,13 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                 s["m"] += c["m"]
                 s["real"] += c["m_real"]
         if segs:
-            # pior primeiro: o que a obra precisa ver está embaixo de tudo se a
-            # ordem for alfabética, e são 142 segmentos
+            # Mais avançado primeiro. A primeira versão ordenava do pior para o
+            # melhor e a tela abria com onze barras vazias em 0,0% -- o avanço,
+            # que é o assunto do painel, ficava fora da primeira tela. Empate
+            # desempata pelo maior previsto, que é o segmento que mais pesa.
             ordem = sorted(segs.items(),
-                           key=lambda kv: (kv[1]["real"] / kv[1]["m"] * 100
-                                           if kv[1]["m"] else 0.0, -kv[1]["m"]))
+                           key=lambda kv: (-(kv[1]["real"] / kv[1]["m"] * 100
+                                             if kv[1]["m"] else 0.0), -kv[1]["m"]))
             prontos = sum(1 for _, s in ordem
                           if s["m"] and s["real"] / s["m"] * 100 >= 99.5)
             # O metro já vem capado no previsto pelo cert_metro_real, que é a
@@ -5496,6 +5525,12 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         # a âncora só vale para TAG que existe no controle documental: sem ficha
         # para abrir, o cartão não deve parecer clicável
         r["ancora"] = ficha_anchor(r["org"]) if r["org"] in com_ficha else ""
+        # segmento e malha no cartão: filtrado um segmento, o desenho traz
+        # várias malhas juntas e não havia como saber qual cabo é de qual.
+        # "fseg" e não "seg": seg já é a caixa de onde o instrumento pendura.
+        do_tag = atrib.get(r["org"], {})
+        r["fseg"] = do_tag.get("SEGMENTO", "")
+        r["malha"] = do_tag.get("MALHA", "")
 
     titulo = (f"{cad['painel'] or 'painel indefinido'} → {cad['caixa']}"
               + (f" ({len(cad['segmentos'])} caixas em série)" if cad["segmentos"] else "")
