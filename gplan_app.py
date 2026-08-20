@@ -4588,9 +4588,12 @@ function cartao(xi, yi, r) {
 // segmento: no cartao ela competiria com a TAG, no cabo ela nomeia o cabo.
 function malhaDoCabo(x, y1, y2, r) {
   if (!r.malha) return '';
-  const ym = (y1 + y2) / 2;
-  return `<text class="rot-malha" transform="rotate(-90 ${x + 7} ${ym})"
-    x="${x + 7}" y="${ym}" text-anchor="middle">${esc(r.malha).slice(0, 18)}</text>`;
+  // 15 px e nao 7: a onda do cabo tem amplitude de ate 9 px, e o texto colado
+  // caia bem dentro do tracado. O proximo cabo so comeca 73 px adiante, entao
+  // sobra folga -- e o texto, deitado, ocupa a altura da fonte na horizontal.
+  const ym = (y1 + y2) / 2, xr = x + 15;
+  return `<text class="rot-malha" transform="rotate(-90 ${xr} ${ym})"
+    x="${xr}" y="${ym}" text-anchor="middle">${esc(r.malha).slice(0, 18)}</text>`;
 }
 
 // O cabo não corre reto: sobra comprimento e ele acompanha a bandeja. A onda
@@ -5018,8 +5021,14 @@ svg.cena{{width:100%;height:auto;display:block}}
 .chip-bg{{fill:var(--metal2);stroke:rgba(var(--rgb-tinta),.14)}}
 .chip-sub{{fill:var(--t3);font-size:6.4px;letter-spacing:.2px;
   font-family:ui-monospace,Consolas,monospace}}
-.rot-malha{{fill:var(--t3);font-size:5.6px;letter-spacing:.15px;
-  font-family:ui-monospace,Consolas,monospace}}
+/* A malha e escrita sobre o desenho, e o cabo ondula justamente por onde ela
+   passa. O contorno na cor do fundo abre um vao em volta da letra -- sem ele
+   o texto some dentro do tracado. paint-order manda pintar o contorno ANTES
+   do preenchimento, senao a borda come a letra por dentro. */
+.rot-malha{{fill:var(--t2);font-size:6px;letter-spacing:.15px;font-weight:600;
+  font-family:ui-monospace,Consolas,monospace;
+  paint-order:stroke;stroke:var(--bg);stroke-width:2.2px;
+  stroke-linejoin:round}}
 .inst.sel .chip-bg{{stroke:var(--azul);stroke-width:2.5}}
 .inst:hover .chip-bg{{stroke:var(--t2)}}
 .hit{{stroke:transparent;fill:none}}
