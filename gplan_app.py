@@ -2245,35 +2245,48 @@ def inject_css():
            coluna e o ultimo bloco e empurrado para baixo -- assim ele fica
            colado no pe da tela por mais curto que o menu seja, sem position
            fixed, que brigaria com a rolagem do proprio menu. */
-        [data-testid="stSidebarUserContent"] { display:flex; flex-direction:column;
-                                               min-height:calc(100vh - 150px); }
-        [data-testid="stSidebarUserContent"] .sb-perfil { margin-top:auto; }
+        /* O perfil desce para o pe do menu. Quem faz o empurrao e o
+           margin-top:auto no CONTAINER da linha, e nao na linha: o
+           stSidebarUserContent e o stVerticalBlock sao display:contents, entao
+           quem vira filho do flex da barra e o stElementContainer. Mirar na
+           .sb-perfil nao empurrava nada -- ela e neta de quem tem a caixa. */
+        [data-testid="stSidebarContent"] [data-testid="stElementContainer"]:has(.sb-perfil) {
+            margin-top:auto; }
 
-        .sb-perfil { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
-                     padding:9px 11px; margin:14px 0 6px; border-radius:12px;
-                     background:var(--dark-card-2);
-                     border:1px solid var(--border-color); }
-        .sb-ini, .sb-foto { width:30px; height:30px; flex:none; border-radius:50%; }
-        .sb-ini { display:grid; place-items:center; font-size:11px; font-weight:800;
+        /* Uma linha so, sem cartao: foto, nome e e-mail, e a seta que diz que
+           dali se entra. A altura e fixa porque o botao invisivel por cima
+           precisa cobrir exatamente esta area. */
+        /* A barra tem ~150 px uteis: cada pixel gasto na foto ou na seta sai
+           do nome. Com 32 px de foto o nome ja saia cortado em "Daniel Bo...". */
+        .sb-perfil { display:flex; align-items:center; gap:8px; height:64px;
+                     padding:0 4px; margin-top:10px;
+                     border-top:1px solid var(--border-color); }
+        .sb-ini, .sb-foto { width:28px; height:28px; flex:none; border-radius:50%; }
+        .sb-ini { display:grid; place-items:center; font-size:10.5px; font-weight:800;
                   color:var(--sobre-cor); background:var(--accent-teal); }
         .sb-foto { object-fit:cover; border:1px solid var(--border-strong); }
-        .sb-txt { min-width:0; display:flex; flex-direction:column; line-height:1.25; }
-        .sb-txt b { font-size:12px; font-weight:700; color:var(--text-1);
+        .sb-txt { min-width:0; flex:1; display:flex; flex-direction:column;
+                  line-height:1.28; }
+        .sb-txt b { font-size:11.5px; font-weight:700; color:var(--text-1);
                     overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-        .sb-txt i { font-style:normal; font-size:10.5px; color:var(--text-3);
+        .sb-txt i { font-style:normal; font-size:9.5px; color:var(--text-3);
                     overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-        .sb-oculto { width:100%; font-size:9.5px; font-weight:700; letter-spacing:.4px;
-                     text-transform:uppercase; color:var(--accent-amber);
-                     background:rgba(var(--rgb-ambar),.13); border-radius:5px;
-                     padding:2px 6px; text-align:center; }
-        /* o "Meu perfil" e uma continuacao do cartao, nao um botao a mais */
+        .sb-seta { flex:none; width:14px; height:14px; color:var(--text-3);
+                   transition:transform .13s ease, color .13s ease; }
+        .sb-seta svg { width:100%; height:100%; display:block; }
+        .sb-perfil:hover .sb-seta { color:var(--text-1); transform:translateX(2px); }
+        .sb-perfil:hover .sb-txt b { color:var(--accent-blue); }
+
+        /* O botao real, transparente e puxado por cima da linha. O -58px e a
+           altura da linha: se ela mudar, este numero muda junto. */
+        /* -69 e nao -64: o Streamlit poe 5 px de respiro entre elementos, e
+           com -64 o botao ficava 5 px abaixo da linha -- a faixa de cima
+           deixava de ser clicavel e a de baixo virava clique no vazio. */
+        [data-testid="stSidebarUserContent"] .stButton { margin-top:-69px; height:64px;
+                                                         position:relative; z-index:2; }
         [data-testid="stSidebarUserContent"] .stButton button {
-            border:1px solid var(--border-color); background:transparent;
-            color:var(--text-3); font-size:11.5px; font-weight:600;
-            border-radius:10px; padding:5px 10px; }
-        [data-testid="stSidebarUserContent"] .stButton button:hover {
-            color:var(--text-1); border-color:var(--border-strong);
-            background:var(--dark-card-2); }
+            height:64px; width:100%; opacity:0; border:none; background:transparent;
+            padding:0; cursor:pointer; }
 
         /* dialogo do perfil */
         .pf-topo { display:flex; align-items:center; gap:13px; margin-bottom:14px; }
@@ -2294,7 +2307,10 @@ def inject_css():
         .sb-papel, .pf-papel { font-size:9.5px; font-weight:800; letter-spacing:.5px;
                                text-transform:uppercase; border-radius:5px;
                                padding:2px 7px; white-space:nowrap; }
-        .sb-papel { width:100%; text-align:center; }
+        /* na lateral o papel e a terceira linha, alinhado a esquerda e do
+           tamanho do texto -- esticado ocuparia a linha inteira a toa */
+        .sb-papel { font-style:normal; align-self:flex-start; margin-top:3px;
+                    font-size:8.5px; padding:1px 5px; }
         .pf-papel { margin-left:9px; vertical-align:middle; }
         .sb-papel.roxo,  .pf-papel.roxo  { color:var(--txt-roxo);
             background:rgba(var(--rgb-roxo),.15); }
@@ -7591,20 +7607,26 @@ def render_perfil_lateral():
     eu = st.session_state.get("gplan_usuario", {})
     login = eu.get("login", "")
     papel = acesso.papel_de(eu)
+    dica = ("" if pode("ver_valores")
+            else " · este login não vê valores em reais")
     render_html(
-        '<div class="sb-perfil">'
+        f'<div class="sb-perfil" title="{esc(papel)}{esc(dica)}">'
         + (f'<img class="sb-foto" src="{eu["foto"]}" alt="">' if eu.get("foto")
            else f'<span class="sb-ini">{esc(acesso.iniciais(eu.get("nome",""), login))}</span>')
         + '<span class="sb-txt">'
         f'<b>{esc(eu.get("nome") or login)}</b>'
-        + (f'<i>{esc(eu.get("email") or login)}</i>')
-        + "</span>"
-        + f'<span class="sb-papel {acesso.COR_PAPEL.get(papel, "teal")}">{esc(papel)}</span>' 
-        + ("" if pode("ver_valores")
-           else '<span class="sb-oculto" title="Este login não vê valores em '
-                'reais">valores ocultos</span>')
-        + "</div>")
-    if st.button("Meu perfil", key="abrir_perfil", use_container_width=True):
+        f'<i>{esc(eu.get("email") or login)}</i>'
+        f'<em class="sb-papel {acesso.COR_PAPEL.get(papel, "teal")}">{esc(papel)}</em>'
+        "</span>"
+        '<span class="sb-seta" aria-hidden="true">'
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"'
+        ' stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>'
+        "</span></div>")
+    # O botão do Streamlit não aceita HTML no rótulo, então ele vem depois da
+    # linha e é puxado para cima por CSS, transparente, cobrindo-a: o que se
+    # vê é a linha, o que se clica é o botão. Sem isso seria a linha bonita e
+    # um botão "Meu perfil" repetindo embaixo o que a linha já diz.
+    if st.button("Abrir o perfil", key="abrir_perfil", use_container_width=True):
         dialogo_perfil()
 
 
