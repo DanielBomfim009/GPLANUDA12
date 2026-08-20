@@ -14,6 +14,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+import acesso
+
 LOCAL_EXCEL_FALLBACK = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..",
     "Controle de Relatório dos Instrumentos", "01_ARQUIVO_ATUAL",
@@ -653,6 +655,210 @@ def trocar_tema():
     st.session_state["gplan_tema"] = novo
     st.query_params["tema"] = novo
     # o cookie e reescrito no proximo desenho, por lembrar_tema
+
+
+# ===================================================================== #
+# Acesso: quem entrou decide o que a tela mostra                         #
+# ===================================================================== #
+# A pergunta que originou isto era "como esconder valor numa reunião". Um
+# botão de modo apresentação resolveria a tela e não o controle: qualquer um
+# clica de volta, inclusive na frente do cliente. Aqui o que aparece é
+# consequência do login, e não uma preferência que se desliga.
+
+COOKIE_SESSAO = "gplan_sessao"
+
+
+def cofre_acesso() -> dict:
+    """Lido uma vez por sessão: são meia dúzia de logins, e reler a cada
+    redesenho custaria uma ida ao Supabase por clique."""
+    if "gplan_cofre" not in st.session_state:
+        st.session_state["gplan_cofre"] = acesso.ler()
+    return st.session_state["gplan_cofre"]
+
+
+def lembrar_sessao(token: str) -> None:
+    """O mesmo mecanismo do tema: cookie lido pelo servidor no primeiro
+    instante. Sem ele, recarregar a página derrubaria o login -- session_state
+    não sobrevive a F5."""
+    st.components.v1.html(
+        "<script>try{parent.document.cookie="
+        f"'{COOKIE_SESSAO}={token};path=/;max-age={acesso.VALIDADE};samesite=lax'}}"
+        "catch(e){}</script>", height=0)
+
+
+def esquecer_sessao() -> None:
+    st.components.v1.html(
+        "<script>try{parent.document.cookie="
+        f"'{COOKIE_SESSAO}=;path=/;max-age=0;samesite=lax'}}catch(e){{}}</script>",
+        height=0)
+
+
+def usuario_atual() -> dict | None:
+    """Quem está logado: da sessão, ou do cookie assinado."""
+    if st.session_state.get("gplan_usuario"):
+        return st.session_state["gplan_usuario"]
+    cofre = cofre_acesso()
+    if not cofre.get("usuarios"):
+        return None
+    try:
+        token = st.context.cookies.get(COOKIE_SESSAO)
+    except Exception:
+        token = None
+    if not token:
+        return None
+    login = acesso.conferir_assinatura(token, acesso.segredo(cofre))
+    if not login:
+        return None
+    u = cofre["usuarios"].get(login)
+    if not u or not u.get("ativo", True):
+        return None
+    dados = dict(u, login=login)
+    st.session_state["gplan_usuario"] = dados
+    return dados
+
+
+def pode(permissao: str) -> bool:
+    return acesso.pode(st.session_state.get("gplan_usuario"), permissao)
+
+
+# A entrada é a primeira tela que o cliente vê, e às vezes a única antes da
+# reunião começar. O movimento aqui é de chegada -- a marca aparece, o cartão
+# sobe -- e para depois: animação que fica repetindo em tela de login vira
+# ruído de fundo na hora de digitar a senha. O halo é a única coisa que
+# continua, devagar, e some inteiro em prefers-reduced-motion.
+ENTRADA_CSS = """
+<style>
+[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"] { display:none; }
+.block-container { padding-top:11vh !important; max-width:none !important; }
+
+.lg-halo { position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
+.lg-halo::before, .lg-halo::after {
+  content:""; position:absolute; width:52vw; height:52vw; border-radius:50%;
+  filter:blur(90px); opacity:.20;
+}
+.lg-halo::before { background:var(--accent-blue); top:-18vw; left:-12vw;
+  animation:lg-vaga 22s ease-in-out infinite alternate; }
+.lg-halo::after { background:var(--accent-teal); bottom:-22vw; right:-10vw;
+  animation:lg-vaga 27s ease-in-out infinite alternate-reverse; }
+@keyframes lg-vaga { to { transform:translate3d(6vw, 4vh, 0) scale(1.12); } }
+
+.lg-caixa { position:relative; z-index:1; width:min(392px, 92vw); margin:0 auto 14px;
+  text-align:center; animation:lg-sobe .55s cubic-bezier(.2,.7,.3,1) both; }
+.lg-marca { display:flex; align-items:center; justify-content:center; gap:13px;
+  margin-bottom:24px; }
+svg.lg-mark { width:44px; height:44px; flex:none;
+  filter:drop-shadow(0 4px 16px rgba(var(--rgb-teal),.45));
+  animation:lg-marca .7s cubic-bezier(.2,.7,.3,1) both; }
+.lg-txt { text-align:left; }
+.lg-nome { font-size:27px; font-weight:800; letter-spacing:-.7px; color:var(--text-1);
+  line-height:1.05; }
+.lg-sub { font-size:11px; color:var(--text-3); letter-spacing:.5px;
+  text-transform:uppercase; font-weight:600; margin-top:3px; }
+.lg-chamada { font-size:15px; font-weight:700; color:var(--text-1); margin-bottom:6px; }
+.lg-aviso { font-size:12.5px; color:var(--text-3); line-height:1.55;
+  margin:0 auto 4px; max-width:340px; }
+
+/* o cartão é o próprio formulário do Streamlit */
+[data-testid="stForm"] { position:relative; z-index:1; width:min(392px, 92vw);
+  margin:0 auto; background:var(--dark-card); border:1px solid var(--border-color);
+  border-radius:16px; padding:20px 20px 6px;
+  box-shadow:0 22px 60px var(--sombra), 0 1px 0 rgba(var(--rgb-tinta),.05) inset;
+  animation:lg-sobe .55s .07s cubic-bezier(.2,.7,.3,1) both; }
+[data-testid="stForm"] label { font-size:12px !important; font-weight:600 !important;
+  color:var(--text-2) !important; }
+[data-testid="stForm"] input { border-radius:10px !important; }
+/* O Streamlit embrulha o botão num div próprio: sem esticar o embrulho, o
+   width:100% do botão mede o embrulho encolhido e não muda nada. E a regra
+   precisa ser do botão de ENVIO, não de "button" solto -- dentro do form há
+   também o olho de mostrar a senha, que esticado ocupa a linha inteira. */
+/* a largura estava presa três níveis acima: o stElementContainer do botão
+   nasce do tamanho do texto, e width:100% dentro dele media esses 63 px */
+[data-testid="stForm"] [data-testid="stElementContainer"] { width:100% !important; }
+[data-testid="stFormSubmitButton"] { width:100%; margin-top:4px; }
+[data-testid="stFormSubmitButton"] button { width:100%; border-radius:10px !important;
+  font-weight:700 !important; letter-spacing:.2px; transition:transform .12s ease,
+  box-shadow .12s ease; }
+[data-testid="stFormSubmitButton"] button:hover { transform:translateY(-1px);
+  box-shadow:0 8px 22px rgba(var(--rgb-azul),.32); }
+[data-testid="stFormSubmitButton"] button:active { transform:translateY(0); }
+
+@keyframes lg-sobe { from { opacity:0; transform:translateY(14px); } }
+@keyframes lg-marca { from { opacity:0; transform:translateY(6px) rotate(-14deg) scale(.82); } }
+
+@media (prefers-reduced-motion:reduce) {
+  .lg-caixa, [data-testid="stForm"], svg.lg-mark { animation:none; }
+  .lg-halo::before, .lg-halo::after { animation:none; }
+}
+</style>
+"""
+
+
+def exigir_login() -> dict:
+    """Sem login não desenha nada. Devolve o usuário ou para a execução.
+
+    O primeiro acesso cadastra o administrador: é a única vez em que a tela
+    aceita criar login sem estar logada, e só enquanto o cofre está vazio --
+    depois disso esse caminho deixa de existir.
+    """
+    u = usuario_atual()
+    if u:
+        return u
+
+    cofre = cofre_acesso()
+    primeiro = not cofre.get("usuarios")
+    # O CSS da entrada é injetado aqui, e não na folha do app, porque ele
+    # formata o stForm inteiro -- na folha global pegaria também os
+    # formulários da aba Acessos, que são outra coisa.
+    render_html(ENTRADA_CSS)
+    render_html(
+        '<div class="lg-halo"></div>'
+        '<div class="lg-caixa"><div class="lg-marca">'
+        + _logo_svg("Lat").replace("<svg ", '<svg class="lg-mark" ')
+        + '<div class="lg-txt"><div class="lg-nome">Gplan</div>'
+        '<div class="lg-sub">Instrumentação · U-12</div></div></div>'
+        + ('<div class="lg-chamada">Crie o administrador</div>'
+           '<div class="lg-aviso">Nenhum login cadastrado ainda. '
+           'Este é o único momento em que a tela aceita criar um login sem '
+           'estar logada.</div>' if primeiro else
+           '<div class="lg-chamada">Entrar</div>')
+        + "</div>")
+
+    if primeiro:
+        with st.form("criar_admin"):
+            login = st.text_input("Login do administrador").strip().lower()
+            nome = st.text_input("Nome")
+            senha = st.text_input("Senha", type="password")
+            repete = st.text_input("Repita a senha", type="password")
+            if st.form_submit_button("Criar administrador", type="primary"):
+                if not login or not senha:
+                    st.error("Login e senha são obrigatórios.")
+                elif senha != repete:
+                    st.error("As senhas não conferem.")
+                elif len(senha) < 8:
+                    st.error("A senha precisa de pelo menos 8 caracteres.")
+                else:
+                    cofre.setdefault("usuarios", {})[login] = acesso.novo_usuario(
+                        login, senha, nome, acesso.TODAS)
+                    acesso.gravar(cofre)
+                    st.session_state["gplan_cofre"] = cofre
+                    st.success("Administrador criado. Entre com ele agora.")
+                    st.rerun()
+        st.stop()
+
+    with st.form("entrar"):
+        login = st.text_input("Login").strip().lower()
+        senha = st.text_input("Senha", type="password")
+        if st.form_submit_button("Entrar", type="primary"):
+            achado = acesso.autenticar(cofre, login, senha)
+            if not achado:
+                # a mesma mensagem para login inexistente e senha errada: dizer
+                # qual dos dois falhou entrega quais logins existem
+                st.error("Login ou senha inválidos.")
+            else:
+                st.session_state["gplan_usuario"] = dict(achado, login=login)
+                lembrar_sessao(acesso.assinar(login, acesso.segredo(cofre)))
+                st.rerun()
+    st.stop()
 
 
 def seletor_tema():
@@ -1982,6 +2188,20 @@ def inject_css():
         .pl-kpis.cinco { grid-template-columns:repeat(5,1fr); }
         .pl-kpis.cinco .pl-kpi .v { font-size:25px; }
         .pl-kpis.tres { grid-template-columns:repeat(3,1fr); }
+
+        /* quem esta logado, na lateral */
+        .sb-eu { display:flex; align-items:center; gap:9px; flex-wrap:wrap;
+                 padding:9px 11px; margin:2px 0 8px; border-radius:11px;
+                 background:var(--dark-card-2); border:1px solid var(--border-color); }
+        .sb-ini { width:26px; height:26px; flex:none; border-radius:50%;
+                  display:grid; place-items:center; font-size:10.5px; font-weight:800;
+                  color:var(--sobre-cor); background:var(--accent-teal); }
+        .sb-nome { font-size:12px; font-weight:650; color:var(--text-2);
+                   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .sb-oculto { width:100%; font-size:9.5px; font-weight:700; letter-spacing:.4px;
+                     text-transform:uppercase; color:var(--accent-amber);
+                     background:rgba(var(--rgb-ambar),.13); border-radius:5px;
+                     padding:2px 6px; }
 
         /* Avanco por segmento: uma barra por segmento H1, a pior em cima.
            Trilho de largura fixa e o metro ao lado -- com 142 segmentos a
@@ -6360,6 +6580,16 @@ def vazio(v: object) -> bool:
 
 
 def br_moeda(v: float) -> str:
+    """Todo valor em reais da tela passa por aqui -- são 32 lugares, e é por
+    isso que a máscara mora nesta função e não em cada um deles: valor novo
+    que alguém escrever amanhã já nasce coberto.
+
+    Quem não tem a permissão vê um traço. O número não é arredondado nem
+    aproximado: ele não é escrito. Ver ficha_valores_ocultos() para o motivo
+    de a permissão também entrar na chave de cache.
+    """
+    if not pode("ver_valores"):
+        return "—"
     return f"R$ {v:,.2f}".replace(",", "~").replace(".", ",").replace("~", ".")
 
 
@@ -7170,6 +7400,82 @@ def aplicar_filtros(escolhas: dict, tags: pd.DataFrame, resumo: pd.DataFrame,
             esperados[esperados["TAG"].isin(ids)].copy())
 
 
+def render_acessos():
+    """Quem entra e o que cada um vê. Só o administrador chega aqui.
+
+    A tela não mostra senha de ninguém -- não há como: o que está guardado é o
+    scrypt, e dele não se volta. Esquecer significa o administrador gravar
+    outra por cima.
+    """
+    render_header("Acessos")
+    cofre = cofre_acesso()
+    usuarios = cofre.setdefault("usuarios", {})
+    eu = st.session_state.get("gplan_usuario", {}).get("login", "")
+
+    def salvar():
+        acesso.gravar(cofre)
+        st.session_state["gplan_cofre"] = cofre
+
+    st.subheader("Logins")
+    for login, u in sorted(usuarios.items()):
+        with st.expander(
+                f"{u.get('nome') or login}  ·  {login}"
+                + ("" if u.get("ativo", True) else "  ·  desativado")
+                + ("  ·  você" if login == eu else "")):
+            marcadas = st.multiselect(
+                "Permissões", acesso.TODAS,
+                default=[p for p in u.get("permissoes", []) if p in acesso.PERMISSOES],
+                format_func=lambda p: acesso.PERMISSOES[p], key=f"perm_{login}")
+            ativo = st.checkbox("Ativo", value=u.get("ativo", True), key=f"ativo_{login}")
+            nova = st.text_input("Trocar a senha (deixe vazio para manter)",
+                                 type="password", key=f"senha_{login}")
+            c1, c2 = st.columns(2)
+            if c1.button("Salvar", key=f"salvar_{login}", type="primary"):
+                # o administrador não pode se trancar do lado de fora: sem
+                # ninguém com "administrar" não há como voltar a esta tela
+                outros_admin = any("administrar" in v.get("permissoes", [])
+                                   and v.get("ativo", True) and k != login
+                                   for k, v in usuarios.items())
+                if login == eu and not outros_admin and (
+                        "administrar" not in marcadas or not ativo):
+                    st.error("Você é o único administrador ativo. Crie outro antes "
+                             "de tirar a sua permissão ou se desativar.")
+                elif nova and len(nova) < 8:
+                    st.error("A senha precisa de pelo menos 8 caracteres.")
+                else:
+                    u["permissoes"] = marcadas
+                    u["ativo"] = ativo
+                    if nova:
+                        u["senha"] = acesso.cifrar(nova)
+                    salvar()
+                    st.success("Salvo.")
+                    st.rerun()
+            if login != eu and c2.button("Remover", key=f"remover_{login}"):
+                del usuarios[login]
+                salvar()
+                st.rerun()
+
+    st.subheader("Novo login")
+    with st.form("novo_login"):
+        login = st.text_input("Login").strip().lower()
+        nome = st.text_input("Nome")
+        senha = st.text_input("Senha", type="password")
+        perms = st.multiselect("Permissões", acesso.TODAS,
+                               format_func=lambda p: acesso.PERMISSOES[p])
+        if st.form_submit_button("Criar", type="primary"):
+            if not login or not senha:
+                st.error("Login e senha são obrigatórios.")
+            elif len(senha) < 8:
+                st.error("A senha precisa de pelo menos 8 caracteres.")
+            elif login in usuarios:
+                st.error("Já existe um login com esse nome.")
+            else:
+                usuarios[login] = acesso.novo_usuario(login, senha, nome, perms)
+                salvar()
+                st.success(f"Login {login} criado.")
+                st.rerun()
+
+
 def main():
     favicon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "favicon.png")
     st.set_page_config(
@@ -7181,12 +7487,19 @@ def main():
     inject_css()
     seletor_tema()
     lembrar_tema(tema_ativo())
+    # antes de qualquer dado: sem login não se carrega planilha nem se desenha
+    exigir_login()
 
     # O carimbo da planilha e a chave de cache sao coisas diferentes: a chave
     # leva a versao da regra colada no fim, e quem le a data precisa do valor
     # cru. Passar a chave para data_atualizacao deixava o cabecalho em "—".
     fonte = get_source_cache_key()
-    cache_key = f"{fonte}|r{REGRA_VERSAO}|v{VISUAL_VERSAO}"
+    # A permissão entra na chave porque metade das telas é montada dentro de
+    # função @st.cache_data, e o HTML delas já traz o valor escrito. Sem isto,
+    # o primeiro a abrir grava a versão dele no cache e o próximo recebe a
+    # mesma -- quem não pode ver valores veria os do anterior, e vice-versa.
+    cache_key = (f"{fonte}|r{REGRA_VERSAO}|v{VISUAL_VERSAO}"
+                 f"|{'com' if pode('ver_valores') else 'sem'}-valores")
     if cache_key == "missing":
         st.error(
             "Não encontrei a planilha no Supabase Storage nem localmente. "
@@ -7207,6 +7520,22 @@ def main():
             '<div class="gplan-brand-sub">Instrumentação · U-12</div>'
             "</div></div>"
         )
+        eu = st.session_state.get("gplan_usuario", {})
+        iniciais = "".join(p[0] for p in (eu.get("nome") or "?").split()[:2]).upper()
+        # o selo de valores ocultos é o que evita o susto na reunião: sem ele,
+        # o traço no lugar do dinheiro se lê como dado faltando
+        render_html(
+            '<div class="sb-eu"><span class="sb-ini">' + esc(iniciais) + "</span>"
+            '<span class="sb-nome">' + esc(eu.get("nome") or eu.get("login", "")) + "</span>"
+            + ("" if pode("ver_valores")
+               else '<span class="sb-oculto" title="Este login não vê valores '
+                    'em reais">valores ocultos</span>')
+            + "</div>")
+        if st.button("Sair", key="sair", use_container_width=True):
+            esquecer_sessao()
+            st.session_state.pop("gplan_usuario", None)
+            st.session_state.pop("gplan_cofre", None)
+            st.rerun()
 
     escolhas = filtros_da_url(tags, resumo, esperados)
     tags, resumo, esperados = aplicar_filtros(escolhas, tags, resumo, esperados)
@@ -7224,9 +7553,25 @@ def main():
     certificacao_page = st.Page(lambda: _sob_carga("Montando a cadeia de certificação", lambda: render_certificacao(tags, lancamento, depara, resumo, esperados, sigem, cache_key)), title="Certificação", icon=":material/fact_check:", url_path="certificacao")
     atualizacao_page = st.Page(lambda: _sob_carga("Lendo as movimentações", lambda: render_atualizacao(movimentacoes, sigem, esperados, lancamento, tags, resumo, cache_key)), title="Última atualização", icon=":material/history:", url_path="atualizacao")
 
-    nav = st.navigation([dashboard_page, progresso_page, relatorios_page, pesquisa_page,
-                         sigem_page, gitec_page, planta_page, certificacao_page,
-                         atualizacao_page], position="sidebar")
+    admin_page = st.Page(render_acessos, title="Acessos",
+                         icon=":material/manage_accounts:", url_path="acessos")
+
+    # A aba que a permissão não cobre não entra no menu, em vez de entrar e
+    # avisar que é proibida: a Gitec sem valores viraria uma tela de traços, e
+    # anunciar o que existe e não se pode ver é o que a reunião não precisa.
+    paginas = [dashboard_page, progresso_page, relatorios_page, pesquisa_page,
+               sigem_page]
+    if pode("ver_gitec"):
+        paginas.append(gitec_page)
+    if pode("ver_planta"):
+        paginas.append(planta_page)
+    if pode("ver_certificacao"):
+        paginas.append(certificacao_page)
+    paginas.append(atualizacao_page)
+    if pode("administrar"):
+        paginas.append(admin_page)
+
+    nav = st.navigation(paginas, position="sidebar")
     nav.run()
 
 
