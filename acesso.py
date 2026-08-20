@@ -140,10 +140,41 @@ def confere(senha: str, guardado: str) -> bool:
 # Onde ficam guardados                                                  #
 # ===================================================================== #
 
+def _sem_proxy_para(url: str) -> None:
+    """Tira o Supabase do caminho do proxy corporativo.
+
+    A rede da AG exporta HTTPS_PROXY, e o supabase-py (via httpx) obedece.
+    O proxy faz interceptação TLS e apresenta um certificado próprio, que o
+    Python recusa -- o erro que aparece é CERTIFICATE_VERIFY_FAILED, e ele
+    parece problema de credencial quando é de rota. A conexão direta ao
+    Supabase funciona e é verificada de verdade (TLSv1.3), então o certo é
+    não mandar esse tráfego pelo proxy.
+
+    Some sozinho fora da rede corporativa: sem proxy definido, não há nada a
+    contornar e a variável simplesmente não atrapalha.
+    """
+    try:
+        host = url.split("//", 1)[-1].split("/", 1)[0]
+    except Exception:
+        return
+    for nome in ("NO_PROXY", "no_proxy"):
+        atual = os.environ.get(nome, "")
+        if host not in atual:
+            os.environ[nome] = f"{atual},{host}".strip(",")
+
+
 def _cliente():
-    """O mesmo cliente do resto do app; None em modo local."""
-    if os.environ.get("GPLAN_LOCAL") == "1":
-        return None
+    """O cliente do Supabase, ou None quando não há credencial.
+
+    GPLAN_LOCAL=1 NÃO desliga o Supabase aqui, e essa é a diferença que
+    importa: aquela variável quer dizer "leia a planilha do disco", e login é
+    outro assunto. Desenvolver com a planilha local e os usuários de verdade é
+    o caso normal -- sem isso, testar o acesso em localhost exigiria subir o
+    sistema inteiro no Render, que é justamente o que trava.
+
+    Sem credencial nenhuma, cai no arquivo local -- assim quem clonar o
+    projeto ainda consegue rodar.
+    """
     url = os.environ.get("SUPABASE_URL")
     chave = os.environ.get("SUPABASE_KEY")
     if not (url and chave):
@@ -155,6 +186,7 @@ def _cliente():
             pass
     if not (url and chave):
         return None
+    _sem_proxy_para(url)
     from supabase import create_client
     return create_client(url, chave)
 
