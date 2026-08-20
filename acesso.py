@@ -160,35 +160,77 @@ def _cliente():
 
 
 def ler() -> dict:
-    """O cofre inteiro: usuários e o segredo que assina a sessão."""
+    """O cofre inteiro: usuários e o segredo que assina a sessão.
+
+    A falha de leitura vai em "_erro" em vez de virar cofre vazio calado: sem
+    isso, bucket fora do ar e primeiro uso se parecem na tela -- os dois
+    mostram "crie o administrador" -- e criar por cima apaga quem já existia.
+    """
     cli = _cliente()
     if cli is None:
+        cofre = {"usuarios": {}, "segredo": ""}
         if os.path.exists(LOCAL):
             with open(LOCAL, encoding="utf-8") as f:
-                return json.load(f)
-        return {"usuarios": {}, "segredo": ""}
+                cofre = json.load(f)
+        cofre["_origem"] = "local"
+        cofre["_erro"] = ""
+        return cofre
     try:
         bruto = cli.storage.from_("gplan-data").download(ARQUIVO)
-        return json.loads(bruto.decode("utf-8"))
-    except Exception:
-        # arquivo ainda não existe: primeiro uso
-        return {"usuarios": {}, "segredo": ""}
+        cofre = json.loads(bruto.decode("utf-8"))
+        cofre["_origem"] = "supabase"
+        cofre["_erro"] = ""
+        return cofre
+    except Exception as erro:
+        texto = f"{type(erro).__name__}: {erro}"
+        # "não achei o arquivo" é o primeiro uso de verdade; qualquer outra
+        # coisa é problema de acesso, e aí a tela não pode oferecer criar
+        primeiro_uso = any(p in texto.lower()
+                           for p in ("not_found", "not found", "404",
+                                     "object not found"))
+        return {"usuarios": {}, "segredo": "", "_origem": "supabase",
+                "_erro": "" if primeiro_uso else texto}
 
 
 def gravar(cofre: dict) -> None:
-    dados = json.dumps(cofre, ensure_ascii=False, indent=2).encode("utf-8")
+    """Grava e CONFERE relendo.
+
+    O supabase-py nem sempre levanta exceção quando a escrita é recusada --
+    em vários casos devolve um erro que, ignorado, faz o código concluir que
+    salvou. Foi o que aconteceu em produção em 20/08/2026: a tela disse
+    "administrador criado" e no arquivo não havia nada. Reler e comparar é o
+    que transforma "mandei gravar" em "está gravado".
+    """
+    limpo = {k: v for k, v in cofre.items() if not k.startswith("_")}
+    dados = json.dumps(limpo, ensure_ascii=False, indent=2).encode("utf-8")
     cli = _cliente()
     if cli is None:
         with open(LOCAL, "wb") as f:
             f.write(dados)
         return
-    # upsert: o update falha quando o arquivo ainda não existe
-    try:
-        cli.storage.from_("gplan-data").update(
-            ARQUIVO, dados, {"content-type": "application/json", "upsert": "true"})
-    except Exception:
-        cli.storage.from_("gplan-data").upload(
-            ARQUIVO, dados, {"content-type": "application/json", "upsert": "true"})
+
+    balde = cli.storage.from_("gplan-data")
+    opcoes = {"content-type": "application/json", "upsert": "true"}
+    erros = []
+    for tentativa in (lambda: balde.update(ARQUIVO, dados, opcoes),
+                      lambda: balde.upload(ARQUIVO, dados, opcoes)):
+        try:
+            tentativa()
+        except Exception as erro:
+            erros.append(f"{type(erro).__name__}: {erro}")
+            continue
+        # a prova: releia e veja se os logins bateram
+        try:
+            de_volta = json.loads(balde.download(ARQUIVO).decode("utf-8"))
+        except Exception as erro:
+            erros.append(f"releitura falhou: {type(erro).__name__}: {erro}")
+            continue
+        if set(de_volta.get("usuarios", {})) == set(limpo.get("usuarios", {})):
+            return
+        erros.append("o arquivo relido não tem os logins que acabaram de ser "
+                     "gravados")
+    raise RuntimeError("não consegui gravar o cofre no Supabase Storage. "
+                       + " | ".join(erros))
 
 
 def segredo(cofre: dict) -> str:

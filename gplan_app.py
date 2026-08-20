@@ -853,6 +853,18 @@ def exigir_login() -> dict:
         return u
 
     cofre = cofre_acesso()
+    # Cofre ilegível não é primeiro uso. Oferecer "crie o administrador" aqui
+    # convidaria a criar um login por cima de um cofre que existe e não foi
+    # lido -- e o que se veria depois é exatamente "login ou senha inválidos".
+    if cofre.get("_erro"):
+        st.error(
+            "Não consegui ler os logins no Supabase Storage "
+            f"(bucket `{SUPABASE_BUCKET}`, arquivo `{acesso.ARQUIVO}`).\n\n"
+            "Enquanto isso não se resolve, ninguém entra — e é de propósito: "
+            "criar um administrador agora gravaria por cima dos logins que "
+            "já existem.\n\n"
+            f"Detalhe técnico: {cofre['_erro']}")
+        st.stop()
     primeiro = not cofre.get("usuarios")
     # O CSS da entrada é injetado aqui, e não na folha do app, porque ele
     # formata o stForm inteiro -- na folha global pegaria também os
@@ -896,6 +908,14 @@ def exigir_login() -> dict:
                     else:
                         cofre["usuarios"].pop(login, None)
         st.stop()
+
+    # ?diag=1 na URL conta o que a tela sabe do cofre, sem expor nada: quantos
+    # logins existem e de onde vieram. É o que separa "o cofre está vazio" de
+    # "a senha não confere" sem ter de adivinhar.
+    if st.query_params.get("diag") == "1":
+        st.info(f"Cofre lido de **{cofre.get('_origem', '?')}** · "
+                f"**{len(cofre.get('usuarios', {}))}** login(s) cadastrado(s) · "
+                f"segredo de sessão: {'sim' if cofre.get('segredo') else 'ainda não'}")
 
     with st.form("entrar"):
         login = st.text_input("Login").strip().lower()
