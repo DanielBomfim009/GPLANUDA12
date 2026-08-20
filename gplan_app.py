@@ -35,10 +35,18 @@ def render_html(html: str):
 # A marca segue o tema pelas variaveis: o anel de fundo e o ponteiro sao os
 # que sumiriam -- anel escuro sobre fundo claro, ponteiro claro sobre card
 # branco. O arco e o miolo ficam nas cores da marca nos dois temas.
-def _logo_svg(sufixo: str = "") -> str:
+def _logo_svg(sufixo: str = "", px: int = 48) -> str:
+    """A marca.
+
+    O width/height no próprio SVG não é decoração: um SVG que só tem viewBox
+    ocupa TODA a largura disponível até o CSS chegar, e no instante entre o
+    HTML e a folha de estilo a marca enchia a tela. O CSS continua mandando
+    onde há regra; isto é só o tamanho de partida, para não haver instante
+    nenhum sem tamanho.
+    """
     grad = f"gpArc{sufixo}"
     return (
-        '<svg viewBox="0 0 48 48" fill="none">'
+        f'<svg width="{px}" height="{px}" viewBox="0 0 48 48" fill="none">'
         '<circle cx="24" cy="24" r="19" stroke="var(--text-3)" stroke-width="5"/>'
         f'<path d="M24 5a19 19 0 0 1 15.6 29.8" stroke="url(#{grad})" stroke-width="5" stroke-linecap="round"/>'
         '<circle cx="24" cy="24" r="5.5" fill="var(--accent-teal)"/>'
@@ -49,7 +57,7 @@ def _logo_svg(sufixo: str = "") -> str:
     )
 
 
-LOGO_SVG = _logo_svg()
+LOGO_SVG = _logo_svg(px=58)
 
 
 # A transicao inteira leva isso, mesmo quando o trabalho acaba antes. Sem o
@@ -861,9 +869,17 @@ def exigir_login() -> dict:
     if u:
         return u
 
-    render_html(ENTRADA_CSS)
-    traduzir_campos_de_senha()
-    render_html(
+    # Tudo da entrada mora num container proprio para poder ser APAGADO de
+    # uma vez quando o login der certo. Antes daqui vinha um st.rerun(), e o
+    # que se via era o formulario esmaecendo enquanto o sistema surgia por
+    # tras dele, os dois na tela ao mesmo tempo. Apagar e seguir troca isso
+    # por um corte limpo -- e ainda evita autenticar duas vezes.
+    tela = st.empty()
+    entrada = tela.container()
+    with entrada:
+        render_html(ENTRADA_CSS)
+        traduzir_campos_de_senha()
+        render_html(
         '<div class="lg-halo"></div>'
         '<div class="lg-caixa"><div class="lg-marca">'
         + _logo_svg("Lat").replace("<svg ", '<svg class="lg-mark" ')
@@ -875,43 +891,50 @@ def exigir_login() -> dict:
     # não depois de já ter desistido. Reaproveitar o e-mail já digitado apagou
     # a gaveta, o campo repetido e o parágrafo de explicação que havia aqui:
     # a tela ficou com quatro linhas em vez de nove.
-    with st.form("entrar"):
-        email = st.text_input("E-mail").strip().lower()
-        senha = st.text_input("Senha", type="password")
-        esqueci = st.form_submit_button("Esqueci a senha", key="lg_esqueci")
-        entrar = st.form_submit_button("Entrar", type="primary", key="lg_entrar")
+        with st.form("entrar"):
+            email = st.text_input("E-mail").strip().lower()
+            senha = st.text_input("Senha", type="password")
+            esqueci = st.form_submit_button("Esqueci a senha", key="lg_esqueci")
+            entrar = st.form_submit_button("Entrar", type="primary",
+                                           key="lg_entrar")
 
-    if esqueci:
-        if not email:
-            st.warning("Escreva o e-mail acima para eu enviar o link.")
-        else:
+    entrou = None
+    with entrada:
+        if esqueci:
+            if not email:
+                st.warning("Escreva o e-mail acima para eu enviar o link.")
+            else:
+                try:
+                    acesso.recuperar_senha(email)
+                    # a resposta não diz se o e-mail existe: isso entregaria
+                    # quais contas existem a quem só chutou um endereço
+                    st.success("Se esse e-mail estiver cadastrado, o link foi "
+                               "enviado.")
+                except Exception as erro:
+                    avisar_erro("enviar o e-mail de recuperação", erro)
+
+        if entrar:
             try:
-                acesso.recuperar_senha(email)
-                # a resposta não diz se o e-mail existe: isso entregaria quais
-                # contas existem a quem só chutou um endereço
-                st.success("Se esse e-mail estiver cadastrado, o link foi enviado.")
+                entrou = acesso.entrar(email, senha)
+            except acesso.SemSupabase as erro:
+                st.error(str(erro))
+                st.stop()
             except Exception as erro:
-                avisar_erro("enviar o e-mail de recuperação", erro)
+                avisar_erro("falar com o Supabase para autenticar", erro)
+                st.stop()
+            if not entrou:
+                # a mesma mensagem para conta inexistente, senha errada e
+                # conta desativada: dizer qual dos três entrega quem existe
+                st.error("E-mail ou senha inválidos.")
+            else:
+                usuario, token = entrou
 
-    if entrar:
-        try:
-            entrou = acesso.entrar(email, senha)
-        except acesso.SemSupabase as erro:
-            st.error(str(erro))
-            st.stop()
-        except Exception as erro:
-            avisar_erro("falar com o Supabase para autenticar", erro)
-            st.stop()
-        if not entrou:
-            # a mesma mensagem para conta inexistente, senha errada e conta
-            # desativada: dizer qual dos três entrega quem existe
-            st.error("E-mail ou senha inválidos.")
-        else:
-            usuario, token = entrou
-            st.session_state["gplan_usuario"] = usuario
-            st.session_state["gplan_token"] = token
-            lembrar_sessao(token)
-            st.rerun()
+    if entrar and entrou:
+        tela.empty()          # a tela de login sai inteira, de uma vez
+        st.session_state["gplan_usuario"] = usuario
+        st.session_state["gplan_token"] = token
+        lembrar_sessao(token)
+        return usuario
     st.stop()
 
 
@@ -1909,6 +1932,7 @@ def inject_css():
                      opacity:0; animation:gpl-surge 300ms ease-out 130ms forwards; }
         @keyframes gpl-surge { to { opacity:1; } }
         .gpl-mark { width:58px; height:58px; animation:gpl-bate 1.5s ease-in-out infinite; }
+        .gpl-mark svg { width:100%; height:100%; display:block; }
         .gpl-mark svg { width:100%; height:100%; }
         @keyframes gpl-bate { 0%,100% { opacity:0.5; transform:scale(0.93); }
                               50%     { opacity:1;   transform:scale(1); } }
