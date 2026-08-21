@@ -5339,11 +5339,15 @@ if (D.tag) requestAnimationFrame(() => focar(1.6));
 // -- entao a ficha abre pela classe que o CSS ja reconhece ao lado do :target.
 // O que fecha a ficha e registrado assim que a moldura carrega, e nao na
 // primeira ficha aberta: fechar nao pode depender de por onde ela abriu.
+//
+// Registra de novo a cada moldura, sem flag de "so uma vez": ouvinte
+// duplicado nao faz mal (fechar() so tira uma classe que ja pode nao estar
+// la), mas UMA tentativa que falhe silenciosamente -- por qualquer folego de
+// timing no carregamento -- travava fechar ate o F5, ja que a flag global
+// impedia qualquer moldura seguinte de tentar de novo pelo resto da sessao.
 function armarFechamento() {
   try {
     const d = parent.document;
-    if (parent.__gplanFicha) return;
-    parent.__gplanFicha = true;
     const fechar = () => d.querySelectorAll('.fmodal-on')
       .forEach(m => m.classList.remove('fmodal-on'));
     // o X e o fundo sao <a href="#">: com :target isso bastava, com a classe
