@@ -224,11 +224,44 @@ def varrer_pagina(pg, caminho: str, nome: str, marcador: str) -> None:
           f"{'ok' if len(achados) == antes else str(len(achados) - antes) + ' problema(s)'}")
 
 
+def entrar_no_sistema(pg, alvo: str, espera: int) -> None:
+    """Passa pela tela de login, se ela estiver na frente.
+
+    O sistema passou a exigir login, e sem isto toda conferencia reprovaria
+    por um motivo so -- a tela de entrada -- escondendo o que de fato importa.
+    A credencial vem do ambiente para nao morar no repositorio:
+
+        GPLAN_TESTE_EMAIL=... GPLAN_TESTE_SENHA=... python varrer_fichas.py
+    """
+    import os as _os
+    email = _os.environ.get("GPLAN_TESTE_EMAIL", "")
+    senha = _os.environ.get("GPLAN_TESTE_SENHA", "")
+    try:
+        pg.goto(alvo, wait_until="domcontentloaded", timeout=espera)
+        pg.wait_for_selector("[data-testid='stForm'] input, "
+                             "[data-testid='stSidebarNav'] a", timeout=espera)
+    except Exception:
+        return
+    if not pg.locator("[data-testid='stForm'] input").count():
+        return  # ja estava dentro
+    if not (email and senha):
+        raise SystemExit(
+            "O sistema pede login. Defina GPLAN_TESTE_EMAIL e "
+            "GPLAN_TESTE_SENHA no ambiente antes de rodar.")
+    campos = pg.locator("[data-testid='stForm'] input")
+    campos.nth(0).fill(email)
+    campos.nth(1).fill(senha)
+    pg.get_by_role("button", name="Entrar").click()
+    pg.wait_for_selector("[data-testid='stSidebarNav'] a", timeout=espera)
+    pg.wait_for_timeout(3000)
+
+
 def main() -> int:
     print(f"VARREDURA DE FICHAS  {ALVO}")
     with sync_playwright() as p:
         nav = p.chromium.launch()
         pg = nav.new_page(viewport={"width": 1600, "height": 1050})
+        entrar_no_sistema(pg, ALVO, ESPERA)
         erros_js: list[str] = []
         pg.on("pageerror", lambda e: erros_js.append(str(e)))
         for caminho, nome, marcador in ABAS:

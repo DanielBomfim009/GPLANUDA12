@@ -743,8 +743,10 @@ def avisar_erro(acao: str, erro: Exception) -> None:
     causa à configuração do projeto -- foi assim que "Email logins are
     disabled" passou por erro de senha.
     """
-    st.error(f"Não consegui {acao}.\n\n"
-             f"Detalhe do Supabase: {type(erro).__name__}: {erro}")
+    conselho = acesso.explicar(erro)
+    st.error(f"Não consegui {acao}."
+             + (f"\n\n{conselho}" if conselho else "")
+             + f"\n\nDetalhe do Supabase: {type(erro).__name__}: {erro}")
 
 
 # A entrada é a primeira tela que o cliente vê, e às vezes a única antes da
@@ -780,22 +782,8 @@ svg.lg-mark { width:44px; height:44px; flex:none;
   line-height:1.05; }
 .lg-sub { font-size:11px; color:var(--text-3); letter-spacing:.5px;
   text-transform:uppercase; font-weight:600; margin-top:3px; }
-/* O "Esqueci a senha" tem de parecer texto, nao botao -- mas dentro de um
-   formulario so o submit dispara, entao ele E um submit vestido de link. O
-   alvo e a CLASSE DA CHAVE (st-key-lg_esqueci), e nao :first-of-type: cada
-   botao mora no proprio container, e ali os dois sao "o primeiro" -- a regra
-   pegava o Entrar junto e o encolhia para 37 px. O Entrar segue botao. */
-.st-key-lg_esqueci { width:auto !important; margin:2px 0 12px auto;
-  display:flex; justify-content:flex-end; }
-.st-key-lg_esqueci button {
-  background:none !important; border:none !important; box-shadow:none !important;
-  color:var(--text-3) !important; font-size:11.5px !important;
-  font-weight:500 !important; padding:0 !important; height:auto !important;
-  min-height:0 !important; width:auto !important;
-  text-decoration:underline; text-underline-offset:3px; }
-.st-key-lg_esqueci button:hover { color:var(--text-1) !important;
-  transform:none !important; box-shadow:none !important; }
-.st-key-lg_esqueci button p { font-size:11.5px !important; }
+/* o Entrar respira um pouco mais, agora que e o unico botao do formulario */
+.st-key-lg_entrar { margin-top:6px; }
 
 /* o cartão é o próprio formulário do Streamlit */
 [data-testid="stForm"] { position:relative; z-index:1; width:min(392px, 92vw);
@@ -886,33 +874,21 @@ def exigir_login() -> dict:
         + '<div class="lg-txt"><div class="lg-nome">Gplan</div>'
         '<div class="lg-sub">Instrumentação · U-12</div></div></div></div>')
 
-    # "Esqueci a senha" e "Entrar" são os dois botões do MESMO formulário, e o
-    # esqueci vem antes -- é o que a pessoa procura enquanto olha os campos,
-    # não depois de já ter desistido. Reaproveitar o e-mail já digitado apagou
-    # a gaveta, o campo repetido e o parágrafo de explicação que havia aqui:
-    # a tela ficou com quatro linhas em vez de nove.
+        # Três linhas e um botão: e-mail, senha, entrar. Não há mais nada
+        # aqui de propósito -- quem repõe senha é o administrador, pela aba
+        # Acessos.
         with st.form("entrar"):
             email = st.text_input("E-mail").strip().lower()
             senha = st.text_input("Senha", type="password")
-            esqueci = st.form_submit_button("Esqueci a senha", key="lg_esqueci")
             entrar = st.form_submit_button("Entrar", type="primary",
                                            key="lg_entrar")
 
+    # Não há "esqueci a senha" aqui: por decisão do Daniel, quem repõe senha é
+    # o administrador, pela aba Acessos. Oferecer o link e não ter SMTP seria
+    # pior que não oferecer -- a pessoa clicaria, veria "enviado" e esperaria
+    # um e-mail que não vem.
     entrou = None
     with entrada:
-        if esqueci:
-            if not email:
-                st.warning("Escreva o e-mail acima para eu enviar o link.")
-            else:
-                try:
-                    acesso.recuperar_senha(email)
-                    # a resposta não diz se o e-mail existe: isso entregaria
-                    # quais contas existem a quem só chutou um endereço
-                    st.success("Se esse e-mail estiver cadastrado, o link foi "
-                               "enviado.")
-                except Exception as erro:
-                    avisar_erro("enviar o e-mail de recuperação", erro)
-
         if entrar:
             try:
                 entrou = acesso.entrar(email, senha)

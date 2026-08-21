@@ -59,6 +59,50 @@ class SemSupabase(RuntimeError):
     """Faltou credencial. É erro de configuração, não de senha."""
 
 
+def papel_da_chave() -> str:
+    """anon, service_role ou "" -- lido do próprio JWT, sem chamar ninguém.
+
+    A chave anon obedece ao RLS. Como a `perfis` tem RLS ligado e nenhuma
+    política, com ela a linha do perfil simplesmente não existe para a
+    consulta: o código conclui que a conta não tem perfil, tenta criar e leva
+    "new row violates row-level security policy". O erro fala de escrita, mas
+    o problema é a chave -- e é isso que esta função permite explicar.
+    """
+    import base64
+    import json
+    try:
+        _, chave = _credenciais()
+        corpo = chave.split(".")[1]
+        corpo += "=" * (-len(corpo) % 4)
+        return json.loads(base64.urlsafe_b64decode(corpo)).get("role", "")
+    except Exception:
+        return ""
+
+
+def explicar(erro: Exception) -> str:
+    """Traduz o erro do Supabase para o que precisa ser feito."""
+    texto = str(erro)
+    if "row-level security" in texto or "42501" in texto:
+        papel = papel_da_chave()
+        return (
+            "O Supabase recusou por segurança de linha (RLS) na tabela "
+            "`perfis`.\n\n"
+            "A tabela é fechada de propósito: só a chave **service_role** "
+            "enxerga. A chave configurada aqui é "
+            f"**{papel or 'de tipo desconhecido'}**"
+            + (", que obedece ao RLS e por isso não vê nem grava nada nela."
+               if papel == "anon" else ".")
+            + "\n\nO caminho é trocar a `SUPABASE_KEY` do ambiente pela "
+              "service_role (Supabase → Project Settings → API). No Render "
+              "ela fica em Environment, e o serviço precisa reiniciar depois.")
+    if "Email logins are disabled" in texto:
+        return ("O provedor de e-mail está desligado no Supabase. Ligue "
+                "**Enable Email provider** em Authentication → Sign In / "
+                "Providers → Email. O que deve ficar desligado é só o "
+                "cadastro público (*Allow new users to sign up*).")
+    return ""
+
+
 def problema_na_senha(senha: str) -> str | None:
     """A senha serve? Devolve o que falta, ou None quando está boa.
 
@@ -256,9 +300,10 @@ def esquecer(refresh_token: str) -> None:
         pass
 
 
-def recuperar_senha(email: str) -> None:
-    """Manda o e-mail de redefinição. Exige SMTP configurado no projeto."""
-    cliente().auth.reset_password_for_email(str(email).strip().lower())
+# Não há função de "esqueci a senha". O Auth do Supabase tem
+# reset_password_for_email, mas ela exige SMTP configurado no projeto, e a
+# decisão foi que quem repõe senha é o administrador, pela aba Acessos. Uma
+# tela que promete e-mail e não o envia é pior que uma que não promete.
 
 
 # ===================================================================== #
