@@ -2428,6 +2428,13 @@ def inject_css():
         .pl-res .feito { color:var(--accent-teal); }
         .pl-res .andando { color:var(--accent-amber); }
         .pl-res .parado { color:var(--accent-red); }
+        .pl-res .pl1 { color:#E8974E; }
+        .pl-res .pl2 { color:#D4B106; }
+        .pl-res .pl3 { color:#A8A020; }
+        .pl-res .pl4 { color:#8BC34A; }
+        .pl-res .pl5 { color:#6BAF3E; }
+        .pl-res .pl6 { color:#4F9130; }
+        .pl-res .pl7 { color:#2F7D32; }
 
         .pl-tela { position:relative; width:100%; height:0;
                    border:1px solid var(--border-color); border-radius:11px;
@@ -2452,6 +2459,16 @@ def inject_css():
                            color:var(--accent-amber); }
         .pl-zona.parado { border-color:var(--accent-red); background:rgba(var(--rgb-vermelho),.09);
                           color:var(--accent-red); }
+        /* Escala de avanco da Planta: sete faixas, laranja a verde escuro --
+           tabela que o Daniel definiu. So vale nesta aba: o resto do projeto
+           (Certificacao, Progresso) continua no feito/andando/parado. */
+        .pl-zona.pl1 { border-color:#E8974E; background:rgba(232,151,78,.14); color:#E8974E; }
+        .pl-zona.pl2 { border-color:#D4B106; background:rgba(212,177,6,.16); color:#D4B106; }
+        .pl-zona.pl3 { border-color:#A8A020; background:rgba(168,160,32,.16); color:#A8A020; }
+        .pl-zona.pl4 { border-color:#8BC34A; background:rgba(139,195,74,.16); color:#8BC34A; }
+        .pl-zona.pl5 { border-color:#6BAF3E; background:rgba(107,175,62,.16); color:#6BAF3E; }
+        .pl-zona.pl6 { border-color:#4F9130; background:rgba(79,145,48,.16); color:#4F9130; }
+        .pl-zona.pl7 { border-color:#2F7D32; background:rgba(47,125,50,.18); color:#2F7D32; }
         /* O preenchimento sobe com o percentual: a zona e o proprio grafico. */
         .pl-zona::before { content:""; position:absolute; left:0; right:0; bottom:0;
                            height:calc(var(--p) * 1%); background:currentColor; opacity:.22; }
@@ -2476,6 +2493,13 @@ def inject_css():
         .pl-zona.feito .pl-ar { background:var(--accent-teal); }
         .pl-zona.andando .pl-ar { background:var(--accent-amber); }
         .pl-zona.parado .pl-ar { background:var(--accent-red); }
+        .pl-zona.pl1 .pl-ar { background:#E8974E; }
+        .pl-zona.pl2 .pl-ar { background:#D4B106; }
+        .pl-zona.pl3 .pl-ar { background:#A8A020; }
+        .pl-zona.pl4 .pl-ar { background:#8BC34A; }
+        .pl-zona.pl5 .pl-ar { background:#6BAF3E; }
+        .pl-zona.pl6 .pl-ar { background:#4F9130; }
+        .pl-zona.pl7 .pl-ar { background:#2F7D32; }
 
         /* A lista de instrumentos rola dentro do painel. Paginar aqui obrigaria
            a fechar a ficha para trocar de pagina -- o modal e :target puro, nao
@@ -2501,6 +2525,13 @@ def inject_css():
         .pl-ch.feito { color:var(--accent-teal); }
         .pl-ch.andando { color:var(--accent-amber); }
         .pl-ch.parado { color:var(--accent-red); }
+        .pl-ch.pl1 { color:#E8974E; }
+        .pl-ch.pl2 { color:#D4B106; }
+        .pl-ch.pl3 { color:#A8A020; }
+        .pl-ch.pl4 { color:#8BC34A; }
+        .pl-ch.pl5 { color:#6BAF3E; }
+        .pl-ch.pl6 { color:#4F9130; }
+        .pl-ch.pl7 { color:#2F7D32; }
         .pl-ch .tx b { display:block; font-size:12px; font-weight:750; color:var(--text-1); line-height:1.3; }
         .pl-ch .tx em { font-style:normal; font-size:10.5px; color:var(--text-3); }
         .pl-ch .qt { margin-left:auto; text-align:right; }
@@ -4164,6 +4195,20 @@ def classe_avanco(pct: float) -> str:
     return "feito" if pct >= 99.5 else "andando" if pct > 0 else "parado"
 
 
+# A escala de sete degraus e so da Planta -- laranja a verde escuro, do jeito
+# que o Daniel definiu. O resto do projeto (Certificacao, Progresso) continua
+# no feito/andando/parado de classe_avanco: sao paginas diferentes, com
+# pergunta diferente ("terminou ou nao" vs "quanto do mapa ja avancou").
+PLANTA_FAIXAS_PCT = [20, 40, 60, 70, 80, 90]
+
+
+def classe_avanco_planta(pct: float) -> str:
+    for i, teto in enumerate(PLANTA_FAIXAS_PCT, start=1):
+        if pct < teto:
+            return f"pl{i}"
+    return "pl7"
+
+
 def dados_por_area(tags: pd.DataFrame, resumo: pd.DataFrame,
                    locacao: pd.DataFrame,
                    aux: pd.DataFrame) -> tuple[dict, dict, pd.DataFrame]:
@@ -4329,7 +4374,7 @@ def planta_zonas_html(prancha: dict, areas: dict, plantas: dict,
                   f'{br_num(a["montados"])} de {br_num(a["tags"])} montados '
                   f'({br_pct(a["pct"])}) — clique para abrir a ficha')
         partes.append(
-            f'<a class="pl-zona {classe_avanco(a["pct"])}'
+            f'<a class="pl-zona {classe_avanco_planta(a["pct"])}'
             f'{" rec" if z.get("recorte") else ""}" style="{estilo}"'
             f' href="#{_ancora("PLANTA", rotulo)}" title="{esc(titulo)}">{etiqueta}'
             f'<span class="pl-mio"><b>{esc(rotulo)}</b>'
@@ -4362,7 +4407,7 @@ def planta_prancha_html(prancha: dict, areas: dict, plantas: dict,
         f'<div class="gplan-panel-title">{esc(prancha["rotulo"])}'
         f'<span class="pl-res">{len(vistas)} área{"s" if len(vistas) > 1 else ""}'
         f' · {br_num(qtd)} instrumentos · '
-        f'<b class="{classe_avanco(pct)}">{br_pct(pct)}</b></span></div>'
+        f'<b class="{classe_avanco_planta(pct)}">{br_pct(pct)}</b></span></div>'
         f'<div class="pl-tela" style="padding-top:{prancha["prop"]:.3f}%">'
         f'<img src="{prancha["uri"]}" alt="Planta — {esc(prancha["rotulo"])}">'
         + planta_zonas_html(prancha, areas, plantas, area_do_desenho)
@@ -6469,9 +6514,15 @@ def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFram
     mont = sum(a["montados"] for a in areas.values())
     val_m = sum(a["valor_montado"] for a in areas.values())
     val_t = sum(a["valor"] for a in areas.values())
-    faixas = [("feito", "Concluído", "100% montado", lambda a: a["pct"] >= 99.5),
-              ("andando", "Em andamento", "1% a 99%", lambda a: 0 < a["pct"] < 99.5),
-              ("parado", "Não iniciado", "nenhum montado", lambda a: a["pct"] == 0)]
+    # Sete faixas, na mesma tabela que o Daniel definiu -- laranja a verde
+    # escuro, do menos ao mais avançado.
+    faixas = [("pl1", "<20%", "avanço da área", lambda a: a["pct"] < 20),
+              ("pl2", ">=20% e <40%", "avanço da área", lambda a: 20 <= a["pct"] < 40),
+              ("pl3", ">=40% e <60%", "avanço da área", lambda a: 40 <= a["pct"] < 60),
+              ("pl4", ">=60% e <70%", "avanço da área", lambda a: 60 <= a["pct"] < 70),
+              ("pl5", ">=70% e <80%", "avanço da área", lambda a: 70 <= a["pct"] < 80),
+              ("pl6", ">=80% e <90%", "avanço da área", lambda a: 80 <= a["pct"] < 90),
+              ("pl7", ">=90%", "avanço da área", lambda a: a["pct"] >= 90)]
     contagem = {c: [a for a in areas.values() if f(a)] for c, _t, _f, f in faixas}
 
     val_med = sum(a["valor_medido"] for a in areas.values())

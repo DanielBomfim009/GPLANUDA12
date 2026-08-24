@@ -4,7 +4,9 @@
     {
       "name": "gplan",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "streamlit", "run", "gplan_app.py", "--server.port", "8501"],
+      "runtimeArgs": ["-m", "streamlit", "run",
+        "C:/Users/daniel.bomfim/OneDrive - Andrade Gutierrez/\u00c1rea de Trabalho/GSProjeto/gplan-web/gplan_app.py",
+        "--server.port", "8501"],
       "port": 8501
     }
   ]
