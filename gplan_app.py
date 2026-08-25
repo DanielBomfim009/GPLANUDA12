@@ -1446,7 +1446,8 @@ def inject_css():
                mask:var(--fxi) center/contain no-repeat; }
         __ICONES__
         .fx-tile .ic .fxi, .fx-kpi .ic .fxi, .fx-pn-t .ic .fxi,
-        .fx-acao .ic .fxi, .fx-com .cab .ic .fxi, .fx-cab .marca .fxi
+        .fx-acao .ic .fxi, .fx-com .cab .ic .fxi, .fx-cab .marca .fxi,
+        .pl-kpi .ic .fxi
           { width:100%; height:100%; }
         .fx-folha { width:12px; height:12px; vertical-align:-1px; margin-right:7px;
                     color:var(--text-2); }
@@ -1470,6 +1471,12 @@ def inject_css():
         .fxc-rubi  { color:var(--accent-red); } .fx-tile .ic.fxc-rubi  { background:rgba(var(--rgb-vermelho),.11); }
         .fxc-mudo  { color:var(--text-2); } .fx-tile .ic.fxc-mudo  { background:rgba(var(--rgb-tinta),.13); }
         .fxc-verde { color:var(--accent-green); } .fx-tile .ic.fxc-verde { background:rgba(var(--rgb-verde),.11); }
+        .pl-kpi .ic.fxc-azul  { background:rgba(var(--rgb-azul),.11); }
+        .pl-kpi .ic.fxc-teal  { background:rgba(var(--rgb-teal),.11); }
+        .pl-kpi .ic.fxc-roxo  { background:rgba(var(--rgb-roxo),.11); }
+        .pl-kpi .ic.fxc-ambar { background:rgba(var(--rgb-ambar),.11); }
+        .pl-kpi .ic.fxc-rubi  { background:rgba(var(--rgb-vermelho),.11); }
+        .pl-kpi .ic.fxc-verde { background:rgba(var(--rgb-verde),.11); }
         .fxc-cinza { color:var(--neutro); }
         .fx-trilho.fxc-azul i  { background:var(--accent-blue); }
         .fx-trilho.fxc-teal i  { background:var(--accent-teal); }
@@ -2402,6 +2409,13 @@ def inject_css():
         .cs-num b { font-size:12.5px; font-weight:800; }
         .pl-kpi { background:var(--dark-card); border:1px solid var(--border-color);
                   border-radius:14px; padding:15px 18px; }
+        /* O icone e opcional -- so a Planta usa, alinhado com o mapa de infra
+           de instrumentacao (visual padronizado pra apresentacao). A
+           Certificacao continua com o cartao sem .top, sem mudar nada nela. */
+        .pl-kpi .top { display:flex; align-items:flex-start; justify-content:space-between;
+                       gap:8px; }
+        .pl-kpi .top .r { margin-top:2px; }
+        .pl-kpi .ic { width:28px; height:28px; flex:none; border-radius:8px; padding:6px; }
         .pl-kpi .r { font-size:10px; letter-spacing:.75px; text-transform:uppercase;
                      color:var(--text-3); font-weight:700; }
         .pl-kpi .v { font-size:29px; font-weight:800; letter-spacing:-1.2px;
@@ -2517,7 +2531,10 @@ def inject_css():
         .pl-nao { color:var(--text-3); }
 
         .pl-lg { padding:16px; }
-        .pl-ch-c { display:flex; flex-direction:column; gap:9px; }
+        /* Em linha, nao empilhada -- do jeito que ficou no mapa de infra de
+           instrumentacao, pra apresentacao com visual padronizado. */
+        .pl-ch-c { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+                   gap:9px; }
         .pl-ch { display:flex; align-items:center; gap:11px; background:var(--dark-card-2);
                  border:1px solid var(--border-color); border-radius:11px; padding:10px 12px; }
         .pl-ch .sw { width:14px; height:28px; border-radius:5px; border:1.5px solid currentColor;
@@ -6543,20 +6560,24 @@ def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFram
     # cartoes sao a divisao do segundo -- somados, dao o valor montado.
     render_html(f"""
       <div class="pl-kpis">
-        <div class="pl-kpi"><div class="r">Montagem nas áreas</div>
+        <div class="pl-kpi"><div class="top"><div class="r">Montagem nas áreas</div>
+          <span class="ic fxc-ambar">{fx_svg("seta")}</span></div>
           <div class="v andando">{br_pct(pct_mont)}</div>
           <div class="s">{br_num(mont)} de {br_num(total)} instrumentos montados</div>
           <div class="pl-barra"><i class="andando" style="width:{pct_mont:.1f}%"></i></div></div>
-        <div class="pl-kpi"><div class="r">Valor montado</div>
+        <div class="pl-kpi"><div class="top"><div class="r">Valor montado</div>
+          <span class="ic fxc-roxo">{fx_svg("moeda")}</span></div>
           <div class="v dinheiro">{br_moeda(val_m)}</div>
           <div class="s">{br_pct(pct_valor)} de {br_moeda(val_t)} nas áreas mapeadas</div>
           <div class="pl-barra"><i class="feito" style="width:{pct_valor:.1f}%"></i></div></div>
-        <div class="pl-kpi"><div class="r">Montado sem medir</div>
+        <div class="pl-kpi"><div class="top"><div class="r">Montado sem medir</div>
+          <span class="ic fxc-rubi">{fx_svg("relogio")}</span></div>
           <div class="v dinheiro parado">{br_moeda(val_sem)}</div>
           <div class="s">{br_num(mont - n_med)} instrumentos ·
             {br_pct(pct_sem)} do montado</div>
           <div class="pl-barra"><i class="parado" style="width:{pct_sem:.1f}%"></i></div></div>
-        <div class="pl-kpi"><div class="r">Montado e medido no GITEC</div>
+        <div class="pl-kpi"><div class="top"><div class="r">Montado e medido no GITEC</div>
+          <span class="ic fxc-verde">{fx_svg("ok")}</span></div>
           <div class="v dinheiro feito">{br_moeda(val_med)}</div>
           <div class="s">{br_num(n_med)} instrumentos ·
             {br_pct(pct_med)} do montado</div>
