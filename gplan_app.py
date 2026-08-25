@@ -4310,19 +4310,24 @@ def dados_da_zona(zona: dict, areas: dict, plantas: dict,
     zonas irmas repetem o mesmo valor, porque e o unico que existe.
     """
     proprias = [plantas[d] for d in zona.get("desenhos", []) if d in plantas]
+    a = zona_area(zona, area_do_desenho)
     if proprias:
         somado = {c: sum(p[c] for p in proprias)
                   for c in ("tags", "montados", "montados_medidos",
                             "valor", "valor_montado", "valor_medido")}
         qtd = somado["tags"]
         return {**proprias[0], **somado,
+                # o "area" de proprias[0] e o desenho (plantas[d] usa a chave
+                # "area" para o proprio nome) -- sem isto a etiqueta da zona e
+                # o link "abrir ficha da area" mostravam "800-CHZ-327" em vez
+                # do codigo real, e o link nem batia com ficha nenhuma.
+                "area": a or proprias[0]["area"],
                 "pct": round(somado["montados"] / qtd * 100, 1) if qtd else 0.0,
                 # media ponderada pelo tamanho de cada planta, e nao media das
                 # medias: planta de 3 TAGs pesaria igual a de 300
                 "doc": round(sum(p["doc"] * p["tags"] for p in proprias) / qtd, 1)
                 if qtd else 0.0,
                 "por_planta": True}
-    a = zona_area(zona, area_do_desenho)
     dados = areas.get(a or "")
     return {**dados, "por_planta": False} if dados else None
 
