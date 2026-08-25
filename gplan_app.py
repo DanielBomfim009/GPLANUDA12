@@ -6578,13 +6578,12 @@ def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFram
       </div>""")
 
     por_id = {p["id"]: p for p in mapa["pranchas"]}
-    if "principal" in por_id:
-        render_html_pesado(planta_prancha_html(por_id["principal"], areas, plantas, area_do_desenho))
 
-    # As pranchas deitadas ficam embaixo da principal, na largura toda; a
-    # subestacao e um desenho em pe -- numa faixa larga ela viraria uma torre
-    # de mil pixels, entao vai para uma coluna estreita ao lado, com a legenda
-    # ocupando a altura que sobra do lado largo.
+    # A subestacao e um desenho em pe -- numa faixa larga ela viraria uma torre
+    # de mil pixels, entao vai para uma coluna estreita ao lado. Essa coluna
+    # acompanha a principal desde o topo (a principal entra dentro de col_a,
+    # e nao antes dela) -- igual ficou no mapa de infra de instrumentacao, com
+    # a subestacao ao lado do mapa inteiro, nao so da faixa de baixo.
     resto = [p for p in mapa["pranchas"] if p["id"] != "principal"]
     largas = [p for p in resto if p["prop"] < 100]
     altas = [p for p in resto if p["prop"] >= 100]
@@ -6593,6 +6592,8 @@ def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFram
     else:
         col_a, col_b = st.container(), None
     with col_a:
+        if "principal" in por_id:
+            render_html_pesado(planta_prancha_html(por_id["principal"], areas, plantas, area_do_desenho))
         for p in largas:
             render_html_pesado(planta_prancha_html(p, areas, plantas, area_do_desenho))
         render_html(planta_legenda_html(faixas, contagem))
