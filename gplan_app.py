@@ -2450,8 +2450,12 @@ def inject_css():
         .pl-tela { position:relative; width:100%; height:0;
                    border:1px solid var(--border-color); border-radius:11px;
                    overflow:hidden; background:#fff; }
+        /* Com o fundo branco cheio (sem mais opacidade reduzida escondendo o
+           traco), o desborrar do redimensionamento do navegador passou a
+           aparecer -- pede a imagem nitida, e nao a suavizacao padrao. */
         .pl-tela img { position:absolute; inset:0; width:100%; height:100%;
-                       object-fit:fill; }
+                       object-fit:fill; image-rendering:-webkit-optimize-contrast;
+                       image-rendering:crisp-edges; }
 
         /* a zona virou link para abrir a ficha: sem isto o navegador sublinha
            codigo, percentual e contagem */
@@ -2469,13 +2473,13 @@ def inject_css():
         /* Escala de avanco da Planta: sete faixas, laranja a verde escuro --
            tabela que o Daniel definiu. So vale nesta aba: o resto do projeto
            (Certificacao, Progresso) continua no feito/andando/parado. */
-        .pl-zona.pl1 { border-color:#E8974E; background:rgba(232,151,78,.14); color:#E8974E; }
-        .pl-zona.pl2 { border-color:#D4B106; background:rgba(212,177,6,.16); color:#D4B106; }
-        .pl-zona.pl3 { border-color:#A8A020; background:rgba(168,160,32,.16); color:#A8A020; }
-        .pl-zona.pl4 { border-color:#8BC34A; background:rgba(139,195,74,.16); color:#8BC34A; }
-        .pl-zona.pl5 { border-color:#6BAF3E; background:rgba(107,175,62,.16); color:#6BAF3E; }
-        .pl-zona.pl6 { border-color:#4F9130; background:rgba(79,145,48,.16); color:#4F9130; }
-        .pl-zona.pl7 { border-color:#2F7D32; background:rgba(47,125,50,.18); color:#2F7D32; }
+        .pl-zona.pl1 { border-color:#E8974E; background:rgba(232,151,78,.34); color:#E8974E; }
+        .pl-zona.pl2 { border-color:#D4B106; background:rgba(212,177,6,.34); color:#D4B106; }
+        .pl-zona.pl3 { border-color:#A8A020; background:rgba(168,160,32,.34); color:#A8A020; }
+        .pl-zona.pl4 { border-color:#8BC34A; background:rgba(139,195,74,.34); color:#8BC34A; }
+        .pl-zona.pl5 { border-color:#6BAF3E; background:rgba(107,175,62,.34); color:#6BAF3E; }
+        .pl-zona.pl6 { border-color:#4F9130; background:rgba(79,145,48,.34); color:#4F9130; }
+        .pl-zona.pl7 { border-color:#2F7D32; background:rgba(47,125,50,.34); color:#2F7D32; }
         /* O preenchimento sobe com o percentual: a zona e o proprio grafico. */
         .pl-zona::before { content:""; position:absolute; left:0; right:0; bottom:0;
                            height:calc(var(--p) * 1%); background:currentColor; opacity:.22; }
