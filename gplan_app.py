@@ -1522,12 +1522,13 @@ def inject_css():
           z-index: 2; }
         /* Campinhos de min/max acima do slider: atalho pro numero exato, nao
            um formulario -- por isso pequenos, sem esticar a coluna toda. */
-        .st-key-pesq_avanco_min, .st-key-pesq_avanco_max { max-width: 92px; }
+        .st-key-pesq_avanco_min, .st-key-pesq_avanco_max { max-width: 68px; }
+        .st-key-pesq_avanco_max { margin-left: auto; }
         .st-key-pesq_avanco_min [data-testid="stWidgetLabel"] p,
         .st-key-pesq_avanco_max [data-testid="stWidgetLabel"] p {
-          font-size: 10.5px !important; }
+          font-size: 10px !important; }
         .st-key-pesq_avanco_min input, .st-key-pesq_avanco_max input {
-          padding: 4px 8px !important; font-size: 13px !important; }
+          padding: 3px 6px !important; font-size: 12px !important; }
 
         /* a lista de opcoes e portalada para fora do widget: sem regra propria
            ela nasce com o fundo do config e o texto some */
@@ -4090,13 +4091,17 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
 
 
 def _pesq_avanco_do_slider():
-    """Arrastar o slider tambem atualiza os dois campos numericos."""
+    """Arrastar o slider tambem atualiza os dois campos numericos.
+
+    So mexe nos OUTROS widgets (nunca no proprio "pesq_avanco"): passar value=
+    pro slider depois de escrever em st.session_state["pesq_avanco"] no mesmo
+    ciclo e o que gera o aviso "created with a default value but also had its
+    value set via Session State API" -- por isso os widgets abaixo nascem so
+    com key=, sem value=, e o valor inicial entra so uma vez, via setdefault.
+    """
     lo, hi = st.session_state["pesq_avanco"]
     st.session_state["pesq_avanco_min"] = lo
     st.session_state["pesq_avanco_max"] = hi
-    st.session_state["mem_pesq_avanco"] = (lo, hi)
-    st.session_state["mem_pesq_avanco_min"] = lo
-    st.session_state["mem_pesq_avanco_max"] = hi
 
 
 def _pesq_avanco_do_min():
@@ -4106,8 +4111,6 @@ def _pesq_avanco_do_min():
     lo = min(st.session_state["pesq_avanco_min"], hi)
     st.session_state["pesq_avanco_min"] = lo
     st.session_state["pesq_avanco"] = (lo, hi)
-    st.session_state["mem_pesq_avanco"] = (lo, hi)
-    st.session_state["mem_pesq_avanco_min"] = lo
 
 
 def _pesq_avanco_do_max():
@@ -4116,8 +4119,6 @@ def _pesq_avanco_do_max():
     hi = max(st.session_state["pesq_avanco_max"], lo)
     st.session_state["pesq_avanco_max"] = hi
     st.session_state["pesq_avanco"] = (lo, hi)
-    st.session_state["mem_pesq_avanco"] = (lo, hi)
-    st.session_state["mem_pesq_avanco_max"] = hi
 
 
 def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame,
@@ -4179,19 +4180,31 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
     # mostra so quem esta nesse intervalo, nao tudo acima de 90. As pontas do
     # slider se encostam perto de 0% ou 100% e ficam dificeis de pegar uma sem
     # mexer na outra -- os dois campinhos acima resolvem isso: da pra escrever
-    # o numero exato em vez de arrastar. Pequenos e alinhados a esquerda, nao
-    # uma coluna cheia cada: sao um atalho do slider, nao um controle a parte.
-    faixa_atual = st.session_state.get("mem_pesq_avanco", (0, 100))
-    c_min, c_max, _c_resto = st.columns([1, 1, 5])
+    # o numero exato em vez de arrastar. Um em cima do inicio e outro em cima
+    # do final do slider (min a esquerda, max a direita), pequenos: sao um
+    # atalho do slider, nao um controle a parte.
+    # setdefault em vez de value=: cada um dos tres widgets abaixo nasce so
+    # com key=, sem value=. So assim um callback pode escrever direto no
+    # session_state de OUTRO widget (o que sincroniza os tres) sem que o
+    # Streamlit reclame de "value definido nos dois lugares" -- o valor
+    # inicial (ou o que sobrou de antes de trocar de aba, via mem_) entra uma
+    # unica vez, so quando a chave ainda nao existe.
+    st.session_state.setdefault("pesq_avanco", st.session_state.get("mem_pesq_avanco", (0, 100)))
+    st.session_state.setdefault("pesq_avanco_min", st.session_state["pesq_avanco"][0])
+    st.session_state.setdefault("pesq_avanco_max", st.session_state["pesq_avanco"][1])
+
+    c_min, _c_meio, c_max = st.columns([1, 6, 1])
     with c_min:
-        lembrado(st.number_input, "pesq_avanco_min", "Mín. %", min_value=0, max_value=100,
-                value=faixa_atual[0], step=1, on_change=_pesq_avanco_do_min)
+        st.number_input("Mín. %", min_value=0, max_value=100, step=1,
+                        key="pesq_avanco_min", on_change=_pesq_avanco_do_min)
     with c_max:
-        lembrado(st.number_input, "pesq_avanco_max", "Máx. %", min_value=0, max_value=100,
-                value=faixa_atual[1], step=1, on_change=_pesq_avanco_do_max)
-    faixa_avanco = lembrado(st.slider, "pesq_avanco", "Avanço documental (%)",
-                            min_value=0, max_value=100, value=faixa_atual,
-                            on_change=_pesq_avanco_do_slider)
+        st.number_input("Máx. %", min_value=0, max_value=100, step=1,
+                        key="pesq_avanco_max", on_change=_pesq_avanco_do_max)
+    faixa_avanco = st.slider("Avanço documental (%)", min_value=0, max_value=100, step=1,
+                             key="pesq_avanco", on_change=_pesq_avanco_do_slider)
+    st.session_state["mem_pesq_avanco"] = faixa_avanco
+    st.session_state["mem_pesq_avanco_min"] = st.session_state["pesq_avanco_min"]
+    st.session_state["mem_pesq_avanco_max"] = st.session_state["pesq_avanco_max"]
 
     list_df = resumo[["TAG", "DESCRICAO", "GRUPO_REGRA", "ITEM_PPU", "RELATORIOS_ESPERADOS", "AVANCO_DOCUMENTAL"]].copy()
     if painel_de:
