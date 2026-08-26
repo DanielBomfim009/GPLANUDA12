@@ -359,6 +359,49 @@ def aprovado(serie: pd.Series) -> pd.Series:
     return serie.astype(str).str.strip().str.upper().isin(STATUS_APROVADOS)
 
 
+def totais_por_documento(esperados_sub: pd.DataFrame) -> tuple[int, int, int, int]:
+    """Esperados/postados/aprovados/pendentes por DOCUMENTO unico, nao por par
+    (TAG, documento).
+
+    Um documento pode ser esperado por varias TAGs -- o RIMII/RIMSI de infra
+    por planta passa de 700. RELATORIOS_ESPERADOS por TAG (em aplicar_regra_
+    aprovados) conta certo dentro de cada TAG, mas somar essa coluna entre
+    varias TAGs conta o mesmo documento compartilhado uma vez por TAG
+    pendurada nele -- infla esperados e pendentes bem acima do numero real de
+    relatorios distintos. Aqui o documento entra uma unica vez, do mesmo jeito
+    que du_status ja faz para o donut de Status SIGEM.
+    """
+    unicos = esperados_sub.drop_duplicates(subset=["DOCUMENTO_ESPERADO"])
+    esp = len(unicos)
+    pos = int(unicos["EXISTE_NO_SIGEM"].astype(str).str.strip().str.upper().eq("SIM").sum())
+    apr = int(aprovado(unicos["STATUS_SIGEM"]).sum())
+    pen = esp - apr
+    return esp, pos, apr, pen
+
+
+def totais_por_documento_agrupado(df: pd.DataFrame, esperados: pd.DataFrame,
+                                  coluna: str) -> pd.DataFrame:
+    """Como totais_por_documento, mas por grupo (FASE/SOP/SSOP/MALHA/GRUPO_
+    REGRA/...) em vez do total geral -- usado por toda a arvore de Progresso e
+    pelo Resumo por grupo do Dashboard.
+
+    Um documento compartilhado entre TAGs de grupos diferentes (RIMII/RIMSI de
+    infra por planta atravessa FASE/SOP/SSOP e ate tipo de instrumento) conta
+    uma vez DENTRO de cada grupo que ele afeta -- por isso os grupos, somados,
+    podem passar do total geral: cada um responde "quanto desse grupo esta
+    aprovado", nao uma fatia de uma torta unica.
+    """
+    grupo_por_tag = df.set_index("TAG")[coluna]
+    e = esperados[esperados["TAG"].isin(set(df["TAG"]))][
+        ["TAG", "DOCUMENTO_ESPERADO", "STATUS_SIGEM"]].copy()
+    e["_grp"] = e["TAG"].map(grupo_por_tag)
+    unicos = e.drop_duplicates(subset=["DOCUMENTO_ESPERADO", "_grp"])
+    return unicos.groupby("_grp").agg(
+        esperados=("DOCUMENTO_ESPERADO", "size"),
+        emitidos=("STATUS_SIGEM", lambda s: int(aprovado(s).sum())),
+    )
+
+
 def aplicar_regra_aprovados(resumo: pd.DataFrame, esperados: pd.DataFrame) -> pd.DataFrame:
     """Recalcula o avanco por TAG contando so relatorio aprovado.
 
@@ -849,6 +892,20 @@ def exigir_login() -> dict:
     if u:
         return u
 
+    # Bypass so-para-verificacao-automatizada-local: uma variavel separada
+    # do GPLAN_LOCAL que o Daniel ja usa (esse continua exigindo login
+    # normal, pelo Supabase). So liga com as DUAS: GPLAN_LOCAL=1 (dados do
+    # disco) e GPLAN_DEV_SKIP_LOGIN=1 (usuario fake, so nesta sessao). Nunca
+    # ativa no Render -- as duas exigem env var explicita, nenhuma tem
+    # default ligado.
+    if (os.environ.get("GPLAN_LOCAL") == "1"
+            and os.environ.get("GPLAN_DEV_SKIP_LOGIN") == "1"):
+        st.session_state["gplan_usuario"] = {
+            "id": "dev-local", "nome": "Dev Local", "email": "dev@local.test",
+            "permissoes": acesso.TODAS, "ativo": True, "papel": "Administrador",
+        }
+        return st.session_state["gplan_usuario"]
+
     # Tudo da entrada mora num container proprio para poder ser APAGADO de
     # uma vez quando o login der certo. Antes daqui vinha um st.rerun(), e o
     # que se via era o formulario esmaecendo enquanto o sistema surgia por
@@ -968,12 +1025,31 @@ def inject_css():
         section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
           order: 1; padding-top: 0 !important; padding-bottom: 0 !important;
         }
-        /* O menu ocupa o lugar que era dos filtros rapidos. Eles saiam por
-           decisao de uso, e de quebra o motivo que os prendia no topo -- o
-           dropdown do selectbox e portalado no body e abria atras da barra de
-           tarefas quando comecava baixo demais -- deixou de existir. */
+        /* O menu fica entre a marca e o filtro rapido (que voltou, order 3
+           abaixo, antes do perfil -- ver sidebar_filtros e o comentario no
+           main()). Historico: os seletores ja ficaram no topo, antes do
+           menu, mas o dropdown do selectbox e portalado no body e abria
+           atras da barra de tarefas quando comecava baixo demais -- por
+           isso o menu tomou o lugar de cima e o filtro passou para depois
+           dele. */
         section[data-testid="stSidebar"] [data-testid="stSidebarNav"] { order: 2; }
         section[data-testid="stSidebar"] [data-testid="stSidebarNavSeparator"] { display: none; }
+        /* O Streamlit desenha esse cabecalho com a cor fixa do tema PROPRIO
+           dele (claro pro navegador, nao o claro/escuro que este app
+           implementa por conta -- ver sistema de temas). Sem sobrescrever,
+           ficava sempre com a cor de texto do escuro, ilegivel no fundo
+           claro deste app. */
+        section[data-testid="stSidebar"] header[data-testid="stNavSectionHeader"] {
+          display:flex; align-items:center; gap:7px;
+          color:var(--text-3) !important; }
+        section[data-testid="stSidebar"] header[data-testid="stNavSectionHeader"] p {
+          color:inherit !important; }
+        section[data-testid="stSidebar"] header[data-testid="stNavSectionHeader"]::before {
+          content:""; display:inline-block; width:13px; height:13px; flex:none;
+          background-color:currentColor;
+          -webkit-mask:var(--fxi-secao) center/contain no-repeat;
+          mask:var(--fxi-secao) center/contain no-repeat; }
+        __ICONES_SECAO__
 
         .gplan-brand {
           display:flex; align-items:center; gap:11px; padding: 0 4px 32px;
@@ -1077,6 +1153,12 @@ def inject_css():
         .du-kpi .val { font-size:clamp(21px,3.4vh,31px); font-weight:800; letter-spacing:-.8px;
                        line-height:1; color:var(--text-1); }
         .du-kpi .sub { font-size:10px; color:var(--text-3); }
+        /* Resumo so das TAGs prioritarias, ao lado do "sub" na mesma linha
+           -- a mesma pergunta do cartao, restrita as prioritarias, sem abrir
+           outra tela. Cor um pouco mais forte que o sub simples, pra dar pra
+           notar que e um recorte, nao so mais texto de legenda. */
+        .du-kpi-linha, span.du-kpi-linha { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+        .du-kpi-prio { font-size:10px; color:var(--txt-ambar); font-weight:650; white-space:nowrap; flex:none; }
         .du-trilho { height:3px; border-radius:99px; background:rgba(var(--rgb-tinta),.07);
                      overflow:hidden; color:var(--accent-green); }
         .du-trilho i { display:block; height:100%; border-radius:99px; background:currentColor; }
@@ -1222,8 +1304,31 @@ def inject_css():
           display: contents !important;
         }
         section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] .stElementContainer,
-        section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stElementContainer"] { order: 3; }
-        section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] .stElementContainer:first-child { order: 1; }
+        section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stElementContainer"],
+        section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stLayoutWrapper"] { order: 3; }
+        /* Cada bloco pelo conteudo, nao pela posicao no DOM -- ":first-child"
+           deveria pegar a marca, mas na pratica quem vinha primeiro variava
+           (chegou a ser o proprio filtro), e a marca ficava solta na ordem
+           padrao, sem bater com o menu nem com o perfil. Marca sempre
+           primeiro; filtro (botao + campos, quando abertos) cai no order:3
+           generico logo acima; perfil sempre por ultimo -- direto pelo que
+           cada um tem dentro, sem depender de qual o Streamlit desenhou
+           primeiro.
+           O perfil mora dentro de um st.container (pra dar posicionamento
+           proprio ao botao invisivel) -- e isso faz o Streamlit envolve-lo
+           num stLayoutWrapper, nao no stElementContainer que os widgets
+           simples (marca, seletores) usam. Sem cobrir os dois tipos, o
+           perfil nao batia com o order:3 generico NEM com o :has() de
+           order:4, ficava sem nenhuma ordem definida e pulava pra frente de
+           tudo -- inclusive da marca. */
+        section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stElementContainer"]:has(.gplan-brand),
+        section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stLayoutWrapper"]:has(.gplan-brand) {
+          order: 1 !important; }
+        section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stElementContainer"]:has(.sb-perfil),
+        section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stLayoutWrapper"]:has(.sb-perfil),
+        section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stElementContainer"]:has(.st-key-abrir_perfil),
+        section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] [data-testid="stLayoutWrapper"]:has(.st-key-abrir_perfil) {
+          order: 4 !important; }
         /* O display:contents tirou o bloco vertical do layout, e com ele o
            gap de 16px que compensava a margem negativa que o Streamlit poe em
            todo markdown -- por isso o titulo dos filtros subia por cima do
@@ -1250,24 +1355,45 @@ def inject_css():
             max-height: max(100px, calc(100dvh - 470px)) !important;
           }
         }
-        .flt-topo { padding:2px 4px 0; display:flex; align-items:baseline;
-                    justify-content:space-between; gap:8px; }
+        /* Filtro recolhido por padrao, pra nao empurrar o perfil pra fora da
+           tela: com os 6 campos sempre abertos, o menu + filtro passava de
+           800px e obrigava rolagem dentro da lateral. Duas tentativas
+           anteriores nao vingaram: um "cartao" com fundo/borda em cada campo
+           ficou pesado sem resolver o espaco, e o st.expander nativo nao
+           respeitava a mesma reordenacao por flex que marca e perfil
+           respeitam (aparecia antes da marca, nao depois do menu). Um botao
+           comum alternando um session_state, do mesmo tipo do "Abrir o
+           perfil" logo abaixo, se comporta certo. */
         section[data-testid="stSidebar"] [data-testid="stSidebarNav"] {
           border-top: 1px solid var(--border-color); padding-top: 8px; margin-top: 10px; }
-        .flt-titulo { font-size:9.5px; letter-spacing:.6px; text-transform:uppercase;
-                      color:var(--text-3); font-weight:700; white-space:nowrap; }
-        .flt-conta { font-size:10px; color:var(--text-3); white-space:nowrap; }
-        .flt-conta b { color:var(--txt-verde); }
-        section[data-testid="stSidebar"] .stSelectbox label { font-size:9.5px !important;
+        section[data-testid="stSidebar"] .st-key-flt_toggle button {
+          background:var(--dark-card-2) !important; border-color:var(--border-color) !important;
+          color:var(--text-2) !important; font-weight:600 !important;
+          justify-content:flex-start !important; }
+        section[data-testid="stSidebar"] .st-key-flt_toggle button p {
+          font-size:12px !important; white-space:nowrap !important; overflow:hidden !important;
+          text-overflow:ellipsis !important; }
+        section[data-testid="stSidebar"] .stSelectbox label { font-size:10px !important;
           color:var(--text-3) !important; margin-bottom:0 !important;
           min-height:0 !important; line-height:1.25 !important; }
         section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.stSelectbox) {
           margin-bottom:-9px; }
         section[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] > div {
-          background:var(--dark-card-2) !important; border-color:var(--border-color) !important;
-          font-size:11.5px !important; min-height:30px !important; }
+          background:var(--dark-card) !important; border-color:var(--border-color) !important;
+          font-size:11.5px !important; min-height:30px !important;
+          transition:border-color 120ms; }
+        section[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"]:hover > div {
+          border-color:rgba(var(--rgb-azul),.5) !important; }
+        /* O botao de limpar e uma acao leve, nao um segundo botao do tamanho
+           do menu -- fundo transparente e cor de aviso so aparecem no hover. */
         section[data-testid="stSidebar"] .stButton button { width:100%; font-size:11px !important;
           padding:4px 10px !important; border-radius:8px !important; }
+        section[data-testid="stSidebar"] .st-key-gf_limpar button {
+          background:transparent !important; border:1px dashed var(--border-color) !important;
+          color:var(--text-3) !important; box-shadow:none !important; }
+        section[data-testid="stSidebar"] .st-key-gf_limpar button:hover {
+          color:var(--txt-vermelho) !important; border-color:rgba(var(--rgb-vermelho),.4) !important;
+          background:rgba(var(--rgb-vermelho),.08) !important; }
         /* ------- botao de tema: so o icone, preso no alto a direita -------
            Fora do fluxo, ao lado do menu do proprio Streamlit. O rotulo existe
            para leitor de tela, mas nao ocupa espaco. */
@@ -1355,6 +1481,53 @@ def inject_css():
           fill: var(--text-2) !important; color: var(--text-2) !important; }
         input::placeholder, textarea::placeholder {
           color: var(--text-3) !important; opacity: 1 !important; }
+
+        /* Slider de faixa (duas pontas, ex: Avanço na Pesquisa tag). Sem
+           regra propria o rastro nasce cinza e fino, e o numero de cada ponta
+           duplica com o rotulo min/max debaixo (0 100 0 100), redundante e
+           feio. O rastro vira o espectro vermelho->ambar->teal que o resto do
+           app ja usa pra avanco (critico/atencao/ok) -- a cor conta a
+           historia mesmo antes de ler o numero -- e cada ponta vira uma
+           pilula arrastavel em vez do numero pelado. O rotulo min/max fixo
+           some: as pilulas ja mostram o valor de cada ponta o tempo todo. */
+        [data-testid="stSlider"] [role="group"] > div[data-orientation="horizontal"] {
+          padding: 16px 4px 4px; }
+        [data-testid="stSlider"] [role="group"] > div[data-orientation="horizontal"] > div:first-child {
+          height: 7px !important; border-radius: 999px !important;
+          background: linear-gradient(90deg, var(--accent-red) 0%, var(--accent-amber) 50%,
+                      var(--accent-teal) 100%) !important;
+          box-shadow: inset 0 1px 3px rgba(0,0,0,.22); }
+        [data-testid="stSliderThumbValue"] {
+          background: var(--dark-card) !important; color: var(--text-1) !important;
+          border: 2px solid var(--accent-teal) !important; border-radius: 999px !important;
+          padding: 2px 10px !important; font-size: 12px !important; font-weight: 700 !important;
+          box-shadow: 0 3px 10px var(--sombra) !important;
+          transition: transform 160ms ease, box-shadow 160ms ease; }
+        [data-testid="stSliderThumbValue"] p {
+          color: inherit !important; margin: 0 !important; }
+        [data-testid="stSlider"] [role="group"] > div[data-orientation="horizontal"] > div:hover [data-testid="stSliderThumbValue"],
+        [data-testid="stSlider"] [role="group"] > div[data-orientation="horizontal"] > div:has(input:focus-visible) [data-testid="stSliderThumbValue"] {
+          transform: scale(1.1);
+          box-shadow: 0 0 0 3px rgba(var(--rgb-teal),.3), 0 4px 14px rgba(var(--rgb-teal),.45) !important; }
+        [data-testid="stSliderTickBar"] { display: none !important; }
+        /* As duas pontas do slider, quando bem proximas (ex: as duas em
+           100%), ficam uma em cima da outra -- a de cima bloqueia o clique na
+           de baixo e trava o arraste. [data-rac] marca so as pontas (o rastro
+           nao tem esse atributo). A ponta sob o mouse ou com foco sobe de
+           camada, entao da pra pegar qualquer uma das duas mesmo grudadas. */
+        [data-testid="stSlider"] [role="group"] > div[data-orientation="horizontal"] > div[data-rac] {
+          z-index: 1; }
+        [data-testid="stSlider"] [role="group"] > div[data-orientation="horizontal"] > div[data-rac]:hover,
+        [data-testid="stSlider"] [role="group"] > div[data-orientation="horizontal"] > div[data-rac]:has(input:focus-visible) {
+          z-index: 2; }
+        /* Campinhos de min/max acima do slider: atalho pro numero exato, nao
+           um formulario -- por isso pequenos, sem esticar a coluna toda. */
+        .st-key-pesq_avanco_min, .st-key-pesq_avanco_max { max-width: 92px; }
+        .st-key-pesq_avanco_min [data-testid="stWidgetLabel"] p,
+        .st-key-pesq_avanco_max [data-testid="stWidgetLabel"] p {
+          font-size: 10.5px !important; }
+        .st-key-pesq_avanco_min input, .st-key-pesq_avanco_max input {
+          padding: 4px 8px !important; font-size: 13px !important; }
 
         /* a lista de opcoes e portalada para fora do widget: sem regra propria
            ela nasce com o fundo do config e o texto some */
@@ -2249,9 +2422,12 @@ def inject_css():
         /* O perfil desce para o pe do menu. Quem faz o empurrao e o
            margin-top:auto no CONTAINER da linha, e nao na linha: o
            stSidebarUserContent e o stVerticalBlock sao display:contents, entao
-           quem vira filho do flex da barra e o stElementContainer. Mirar na
-           .sb-perfil nao empurrava nada -- ela e neta de quem tem a caixa. */
-        [data-testid="stSidebarContent"] [data-testid="stElementContainer"]:has(.sb-perfil) {
+           quem vira filho do flex da barra e o stElementContainer -- ou o
+           stLayoutWrapper, que e o que o perfil usa por morar dentro de um
+           st.container (ver render_perfil_lateral). Mirar so no
+           stElementContainer nao empurrava nada pra ele. */
+        [data-testid="stSidebarContent"] [data-testid="stElementContainer"]:has(.sb-perfil),
+        [data-testid="stSidebarContent"] [data-testid="stLayoutWrapper"]:has(.sb-perfil) {
             margin-top:auto; }
 
         /* Uma linha so, sem cartao: foto, nome e e-mail, e a seta que diz que
@@ -2278,15 +2454,21 @@ def inject_css():
         .sb-perfil:hover .sb-seta { color:var(--text-1); transform:translateX(2px); }
         .sb-perfil:hover .sb-txt b { color:var(--accent-blue); }
 
-        /* O botao real, transparente e puxado por cima da linha. O -58px e a
-           altura da linha: se ela mudar, este numero muda junto. */
-        /* -69 e nao -64: o Streamlit poe 5 px de respiro entre elementos, e
-           com -64 o botao ficava 5 px abaixo da linha -- a faixa de cima
-           deixava de ser clicavel e a de baixo virava clique no vazio. */
-        [data-testid="stSidebarUserContent"] .stButton { margin-top:-69px; height:64px;
-                                                         position:relative; z-index:2; }
-        [data-testid="stSidebarUserContent"] .stButton button {
-            height:64px; width:100%; opacity:0; border:none; background:transparent;
+        /* O botao real, transparente e cobrindo o container do perfil
+           inteiro (position:absolute; inset:0) -- nao mais uma margem
+           negativa fixa em pixel. Aquele calculo supunha a linha do perfil
+           como vizinha imediata do botao no fluxo normal, e quebrava (cobria
+           o fim do menu e o botao do filtro com um clique fantasma) assim
+           que outra coisa passou a viver no mesmo bloco reordenado por
+           flex. Com os dois dentro do MESMO st.container (key=perfil_wrap,
+           position:relative, sem display:contents), o botao so precisa
+           preencher esse container -- o tamanho dele quem da e a propria
+           linha, que continua no fluxo normal. */
+        .st-key-perfil_wrap { position:relative; }
+        .st-key-perfil_wrap .st-key-abrir_perfil {
+          position:absolute; inset:0; margin:0 !important; height:auto !important; z-index:2; }
+        .st-key-perfil_wrap .st-key-abrir_perfil button {
+            height:100%; width:100%; opacity:0; border:none; background:transparent;
             padding:0; cursor:pointer; }
 
         /* dialogo do perfil */
@@ -2561,6 +2743,7 @@ def inject_css():
         @media (max-width:620px) { .pl-kpis { grid-template-columns:1fr; } }
         </style>
         """.replace("__ICONES__", fx_css_icones())
+            .replace("__ICONES_SECAO__", secao_css_icones())
             .replace("__TOKENS__", tokens_css(tema_ativo()))
     )
 
@@ -2882,7 +3065,7 @@ def fichas_completas(ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
     base_niveis = progresso_base(resumo, tags)
     base_niveis = base_niveis[base_niveis["TAG"].isin(alvo)]
     return (fichas_niveis_html(cache_key, f"{origem}:{assinatura_tags(alvo)}", "", "",
-                               0, base_niveis)
+                               0, base_niveis, esperados)
             + fichas_modais_html(ids, resumo, esperados, tags, espera,
                                  niveis_na_pagina=True)
             + fichas_relatorios_html(docs, esperados, historico))
@@ -2900,9 +3083,16 @@ def du_tile(cor: str, icone: str) -> str:
             f'stroke-linecap="round" stroke-linejoin="round">{svg}</svg></span>')
 
 
-def du_kpi(rot: str, val: str, sub: str, pct: float, cor: str, icone: str, href: str = "") -> str:
+def du_kpi(rot: str, val: str, sub: str, pct: float, cor: str, icone: str, href: str = "",
+          prioridade: str = "") -> str:
+    # "prioridade" e o recorte so das TAGs prioritarias (SSOP_PRIORITARIO),
+    # ao lado do "sub" na mesma linha -- a mesma pergunta do cartao, so que
+    # restrita as prioritarias, sem abrir outra tela pra ver isso.
+    linha_sub = (f'<div class="du-kpi-linha"><div class="sub">{sub}</div>'
+                 f'<div class="du-kpi-prio">{prioridade}</div></div>'
+                 if prioridade else f'<div class="sub">{sub}</div>')
     corpo = (f'<div class="topo">{du_tile(cor, icone)}<div class="rot">{rot}</div></div>'
-             f'<div class="val">{val}</div><div class="sub">{sub}</div>'
+             f'<div class="val">{val}</div>{linha_sub}'
              f'<div class="du-trilho {fx_classe_cor(cor)}">'
              f'<i style="width:{max(0.0, min(pct, 1.0)) * 100:.1f}%;"></i></div>')
     if href:
@@ -2910,11 +3100,14 @@ def du_kpi(rot: str, val: str, sub: str, pct: float, cor: str, icone: str, href:
     return f'<div class="du-kpi">{corpo}</div>'
 
 
-def du_grupos(resumo: pd.DataFrame) -> str:
-    g = resumo.groupby("GRUPO_REGRA").agg(
-        tags=("TAG", "count"), esperados=("RELATORIOS_ESPERADOS", "sum"),
-        aprovados=("RELATORIOS_APROVADOS", "sum"),
-    ).reset_index()
+def du_grupos(resumo: pd.DataFrame, esperados: pd.DataFrame) -> str:
+    # Um documento compartilhado pode cair em mais de um grupo (o RIMII/RIMSI
+    # de infra por planta cobre tags de Instrumento, Valvula, Caixa, Painel e
+    # Analisador juntas) -- ver totais_por_documento_agrupado.
+    doc_g = totais_por_documento_agrupado(resumo, esperados, "GRUPO_REGRA")
+    g = doc_g.rename(columns={"emitidos": "aprovados"}).reset_index(names="GRUPO_REGRA")
+    tags_por_grupo = resumo.groupby("GRUPO_REGRA")["TAG"].size()
+    g["tags"] = g["GRUPO_REGRA"].map(tags_por_grupo).fillna(0).astype(int)
     g["avanco"] = (g["aprovados"] / g["esperados"]).fillna(0) * 100
     g = g.sort_values("tags", ascending=False)
     cartoes = "".join(
@@ -2955,9 +3148,14 @@ def du_barras(esperados: pd.DataFrame) -> str:
 
 
 def du_status(esperados: pd.DataFrame) -> str:
-    contagem = esperados["STATUS_SIGEM"].value_counts()
+    # Um documento pode ser esperado por mais de uma TAG -- o RIMII/RIMSI de
+    # infra por planta e o exemplo, ate 806 TAGs num so. A linha e por par
+    # (TAG, documento); contar linha contava o mesmo parecer uma vez por TAG
+    # penduradas nele. O documento e unico, entao so ele entra na conta.
+    unicos = esperados.drop_duplicates(subset=["DOCUMENTO_ESPERADO"])
+    contagem = unicos["STATUS_SIGEM"].value_counts()
     itens = [(sentence_case(k), int(v)) for k, v in contagem.items()]
-    total = int(len(esperados)) or 1
+    total = int(len(unicos)) or 1
     raio, largura = 46.0, 13.0
     circ = 2 * math.pi * raio
     fatias, giro = "", 0.0
@@ -2982,7 +3180,7 @@ def du_status(esperados: pd.DataFrame) -> str:
             f'<div class="du-rosca"><svg viewBox="0 0 120 120">'
             f'<circle class="trilho" cx="60" cy="60" r="{raio}" fill="none" '
             f'stroke-width="{largura}"></circle>{fatias}</svg>'
-            f'<div class="centro"><b>{br_num(int(len(esperados)))}</b><span>relatórios</span></div></div>'
+            f'<div class="centro"><b>{br_num(total if itens else 0)}</b><span>relatórios</span></div></div>'
             f'<div class="du-leg">{legenda}</div></div></div></div>')
 
 
@@ -3010,11 +3208,15 @@ def du_top10(resumo: pd.DataFrame) -> str:
             'Ver todas as tags pendentes →</a></div>')
 
 
-def du_mini(rot: str, val: str, sub: str, cor: str, icone: str, href: str = "") -> str:
+def du_mini(rot: str, val: str, sub: str, cor: str, icone: str, href: str = "",
+           prioridade: str = "") -> str:
     classe = "val pq" if len(val) > 9 else "val"
+    linha_sub = (f'<span class="du-kpi-linha"><span class="rot">{sub}</span>'
+                 f'<span class="du-kpi-prio">{prioridade}</span></span>'
+                 if prioridade else f'<span class="rot">{sub}</span>')
     corpo = (f'{du_tile(cor, icone)}<span><span class="rot">{rot}</span>'
              f'<span class="{classe}" style="display:block;">{val}</span>'
-             f'<span class="rot">{sub}</span></span>')
+             f'{linha_sub}</span>')
     if href:
         return f'<a class="du-mini" href="{com_filtros(href) if href.startswith("/") else href}" target="_self">{corpo}</a>'
     return f'<div class="du-mini">{corpo}</div>'
@@ -3056,30 +3258,65 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
         return
 
     total_tags = len(resumo)
-    total_esperados = int(resumo["RELATORIOS_ESPERADOS"].sum())
-    total_postados = int(resumo["RELATORIOS_POSTADOS"].sum())
-    total_aprovados = int(resumo["RELATORIOS_APROVADOS"].sum())
+    # Por documento unico, nao por par (TAG, documento) -- ver totais_por_
+    # documento. Somar RELATORIOS_ESPERADOS/APROVADOS por TAG inflava esses
+    # totais toda vez que um documento era compartilhado por varias TAGs.
+    total_esperados, total_postados, total_aprovados, total_pendentes = (
+        totais_por_documento(esperados))
     # pendente inclui o que foi postado mas nao passou: recusado, em analise e
     # cancelado voltam para a fila em vez de contarem como entregue
-    total_pendentes = total_esperados - total_aprovados
     avanco = (total_aprovados / total_esperados) if total_esperados else 0.0
     completas = int((resumo["AVANCO_DOCUMENTAL"] >= 1.0).sum())
     st_norm = esperados["STATUS_SIGEM"].astype(str).str.strip().str.upper()
 
+    # Recorte so das TAGs prioritarias (SSOP_PRIORITARIO=SIM), pra mostrar ao
+    # lado de cada cartao quanto daquele numero e delas -- a mesma pergunta
+    # do cartao, sem abrir outra tela. Planilha sem a coluna (pipeline
+    # antigo) degrada pra conjunto vazio, sem quebrar.
+    prioritarias = (set(tags.loc[tags["SSOP_PRIORITARIO"].astype(str).str.strip().str.upper() == "SIM", "TAG"])
+                    if "SSOP_PRIORITARIO" in tags.columns else set())
+    resumo_prio = resumo[resumo["TAG"].isin(prioritarias)]
+    total_tags_prio = len(resumo_prio)
+    completas_prio = int((resumo_prio["AVANCO_DOCUMENTAL"] >= 1.0).sum())
+    # Mesma logica de totais_por_documento: recorta esperados pelas TAGs
+    # prioritarias e conta cada documento uma unica vez, senao um documento
+    # compartilhado entre varias TAGs prioritarias (ou entre uma prioritaria
+    # e outras que nao sao) inflava a fatia igual ao bug do total geral.
+    if total_tags_prio:
+        esperados_prio_df = esperados[esperados["TAG"].isin(prioritarias)]
+        _, postados_prio, aprovados_prio, pendentes_prio = totais_por_documento(esperados_prio_df)
+    else:
+        postados_prio = aprovados_prio = pendentes_prio = 0
+    # Nao e o avanco calculado so entre as prioritarias (outro denominador,
+    # outra pergunta) -- e quantos PONTOS PERCENTUAIS do avanco geral vieram
+    # de aprovacao de documento ligado a tag prioritaria. Mesmo denominador
+    # (total_esperados) dos dois, entao os dois pedacos somam o total.
+    pct_prio_do_avanco = (aprovados_prio / total_esperados * 100) if total_esperados else 0.0
+
+    def prio(rotulo_valor: str) -> str:
+        """"" quando nao ha nenhuma prioritaria no recorte -- o cartao fica
+        limpo em vez de anunciar "0 prioritárias" em todo lugar."""
+        return f"⚑ {rotulo_valor}" if total_tags_prio else ""
+
     kpis = (
         du_kpi("Total de tags", br_num(total_tags), "", 1.0,
-               "#5b8def", "shield", "/pesquisa")
+               "#5b8def", "shield", "/pesquisa",
+               prioridade=prio(f"{br_num(total_tags_prio)} prioritárias"))
         + du_kpi("Tags completas", br_num(completas),
                  f"{br_pct(completas / total_tags * 100)} do total",
-                 completas / total_tags, "#34d399", "check")
+                 completas / total_tags, "#34d399", "check",
+                 prioridade=prio(f"{br_num(completas_prio)} prioritárias"))
         + du_kpi("Pendentes", br_num(total_pendentes),
                  f"{br_pct(total_pendentes / total_esperados * 100) if total_esperados else '—'} dos esperados",
-                 (total_pendentes / total_esperados) if total_esperados else 0, "#f87171", "clock")
+                 (total_pendentes / total_esperados) if total_esperados else 0, "#f87171", "clock",
+                 prioridade=prio(f"{br_num(pendentes_prio)} de prioritárias"))
         + du_kpi("Emitidos SIGEM", br_num(total_postados),
                  f"{br_pct(total_postados / total_esperados * 100) if total_esperados else '—'} dos esperados",
-                 (total_postados / total_esperados) if total_esperados else 0, "#fbbf24", "archive")
+                 (total_postados / total_esperados) if total_esperados else 0, "#fbbf24", "archive",
+                 prioridade=prio(f"{br_num(postados_prio)} de prioritárias"))
         + du_kpi("Avanço geral", br_pct(avanco * 100), f"{br_num(total_aprovados)} aprovados",
-                 avanco, "#9d6bff", "trend")
+                 avanco, "#9d6bff", "trend",
+                 prioridade=prio(f"{br_pct(pct_prio_do_avanco)} p.p. de prioritárias"))
     )
 
     # A medicao de campo entra pelo GITEC. Planilha antiga nao tem essas
@@ -3093,6 +3330,7 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     montagem = (tags["STATUS_MONTAGEM"].astype(str).str.strip().str.upper()
                 if "STATUS_MONTAGEM" in tags.columns else pd.Series(dtype=str))
     montados = int(montagem.eq("MONTADO").sum())
+    montados_prio = int((montagem.eq("MONTADO") & tags["TAG"].isin(prioritarias)).sum())
 
     # Previsto de medicao: o que ja fechou a documentacao e o GITEC ainda nao
     # mediu. Tag no SIGEM e no GITEC ja foi medido; tag so no GITEC tambem.
@@ -3109,7 +3347,8 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     minis = (
         du_mini("Tags montadas", br_num(montados),
                 f"{br_pct(montados / total_tags * 100)} do total" if total_tags else "",
-                "#5b8def", "shield")
+                "#5b8def", "shield",
+                prioridade=prio(f"{br_num(montados_prio)} prioritárias"))
         + du_mini("Previsto de medição", br_moeda(previsto), "", "#2dd4bf", "check")
         + du_mini("Valor total", br_moeda(float(preco_tag.sum())), "", "#9d6bff", "trend")
         # medido de verdade e o aprovado; o que esta em verificacao ainda pode
@@ -3129,7 +3368,7 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
         f'<div class="du-acoes">{selo_filtro}</div></header>'
         f'<section class="du-kpis">{kpis}</section>'
         '<section class="du-meio">'
-        f'<div class="du-col">{du_grupos(resumo)}{du_barras(esperados)}</div>'
+        f'<div class="du-col">{du_grupos(resumo, esperados)}{du_barras(esperados)}</div>'
         f'<div class="du-col">{du_status(esperados)}{du_top10(resumo)}</div>'
         "</section>"
         f'<section class="du-pe">{minis}</section>'
@@ -3195,9 +3434,16 @@ def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.Da
             + " relatórios</div>"
         )
 
-    st_norm = df["STATUS_SIGEM"].astype(str).str.strip().str.upper()
+    # Esta faixa responde "quantos relatorios estao em cada status" -- e o
+    # relatorio e o documento, nao a linha. Um RIMII/RIMSI de infra por planta
+    # e uma linha por TAG (ate 806 pra um so), e contar linha contava o mesmo
+    # parecer uma vez por TAG pendurada nele. A tabela de baixo continua por
+    # linha de proposito -- ali a pergunta e outra, "o que falta para cada
+    # TAG", e cada linha e a pendencia de uma TAG de verdade.
+    doc_unico = df.drop_duplicates(subset=["DOCUMENTO_ESPERADO"])
+    st_norm = doc_unico["STATUS_SIGEM"].astype(str).str.strip().str.upper()
     render_html(faixa_resumo([
-        ("No recorte", br_num(len(df)), None),
+        ("No recorte", br_num(len(doc_unico)), None),
         ("Aprovados", br_num(int(st_norm.isin(STATUS_APROVADOS).sum())), "bom"),
         ("Recusados", br_num(int((st_norm == "RECUSADO").sum())), "ruim"),
         ("Em análise", br_num(int((st_norm == "EM ANÁLISE").sum())), None),
@@ -3300,6 +3546,40 @@ def fx_css_icones() -> str:
         # aspas simples dentro do data: URI, para nao ter de escapar as duplas
         uri = quote(svg.replace('"', "'"), safe="/:='<>() ")
         regras.append(f'.fxi-{nome}{{--fxi:url("data:image/svg+xml,{uri}");}}')
+    return "\n        ".join(regras)
+
+
+# Icone do titulo de cada secao do menu lateral (Visao geral, Documentacao,
+# Avanco, Administracao -- nessa ordem, ver secoes em main()). O atalho
+# ":material/nome:" quebra a secao INTEIRA quando usado no titulo (a propria
+# <section data-testid="stSidebar"> some do DOM -- confirmado ao vivo), e o
+# titulo e so texto puro, sem HTML aceito, entao o icone so pode entrar por
+# CSS -- daqui, via nth-of-type na mesma ordem das secoes.
+SECAO_ICO = [
+    '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>'
+    '<rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    '<path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+    '<path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/>',
+    '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+]
+
+
+def secao_css_icones() -> str:
+    regras = []
+    for i, desenho in enumerate(SECAO_ICO, start=1):
+        svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
+               'stroke="black" stroke-width="1.9" stroke-linecap="round" '
+               f'stroke-linejoin="round">{desenho}</svg>')
+        uri = quote(svg.replace('"', "'"), safe="/:='<>() ")
+        # nth-of-type no proprio <header> nao funciona: cada secao tem o seu
+        # dentro de uma <div> propria, entao TODO header e "o primeiro" da
+        # sua propria div-mae -- os 4 batiam sempre com :nth-of-type(1). Quem
+        # e irmao de verdade sao essas divs, dentro de <ul data-testid=
+        # "stSidebarNavItems">: e nelas que o nth-of-type conta certo.
+        regras.append(
+            f'[data-testid="stSidebarNavItems"] > div:nth-of-type({i}) '
+            'header[data-testid="stNavSectionHeader"]::before'
+            f'{{--fxi-secao:url("data:image/svg+xml,{uri}");}}')
     return "\n        ".join(regras)
 
 
@@ -3733,6 +4013,17 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
                          if v != "—")
     bloco_campo = (fx_painel("Situação em campo", "pessoas", campo_html)
                    if campo_html else "")
+    # SSOP_PRIORITARIO diz SE a tag pede atencao; SUBGRUPO_PRIORIDADE diz
+    # QUANTO -- as duas vem da mesma base (01_BASE_TAGS) e sao perguntas
+    # diferentes, entao o card mostra as duas linhas juntas.
+    prioridade_html = ""
+    ssop_prio, subgrupo_prio = da_base("SSOP_PRIORITARIO"), da_base("SUBGRUPO_PRIORIDADE")
+    if ssop_prio != "—":
+        prioridade_html += fx_linha("SSOP Prioritário", pill_ssop_prioritario(ssop_prio))
+    if subgrupo_prio != "—":
+        prioridade_html += fx_linha("Subgrupo de prioridade", pill_prioridade(subgrupo_prio))
+    bloco_prioridade = (fx_painel("Prioridade", "alerta", prioridade_html)
+                        if prioridade_html else "")
     # Card proprio, logo depois da situacao em campo -- que e onde o leitor
     # acabou de ver "On demand" e vai perguntar quando chega. So existe para
     # quem esta em compra: numa tag calibrada nao quer dizer nada.
@@ -3794,8 +4085,39 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
                     f'<div class="fx-kpis">{kpis}</div><div class="fx-dados">{dados}</div>')
         + fx_painel("Relatórios da tag", "folha", tabela,
                     conta=f"{br_num(esp)} previstos", classe_corpo="zero")
-        + f'</div><div class="fx-col">{avanco}{bloco_campo}{bloco_fornecimento}{mov}{acoes}</div></div></div>'
+        + f'</div><div class="fx-col">{avanco}{bloco_campo}{bloco_prioridade}{bloco_fornecimento}{mov}{acoes}</div></div></div>'
     )
+
+
+def _pesq_avanco_do_slider():
+    """Arrastar o slider tambem atualiza os dois campos numericos."""
+    lo, hi = st.session_state["pesq_avanco"]
+    st.session_state["pesq_avanco_min"] = lo
+    st.session_state["pesq_avanco_max"] = hi
+    st.session_state["mem_pesq_avanco"] = (lo, hi)
+    st.session_state["mem_pesq_avanco_min"] = lo
+    st.session_state["mem_pesq_avanco_max"] = hi
+
+
+def _pesq_avanco_do_min():
+    """Digitar o minimo tambem move a ponta esquerda do slider -- travado no
+    maximo atual, senao o campo digitavel conseguiria inverter a faixa."""
+    hi = st.session_state["pesq_avanco"][1]
+    lo = min(st.session_state["pesq_avanco_min"], hi)
+    st.session_state["pesq_avanco_min"] = lo
+    st.session_state["pesq_avanco"] = (lo, hi)
+    st.session_state["mem_pesq_avanco"] = (lo, hi)
+    st.session_state["mem_pesq_avanco_min"] = lo
+
+
+def _pesq_avanco_do_max():
+    """Mesma logica do minimo, do lado de cima."""
+    lo = st.session_state["pesq_avanco"][0]
+    hi = max(st.session_state["pesq_avanco_max"], lo)
+    st.session_state["pesq_avanco_max"] = hi
+    st.session_state["pesq_avanco"] = (lo, hi)
+    st.session_state["mem_pesq_avanco"] = (lo, hi)
+    st.session_state["mem_pesq_avanco_max"] = hi
 
 
 def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame,
@@ -3852,6 +4174,25 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
     with col_busca:
         search = lembrado(st.text_input, "pesq_busca", "Pesquisar", placeholder="Digite a tag para ver a ficha completa (ex: AIT-120005)...", label_visibility="collapsed")
 
+    # Duas pontas: uma so ponta (min ou max fixo) responderia "acima de X" ou
+    # "abaixo de X" -- as duas juntas fecham uma faixa fechada, entao 90-100
+    # mostra so quem esta nesse intervalo, nao tudo acima de 90. As pontas do
+    # slider se encostam perto de 0% ou 100% e ficam dificeis de pegar uma sem
+    # mexer na outra -- os dois campinhos acima resolvem isso: da pra escrever
+    # o numero exato em vez de arrastar. Pequenos e alinhados a esquerda, nao
+    # uma coluna cheia cada: sao um atalho do slider, nao um controle a parte.
+    faixa_atual = st.session_state.get("mem_pesq_avanco", (0, 100))
+    c_min, c_max, _c_resto = st.columns([1, 1, 5])
+    with c_min:
+        lembrado(st.number_input, "pesq_avanco_min", "Mín. %", min_value=0, max_value=100,
+                value=faixa_atual[0], step=1, on_change=_pesq_avanco_do_min)
+    with c_max:
+        lembrado(st.number_input, "pesq_avanco_max", "Máx. %", min_value=0, max_value=100,
+                value=faixa_atual[1], step=1, on_change=_pesq_avanco_do_max)
+    faixa_avanco = lembrado(st.slider, "pesq_avanco", "Avanço documental (%)",
+                            min_value=0, max_value=100, value=faixa_atual,
+                            on_change=_pesq_avanco_do_slider)
+
     list_df = resumo[["TAG", "DESCRICAO", "GRUPO_REGRA", "ITEM_PPU", "RELATORIOS_ESPERADOS", "AVANCO_DOCUMENTAL"]].copy()
     if painel_de:
         # Só entra no filtro o painel que tem segmentação: instrumento pendurado
@@ -3889,7 +4230,9 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
         list_df = list_df[mask]
 
     list_df["AVANCO_DOCUMENTAL"] = (list_df["AVANCO_DOCUMENTAL"] * 100).round(1)
-    list_df_page = paginate(list_df, "pesquisa", search)
+    if faixa_avanco != (0, 100):
+        list_df = list_df[list_df["AVANCO_DOCUMENTAL"].between(faixa_avanco[0], faixa_avanco[1])]
+    list_df_page = paginate(list_df, "pesquisa", f"{search}|{faixa_avanco}")
 
     rows = ""
     for _, r in list_df_page.iterrows():
@@ -5814,24 +6157,6 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                     "Nenhuma caixa de junção nesta base de circuitos.</div></div>")
         return
 
-    # Tudo em TAG. Metro e circuito são a unidade da planilha de cabos, não a
-    # do controle: o que se certifica é o instrumento.
-    total = pan["tags"]
-    pct_lanc = pan["lancado"] / pan["metros"] * 100 if pan["metros"] else 0.0
-    render_html(f"""
-      <div class="pl-kpis tres">
-        <div class="pl-kpi"><div class="r">TAGs mapeadas</div>
-          <div class="v">{br_num(total)}</div>
-          <div class="s">com cadeia de cabo na base</div></div>
-        <div class="pl-kpi"><div class="r">Avanço do cabo</div>
-          <div class="v andando">{br_pct(pct_lanc)}</div>
-          <div class="s">{br_num(int(pan['lancado']))} de {br_num(int(pan['metros']))} m</div>
-          <div class="pl-barra"><i class="andando" style="width:{pct_lanc:.1f}%"></i></div></div>
-        <div class="pl-kpi"><div class="r">Montadas travadas</div>
-          <div class="v">{br_num(pan['montadas_travadas'])}</div>
-          <div class="s">montadas, esperando cabo</div></div>
-      </div>""")
-
     # Duas perguntas diferentes, dois controles: o status recorta o universo,
     # a busca escolhe dentro dele. Num campo só, escolher "TAG apta" e depois
     # digitar uma travada devolveria lista vazia sem dizer por quê.
@@ -5843,7 +6168,37 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     atrib = cert_atributos(tags, cache_key)
     campos = [(c, rot) for c, rot in CERT_FILTROS
               if any(c in v for v in atrib.values())]
-    universo = [t for t in indice if t in por_tag]
+    # indice e por_tag vem do lancamento de cabos (lanc), que nao passa pelo
+    # filtro geral da lateral -- so a 01_BASE_TAGS passa. Sem cruzar aqui, a
+    # Certificacao continuava mostrando a obra inteira mesmo com um filtro
+    # ativo, a unica aba que escapava do recorte.
+    tags_no_filtro_geral = set(tags["TAG"])
+    universo = [t for t in indice if t in por_tag and t in tags_no_filtro_geral]
+
+    # Tudo em TAG. Metro e circuito são a unidade da planilha de cabos, não a
+    # do controle: o que se certifica é o instrumento. Os cartões usam so o
+    # recorte do filtro geral (universo), nao o do painel/segmento local mais
+    # abaixo -- esses dois continuam cada um com seu proprio escopo.
+    metros_org = cert_metros_por_origem(lanc, cache_key)
+    total = len(universo)
+    metros_filtro = sum(metros_org.get(t, (0.0, 0.0))[0] for t in universo)
+    lancado_filtro = sum(metros_org.get(t, (0.0, 0.0))[1] for t in universo)
+    pct_lanc = lancado_filtro / metros_filtro * 100 if metros_filtro else 0.0
+    montadas_travadas = sum(1 for t in universo
+                            if por_tag[t]["montada"] and not por_tag[t]["cabo"])
+    render_html(f"""
+      <div class="pl-kpis tres">
+        <div class="pl-kpi"><div class="r">TAGs mapeadas</div>
+          <div class="v">{br_num(total)}</div>
+          <div class="s">com cadeia de cabo na base</div></div>
+        <div class="pl-kpi"><div class="r">Avanço do cabo</div>
+          <div class="v andando">{br_pct(pct_lanc)}</div>
+          <div class="s">{br_num(int(lancado_filtro))} de {br_num(int(metros_filtro))} m</div>
+          <div class="pl-barra"><i class="andando" style="width:{pct_lanc:.1f}%"></i></div></div>
+        <div class="pl-kpi"><div class="r">Montadas travadas</div>
+          <div class="v">{br_num(montadas_travadas)}</div>
+          <div class="s">montadas, esperando cabo</div></div>
+      </div>""")
     escolhido = {c: st.session_state.get(f"cert_f_{c}", "Todos") for c, _ in campos}
 
     def combina(tag, exceto=""):
@@ -5902,7 +6257,7 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         # Sem os troncos o H1-0057 aparecia 100% com o cabo da CFF-12-0057C
         # para a CFF-12-0057B por lançar. São 290 troncos e 48.846 m que
         # ficavam de fora, 152 deles não concluídos.
-        metros_org = cert_metros_por_origem(lanc, cache_key)
+        # metros_org ja foi calculado la em cima, pros cartoes do topo.
         caixa_seg = {}
         for v in atrib.values():
             cx, sg = v.get("CFF", ""), v.get("SEGMENTO", "")
@@ -6074,7 +6429,7 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         # para o pai dela na trilha (Malha -> SSOP -> SOP -> Fase -> fechado),
         # a mesma logica de qualquer outra ficha do projeto.
         render_html(fichas_niveis_html(cache_key, f"cert:{assinatura_tags(ids)}", "", "",
-                                       0, base_niveis)
+                                       0, base_niveis, esperados)
                     + fichas_modais_html(ids, resumo, esperados, tags, espera,
                                          niveis_na_pagina=True)
                     + fichas_relatorios_pagina(cache_key, "cert", "", "", 0,
@@ -6386,6 +6741,18 @@ def render_atualizacao(movs: pd.DataFrame, sigem: pd.DataFrame, esperados: pd.Da
     """
     render_header("Última atualização")
     movimentos = ua_movimentos(cache_key, movs, sigem, esperados)
+    # ua_movimentos_planilha nao recebe tags/resumo (so o cache_key entra na
+    # chave dela), entao uma TAG fora do filtro geral da lateral ainda
+    # aparecia aqui. As de "documento" ja vem certas -- quem decide quais
+    # documentos entram e o proprio ua_movimentos_documento, a partir do
+    # esperados ja recortado. As de "cabo" seguem sem recorte: o objeto
+    # delas e o CIRCUITO (ex. "PCC-101-07L"), que nao e o mesmo espaco de
+    # nomes da TAG nem da PONTA do de-para, e resolver isso exigiria a
+    # cadeia ORIGEM/DESTINO inteira -- o mesmo problema que a Certificacao
+    # resolve com a cadeia de caixas, e que nao cabe aqui de graca.
+    tags_no_filtro_geral = set(resumo["TAG"])
+    movimentos = [m for m in movimentos
+                  if m["tipo"] in ("documento", "cabo") or m["objeto"] in tags_no_filtro_geral]
     if not movimentos:
         render_html('<div class="gplan-panel"><div class="gtbl-empty">'
                     "Nenhuma movimentação registrada nesta planilha. A aba se enche "
@@ -6447,7 +6814,7 @@ def render_atualizacao(movs: pd.DataFrame, sigem: pd.DataFrame, esperados: pd.Da
     if ids:
         base = progresso_base(resumo, tags)
         render_html(fichas_niveis_html(cache_key, f"ua:{assinatura_tags(ids)}", "", "", 0,
-                                       base[base["TAG"].isin(ids)])
+                                       base[base["TAG"].isin(ids)], esperados)
                     + fichas_modais_html(ids, resumo, esperados, tags,
                                          espera_por_documento(
                                              _revisoes_por_doc(cache_key, sigem)),
@@ -6681,7 +7048,7 @@ def render_planta(tags: pd.DataFrame, resumo: pd.DataFrame, locacao: pd.DataFram
         base_niveis = progresso_base(resumo, tags)
         render_html_pesado(
             fichas_niveis_html(cache_key, f"planta:{assinatura_tags(ids)}", "", "", 0,
-                               base_niveis[base_niveis["TAG"].isin(ids)])
+                               base_niveis[base_niveis["TAG"].isin(ids)], esperados)
             + fichas_modais_html(ids, resumo, esperados, tags,
                                  niveis_na_pagina=True, volta_por_tag=volta,
                                  com_relatorio=False))
@@ -6993,15 +7360,20 @@ def prioridade_do_grupo(serie: pd.Series) -> str:
     return min(reais, key=ordem_prioridade) if reais else "-"
 
 
-def agrega_nivel(df: pd.DataFrame, coluna: str, subnivel: str | None = None) -> pd.DataFrame:
+def agrega_nivel(df: pd.DataFrame, esperados: pd.DataFrame, coluna: str,
+                 subnivel: str | None = None) -> pd.DataFrame:
     """Avanco = soma(emitidos)/soma(esperados): um relatorio pesa o mesmo em
     qualquer nivel, coerente com o avanco do Dashboard e com medicao. A media
     dos subniveis daria outro numero (num SOP chegou a 14pp de diferenca),
-    porque faria um SSOP de 1 TAG pesar como um de 173."""
+    porque faria um SSOP de 1 TAG pesar como um de 173.
+
+    esperados/emitidos saem de totais_por_documento_agrupado, por documento
+    unico -- um documento pendurado em TAGs de mais de um FASE/SOP/SSOP/MALHA
+    (o RIMII/RIMSI de infra por planta e o exemplo extremo) nao pode ser
+    somado por TAG entre os grupos, senao infla o grupo inteiro.
+    """
     agg = dict(
         tags=("TAG", "count"),
-        esperados=("RELATORIOS_ESPERADOS", "sum"),
-        emitidos=("RELATORIOS_APROVADOS", "sum"),
         completas=("COMPLETA", "sum"),
         valor=("PRECO_UNITARIO", "sum"),
         valor_avancado=("VALOR_AVANCADO", "sum"),
@@ -7010,6 +7382,9 @@ def agrega_nivel(df: pd.DataFrame, coluna: str, subnivel: str | None = None) -> 
     if subnivel:
         agg["subniveis"] = (subnivel, "nunique")
     g = df.groupby(coluna).agg(**agg).reset_index()
+    doc_g = totais_por_documento_agrupado(df, esperados, coluna)
+    g["esperados"] = g[coluna].map(doc_g["esperados"]).fillna(0).astype(int)
+    g["emitidos"] = g[coluna].map(doc_g["emitidos"]).fillna(0).astype(int)
     g["avanco"] = (g["emitidos"] / g["esperados"]).fillna(0) * 100
     return g.sort_values("avanco", ascending=False)
 
@@ -7105,7 +7480,7 @@ def _ancora(tipo: str, valor: str) -> str:
 # plano do Render tem 512 MB. Com 8 por funcao dava 83 MB so de cache.
 @st.cache_data(show_spinner=False, max_entries=3)
 def arvore_html(cache_key: str, filtro: str, f_seg: str, f_malha: str, pag: int,
-                _df: pd.DataFrame) -> str:
+                _df: pd.DataFrame, _esperados: pd.DataFrame) -> str:
     """A arvore inteira, ja em HTML e sempre fechada.
 
     Sao 224 agregacoes e 1.883 tabelas de TAG: 2,7 s aqui, uns 20 s na CPU do
@@ -7119,16 +7494,16 @@ def arvore_html(cache_key: str, filtro: str, f_seg: str, f_malha: str, pag: int,
             else base[base[coluna].apply(vazio)]
 
     blocos = []
-    for _, fase in agrega_nivel(_df, "FASE", subnivel="SOP").iterrows():
+    for _, fase in agrega_nivel(_df, _esperados, "FASE", subnivel="SOP").iterrows():
         d_fase = recorte(_df, "FASE", fase["FASE"])
         sops = []
-        for _, sop in agrega_nivel(d_fase, "SOP", subnivel="SSOP").iterrows():
+        for _, sop in agrega_nivel(d_fase, _esperados, "SOP", subnivel="SSOP").iterrows():
             d_sop = recorte(d_fase, "SOP", sop["SOP"])
             ssops = []
-            for _, ss in agrega_nivel(d_sop, "SSOP", subnivel="MALHA").iterrows():
+            for _, ss in agrega_nivel(d_sop, _esperados, "SSOP", subnivel="MALHA").iterrows():
                 d_ssop = recorte(d_sop, "SSOP", ss["SSOP"])
                 malhas = []
-                for _, ml in agrega_nivel(d_ssop, "MALHA").iterrows():
+                for _, ml in agrega_nivel(d_ssop, _esperados, "MALHA").iterrows():
                     d_malha = recorte(d_ssop, "MALHA", ml["MALHA"])
                     # a malha sempre tem "+": as TAGs dela ja vem no HTML
                     corpo = (f'<div class="arv-tags">'
@@ -7157,8 +7532,8 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     if f_malha != "Todas":
         df = df[df.MALHA == f_malha]
 
-    render_html(_totais(df))
-    _graficos(df)
+    render_html(_totais(df, esperados))
+    _graficos(df, esperados)
 
     # Filtros, totais e graficos ja estao na tela: a cobertura sai aqui e a
     # espera pela arvore passa a ser mostrada no lugar dela, la embaixo.
@@ -7183,11 +7558,11 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
     lugar.markdown(tela_carregando(f"Montando a árvore de {n} instrumentos", 20,
                                    coberta=False), unsafe_allow_html=True)
     filtro = assinatura_filtros()
-    arvore = arvore_html(cache_key, filtro, f_seg, f_malha, pag, df_pag)
+    arvore = arvore_html(cache_key, filtro, f_seg, f_malha, pag, df_pag, esperados)
 
     lugar.markdown(tela_carregando("Preparando as fichas de SOP, SSOP e malha", 55,
                                    coberta=False), unsafe_allow_html=True)
-    niveis = fichas_niveis_html(cache_key, filtro, f_seg, f_malha, pag, df_pag)
+    niveis = fichas_niveis_html(cache_key, filtro, f_seg, f_malha, pag, df_pag, esperados)
 
     lugar.markdown(tela_carregando(f"Preparando as fichas das {n} TAGs", 80,
                                    coberta=False), unsafe_allow_html=True)
@@ -7210,13 +7585,13 @@ def render_progresso(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
 # plano do Render tem 512 MB.
 @st.cache_data(show_spinner=False, max_entries=3)
 def fichas_niveis_html(cache_key: str, filtro: str, f_seg: str, f_malha: str, pag: int,
-                       _df: pd.DataFrame) -> str:
+                       _df: pd.DataFrame, _esperados: pd.DataFrame) -> str:
     """As fichas de SOP, SSOP e malha, todas fechadas."""
     partes = []
     for tipo, rotulo in (("FASE", "Fase"), ("SOP", "SOP"), ("SSOP", "SSOP"),
                          ("MALHA", "Malha")):
         for valor, sub in _df.groupby(tipo):
-            partes.append(_modal_nivel(tipo, valor, sub, rotulo))
+            partes.append(_modal_nivel(tipo, valor, sub, rotulo, _esperados))
     return "".join(partes)
 
 
@@ -7248,9 +7623,8 @@ def fichas_tags_html(cache_key: str, filtro: str, f_seg: str, f_malha: str, pag:
                               niveis_na_pagina=True)
 
 
-def _totais(df: pd.DataFrame) -> str:
-    esp = int(df["RELATORIOS_ESPERADOS"].sum())
-    emi = int(df["RELATORIOS_APROVADOS"].sum())
+def _totais(df: pd.DataFrame, esperados: pd.DataFrame) -> str:
+    esp, _, emi, _ = totais_por_documento(esperados[esperados["TAG"].isin(set(df["TAG"]))])
     pct = (emi / esp * 100) if esp else 0
     return (
         '<div class="prg-tot">'
@@ -7328,15 +7702,13 @@ FX_ACIMA = {"SOP": ["FASE"], "SSOP": ["FASE", "SOP"], "MALHA": ["FASE", "SOP", "
 FX_ROTULO_NIVEL = {"FASE": "Fase", "SOP": "SOP", "SSOP": "SSOP", "MALHA": "Malha"}
 
 
-def _modal_nivel(tipo: str, nome: object, sub: pd.DataFrame, rotulo_tipo: str) -> str:
+def _modal_nivel(tipo: str, nome: object, sub: pd.DataFrame, rotulo_tipo: str,
+                 esperados: pd.DataFrame) -> str:
     """Ficha da fase/SOP/SSOP/malha: o que esta cadastrado nele e o degrau
     seguinte da hierarquia."""
     valor_ancora = "(sem)" if vazio(nome) else str(nome)
     titulo = f"Sem {rotulo_tipo.lower()}" if vazio(nome) else str(nome)
-    esp = int(sub["RELATORIOS_ESPERADOS"].sum())
-    apr = int(sub["RELATORIOS_APROVADOS"].sum())
-    pos = int(sub["RELATORIOS_POSTADOS"].sum()) if "RELATORIOS_POSTADOS" in sub.columns else 0
-    pen = esp - apr
+    esp, pos, apr, pen = totais_por_documento(esperados[esperados["TAG"].isin(set(sub["TAG"]))])
     pct = (apr / esp * 100) if esp else 0
     tom = "ok" if pct >= 70 else ("warn" if pct >= 30 else "crit")
     completas = int(sub["COMPLETA"].sum())
@@ -7405,7 +7777,7 @@ def _modal_nivel(tipo: str, nome: object, sub: pd.DataFrame, rotulo_tipo: str) -
     else:
         neto = {"FASE": "SSOP", "SOP": "MALHA"}.get(tipo)
         rotulo_sub = {"SOP": "SOPs", "SSOP": "SSOPs", "MALHA": "Malhas"}[filho]
-        corpo = _tabela_niveis(sub, filho, neto)
+        corpo = _tabela_niveis(sub, esperados, filho, neto)
         quantos = n_mal if filho == "MALHA" else sub[filho].nunique()
         conta = f"{br_num(quantos)} no nível abaixo"
 
@@ -7443,7 +7815,8 @@ def _modal_nivel(tipo: str, nome: object, sub: pd.DataFrame, rotulo_tipo: str) -
     )
 
 
-def _tabela_niveis(sub: pd.DataFrame, coluna: str, subnivel: str = None) -> str:
+def _tabela_niveis(sub: pd.DataFrame, esperados: pd.DataFrame, coluna: str,
+                   subnivel: str = None) -> str:
     """Os filhos diretos de um nivel: o que o SOP mostra dos SSOPs dele.
 
     Cada linha leva a propria ficha, entao dentro da ficha do SOP da para
@@ -7452,7 +7825,7 @@ def _tabela_niveis(sub: pd.DataFrame, coluna: str, subnivel: str = None) -> str:
     rotulo = {"SOP": "SOP", "SSOP": "SSOP", "MALHA": "Malha"}[coluna]
     conta_sub = {"SSOP": "#SSOPs", "MALHA": "#Malhas"}.get(subnivel)
     linhas = []
-    for _, r in agrega_nivel(sub, coluna, subnivel=subnivel).iterrows():
+    for _, r in agrega_nivel(sub, esperados, coluna, subnivel=subnivel).iterrows():
         nome = r[coluna]
         alvo = "(sem)" if vazio(nome) else str(nome)
         rot = f"Sem {rotulo.lower()}" if vazio(nome) else esc(nome)
@@ -7524,6 +7897,17 @@ def painel_previsao_fornecimento(status_final: object, previsao: object) -> str:
     corpo = (fx_linha("Data prevista", f"<b>{d:%d/%m/%Y}</b>")
              + fx_linha("Situação", f'<span class="gtbl-badge {tom}">{texto}</span>'))
     return fx_painel("Previsão de fornecimento", "caixa", corpo)
+
+
+def pill_ssop_prioritario(v: object) -> str:
+    """SIM/NÃO/CANCELADO da coluna SSOP_PRIORITARIO. Só o SIM pede atenção
+    (âmbar); os outros dois ficam neutros -- não são um problema, só não
+    entram no recorte de prioridade."""
+    if vazio(v):
+        return '<span class="gtbl-muted">—</span>'
+    t = str(v).strip()
+    tom = "warn" if t.upper() == "SIM" else "mudo"
+    return f'<span class="gtbl-badge {tom}">{esc(t)}</span>'
 
 
 def status_pill(v: object) -> str:
@@ -7631,7 +8015,7 @@ def _tabela_tags(sub: pd.DataFrame, com_modal: bool = True) -> str:
 
 
 
-def _graficos(df: pd.DataFrame):
+def _graficos(df: pd.DataFrame, esperados: pd.DataFrame):
     """Os quatro recortes mais avancados: onde ha mais chance de fechar rapido.
 
     Um grid CSS unico, e nao st.columns: cada coluna do Streamlit empilha de
@@ -7639,13 +8023,13 @@ def _graficos(df: pd.DataFrame):
     diferentes (chegou a 218px de desequilibrio) e abria um vao no meio.
     """
     blocos = "".join([
-        grafico_avanco("Fases mais avançadas", agrega_nivel(df, "FASE", subnivel="SOP"),
+        grafico_avanco("Fases mais avançadas", agrega_nivel(df, esperados, "FASE", subnivel="SOP"),
                        "FASE", rotulo_sub="SOP"),
-        grafico_avanco("SOP mais avançados", agrega_nivel(df, "SOP", subnivel="SSOP"),
+        grafico_avanco("SOP mais avançados", agrega_nivel(df, esperados, "SOP", subnivel="SSOP"),
                        "SOP", rotulo_sub="SSOP"),
-        grafico_avanco("SSOP mais avançados", agrega_nivel(df, "SSOP", subnivel="MALHA"),
+        grafico_avanco("SSOP mais avançados", agrega_nivel(df, esperados, "SSOP", subnivel="MALHA"),
                        "SSOP", rotulo_sub="malhas"),
-        grafico_avanco("Malhas mais avançadas", agrega_nivel(df, "MALHA"), "MALHA"),
+        grafico_avanco("Malhas mais avançadas", agrega_nivel(df, esperados, "MALHA"), "MALHA"),
     ])
     render_html(f'<div class="gr-grid">{blocos}</div>')
 
@@ -7662,6 +8046,8 @@ URL_DO_FILTRO = {"status": "st_tag"}
 FILTROS = [
     ("fase", "Fase", "Todas", "tags", "FASE"),
     ("sop", "SOP", "Todos", "tags", "SOP"),
+    ("ssop_prioritario", "SSOP Prioritário", "Todos", "tags", "SSOP_PRIORITARIO"),
+    ("subgrupo_prioridade", "Subgrupo de Prioridade", "Todos", "tags", "SUBGRUPO_PRIORIDADE"),
     ("grupo", "Grupo de instrumento", "Todos", "resumo", "GRUPO_REGRA"),
     ("status", "Status SIGEM", "Todos", "esperados", "STATUS_SIGEM"),
 ]
@@ -7681,6 +8067,10 @@ def _tags_do_filtro(chave: str, valor: str, tags, resumo, esperados) -> set:
         return set(tags.loc[tags["FASE"].astype(str).str.strip() == valor, "TAG"])
     if chave == "sop":
         return set(tags.loc[tags["SOP"].astype(str).str.strip() == valor, "TAG"])
+    if chave == "ssop_prioritario":
+        return set(tags.loc[tags["SSOP_PRIORITARIO"].astype(str).str.strip() == valor, "TAG"])
+    if chave == "subgrupo_prioridade":
+        return set(tags.loc[tags["SUBGRUPO_PRIORIDADE"].astype(str).str.strip() == valor, "TAG"])
     if chave == "grupo":
         return set(resumo.loc[resumo["GRUPO_REGRA"].map(sentence_case) == valor, "TAG"])
     if chave == "status":
@@ -7719,22 +8109,96 @@ def consumir_filtros_url(tags: pd.DataFrame, resumo: pd.DataFrame,
             st.session_state[f"gf_{chave}"] = vindo[chave]
 
 
-def filtros_da_url(tags: pd.DataFrame, resumo: pd.DataFrame,
-                   esperados: pd.DataFrame) -> dict:
-    """O recorte que veio no endereço, sem painel de seleção na lateral.
+def _limpar_filtros():
+    """Callback do botão. Precisa ser callback: mexer na chave de um widget
+    depois que ele já foi criado no mesmo run levanta exceção no Streamlit --
+    os callbacks rodam antes do rerun, quando ainda é permitido."""
+    for chave, _, padrao, _, _ in FILTROS:
+        st.session_state[f"gf_{chave}"] = padrao
 
-    Os seletores saíram da lateral, mas os links que a ficha gera -- "ver na
-    Progresso" com ?fase= -- continuam existindo. Ler a URL aqui é o que
-    impede esses links de prometerem um recorte que não aconteceria.
+
+def sidebar_filtros(tags: pd.DataFrame, resumo: pd.DataFrame,
+                    esperados: pd.DataFrame) -> dict:
+    """Filtro rápido e avançado da lateral, em cascata e válido para o app
+    inteiro -- todas as abas passam a ver só o recorte escolhido, como se a
+    base fosse só aquilo, até o filtro ser desfeito.
+
+    "Avançado" é a combinação: cada campo só oferece o que ainda sobra depois
+    dos OUTROS já escolhidos -- marcar SSOP Prioritário = Sim reduz os
+    Subgrupos de Prioridade aos que aparecem só nessas tags, e vice-versa.
+    Sem isso dava para montar uma combinação que não devolve nada e parece
+    defeito. Quando o valor guardado sai da lista -- porque outro filtro
+    mudou -- ele volta ao padrão em vez de estourar.
+
+    A chave do session_state É a chave do widget, de propósito: com duas
+    chaves o valor vindo da URL era escrito numa e o selectbox continuava
+    lendo a outra, e o seletor não mexia. Os links que a ficha gera -- "ver
+    na Progresso" com ?fase= -- continuam funcionando por essa mesma porta,
+    via consumir_filtros_url.
     """
     consumir_filtros_url(tags, resumo, esperados)
-    escolhas = {}
-    for chave, _rotulo, padrao, _fonte, _coluna in FILTROS:
+
+    def escolhido(chave: str, padrao: str) -> str:
         v = st.session_state.get(f"gf_{chave}", padrao)
-        escolhas[chave] = "" if v == padrao else v
-    ativos = {c: v for c, v in escolhas.items() if v}
-    rotulos = {c: r for c, r, *_ in FILTROS}
+        return "" if v == padrao else v
+
+    # O rotulo do expansor precisa do recorte ANTES de desenhar os seletores
+    # -- ele usa o valor que cada widget ja tem guardado do run anterior, o
+    # mesmo que os proprios seletores vao ler duas linhas abaixo.
+    escolhas_agora = {c: escolhido(c, p) for c, _, p, _, _ in FILTROS}
+    ativos_agora = {c: v for c, v in escolhas_agora.items() if v}
+    alvo_agora = _universo(escolhas_agora, tags, resumo, esperados)
+    rotulo_expansor = f"Filtro rápido · {br_num(len(alvo_agora))} de {br_num(len(tags))}"
+
+    # Fechado por padrao -- com os 6 campos sempre abertos, menu + filtro
+    # passava de 800px de altura e forcava rolagem dentro da lateral. Abre
+    # sozinho quando ja tem filtro escolhido, pra nao esconder o que esta
+    # ativo atras de um clique. Nao usa st.expander: ele nao respeita a
+    # mesma reordenacao por flex que marca e perfil respeitam (o filtro
+    # aparecia antes da marca, nao depois do menu) -- um botao comum, do
+    # mesmo tipo do "Abrir o perfil" logo abaixo, se comporta certo.
+    # So forca aberto na TRANSICAO de nenhum filtro pra algum (por exemplo,
+    # um link "ver na Progresso" que chega com ?fase=): olhar so "esta
+    # ativo agora" reabria sozinho a cada rerun, e fechar manualmente com um
+    # filtro ja escolhido nunca pegava -- a caixa voltava a abrir na mesma
+    # hora.
+    tinha_antes = st.session_state.get("_flt_tinha_ativo", False)
+    if "_flt_aberto" not in st.session_state:
+        st.session_state["_flt_aberto"] = bool(ativos_agora)
+    elif ativos_agora and not tinha_antes:
+        st.session_state["_flt_aberto"] = True
+    st.session_state["_flt_tinha_ativo"] = bool(ativos_agora)
+
+    def _alternar_filtro():
+        st.session_state["_flt_aberto"] = not st.session_state["_flt_aberto"]
+
+    with st.sidebar:
+        seta = "▾" if st.session_state["_flt_aberto"] else "▸"
+        st.button(f"{seta}  {rotulo_expansor}", key="flt_toggle",
+                 on_click=_alternar_filtro, use_container_width=True)
+
+        if st.session_state["_flt_aberto"]:
+            for chave, rotulo, padrao, fonte, coluna in FILTROS:
+                escolhas = {c: escolhido(c, p) for c, _, p, _, _ in FILTROS}
+                base = {"tags": tags, "resumo": resumo, "esperados": esperados}[fonte]
+                sub = base[base["TAG"].isin(
+                    _universo(escolhas, tags, resumo, esperados, pular=chave))]
+                serie = sub[coluna].map(sentence_case) if chave in NORMALIZA else sub[coluna]
+                opcoes = [padrao] + _valores(serie)
+                if st.session_state.get(f"gf_{chave}", padrao) not in opcoes:
+                    st.session_state[f"gf_{chave}"] = padrao
+                st.selectbox(rotulo, opcoes, key=f"gf_{chave}")
+
+            escolhas = {c: escolhido(c, p) for c, _, p, _, _ in FILTROS}
+            ativos = {c: v for c, v in escolhas.items() if v}
+            if ativos:
+                st.button("Limpar filtros", key="gf_limpar", on_click=_limpar_filtros)
+        else:
+            escolhas = escolhas_agora
+            ativos = ativos_agora
+
     alvo = _universo(escolhas, tags, resumo, esperados)
+    rotulos = {c: r for c, r, *_ in FILTROS}
     st.session_state["_flt_selo"] = (
         '<div class="du-selo filtro"><i></i>'
         + " · ".join(f"{rotulos[c]}: {esc(v)}" for c, v in ativos.items())
@@ -7851,25 +8315,33 @@ def render_perfil_lateral():
     eu = st.session_state.get("gplan_usuario") or {}
     papel = acesso.papel_de(eu)
     dica = "" if pode("ver_valores") else " · este login não vê valores em reais"
-    render_html(
-        f'<div class="sb-perfil" title="{esc(papel)}{esc(dica)}">'
-        + (f'<img class="sb-foto" src="{eu["foto"]}" alt="">' if eu.get("foto")
-           else f'<span class="sb-ini">'
-                f'{esc(acesso.iniciais(eu.get("nome", ""), eu.get("email", "")))}</span>')
-        + '<span class="sb-txt">'
-        f'<b>{esc(eu.get("nome") or eu.get("email", ""))}</b>'
-        f'<i>{esc(eu.get("email", ""))}</i>'
-        f'<em class="sb-papel {acesso.COR_PAPEL.get(papel, "teal")}">{esc(papel)}</em>'
-        "</span>"
-        '<span class="sb-seta" aria-hidden="true">'
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"'
-        ' stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>'
-        "</span></div>")
-    # O botão do Streamlit não aceita HTML no rótulo, então ele vem depois da
-    # linha e é puxado por cima dela, transparente: o que se vê é a linha, o
-    # que se clica é o botão.
-    if st.button("Abrir o perfil", key="abrir_perfil", use_container_width=True):
-        dialogo_perfil()
+    # A linha e o botao vivem dentro do MESMO st.container, que fica com
+    # posicionamento proprio (position:relative) em vez de ser espalhado
+    # pela reordenacao por flex da lateral. O botao cobre esse container
+    # inteiro (position:absolute; inset:0), do tamanho que a linha ditar --
+    # sem isso, um calculo de margem negativa fixa (que soma a puxada certa
+    # so quando a linha e o vizinho imediato de verdade) passou a cobrir o
+    # fim do menu e o botao do filtro assim que outra coisa entrou no meio.
+    with st.container(key="perfil_wrap"):
+        render_html(
+            f'<div class="sb-perfil" title="{esc(papel)}{esc(dica)}">'
+            + (f'<img class="sb-foto" src="{eu["foto"]}" alt="">' if eu.get("foto")
+               else f'<span class="sb-ini">'
+                    f'{esc(acesso.iniciais(eu.get("nome", ""), eu.get("email", "")))}</span>')
+            + '<span class="sb-txt">'
+            f'<b>{esc(eu.get("nome") or eu.get("email", ""))}</b>'
+            f'<i>{esc(eu.get("email", ""))}</i>'
+            f'<em class="sb-papel {acesso.COR_PAPEL.get(papel, "teal")}">{esc(papel)}</em>'
+            "</span>"
+            '<span class="sb-seta" aria-hidden="true">'
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"'
+            ' stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>'
+            "</span></div>")
+        # O botão do Streamlit não aceita HTML no rótulo, então ele vem depois da
+        # linha e é puxado por cima dela, transparente: o que se vê é a linha, o
+        # que se clica é o botão.
+        if st.button("Abrir o perfil", key="abrir_perfil", use_container_width=True):
+            dialogo_perfil()
 
 
 def campos_do_papel(prefixo: str, papel_inicial: str, marcadas: list[str]):
@@ -8128,13 +8600,20 @@ def main():
             '<div class="gplan-brand-sub">Instrumentação · U-12</div>'
             "</div></div>"
         )
-        render_perfil_lateral()
 
-    escolhas = filtros_da_url(tags, resumo, esperados)
+    # O filtro entra aqui, entre a marca e o perfil: a marca e escrita antes
+    # do menu de navegacao (que o Streamlit sempre desenha por cima de
+    # qualquer coisa que a lateral ja tenha), e tudo escrito depois cai
+    # abaixo dele -- entao chamar o filtro antes do perfil e o que garante a
+    # ordem visual marca -> menu (com Acessos) -> filtro -> perfil.
+    escolhas = sidebar_filtros(tags, resumo, esperados)
     tags, resumo, esperados = aplicar_filtros(escolhas, tags, resumo, esperados)
     # a medicao segue as tags: filtrou a fase, a aba Gitec mostra so o que foi
     # medido nela
     gitec_f = gitec[gitec["TAG"].isin(set(tags["TAG"]))] if not gitec.empty else gitec
+
+    with st.sidebar:
+        render_perfil_lateral()
 
     dashboard_page = st.Page(lambda: _sob_carga("Carregando o painel", lambda: render_dashboard(resumo, esperados, tags, sigem, cache_key)), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
     relatorios_page = st.Page(lambda: _sob_carga("Carregando os relatórios", lambda: render_relatorios(esperados, resumo, tags, sigem, cache_key)), title="Relatórios", icon=":material/description:", url_path="relatorios")
@@ -8152,19 +8631,34 @@ def main():
     # A aba que a permissão não cobre não entra no menu, em vez de entrar e
     # avisar que é proibida: a Gitec sem valores viraria uma tela de traços, e
     # anunciar o que existe e não se pode ver é o que a reunião não precisa.
-    paginas = [dashboard_page, progresso_page, relatorios_page, pesquisa_page,
-               sigem_page]
+    #
+    # Agrupadas por intenção -- a pergunta que cada uma responde -- em vez de
+    # uma lista só de nove abas: Visão geral (retrato de agora), Documentação
+    # (o que falta aprovar/emitir) e Avanço (o que já foi feito na obra). O
+    # st.navigation faz isso nativamente com um dict {seção: [páginas]}, sem
+    # precisar de CSS por cima do menu do próprio Streamlit.
+    # ":material/nome:" quebra a barra INTEIRA quando usado no titulo de uma
+    # secao (confirmado ao vivo: com ele, a secao inteira
+    # <section data-testid="stSidebar"> some do DOM). O icone de cada secao
+    # sai por CSS (nth-of-type, ver .stSidebarNav header abaixo) -- o titulo
+    # aqui fica so texto puro.
+    secoes: dict[str, list] = {
+        "Visão geral": [dashboard_page, progresso_page, pesquisa_page],
+        "Documentação": [relatorios_page, sigem_page, atualizacao_page],
+    }
+    avanco = []
     if pode("ver_gitec"):
-        paginas.append(gitec_page)
+        avanco.append(gitec_page)
     if pode("ver_planta"):
-        paginas.append(planta_page)
+        avanco.append(planta_page)
     if pode("ver_certificacao"):
-        paginas.append(certificacao_page)
-    paginas.append(atualizacao_page)
+        avanco.append(certificacao_page)
+    if avanco:
+        secoes["Avanço"] = avanco
     if pode("administrar"):
-        paginas.append(admin_page)
+        secoes["Administração"] = [admin_page]
 
-    nav = st.navigation(paginas, position="sidebar")
+    nav = st.navigation(secoes, position="sidebar")
     nav.run()
 
 
