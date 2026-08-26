@@ -1482,54 +1482,6 @@ def inject_css():
         input::placeholder, textarea::placeholder {
           color: var(--text-3) !important; opacity: 1 !important; }
 
-        /* Slider de faixa (duas pontas, ex: Avanço na Pesquisa tag). Sem
-           regra propria o rastro nasce cinza e fino, e o numero de cada ponta
-           duplica com o rotulo min/max debaixo (0 100 0 100), redundante e
-           feio. O rastro vira o espectro vermelho->ambar->teal que o resto do
-           app ja usa pra avanco (critico/atencao/ok) -- a cor conta a
-           historia mesmo antes de ler o numero -- e cada ponta vira uma
-           pilula arrastavel em vez do numero pelado. O rotulo min/max fixo
-           some: as pilulas ja mostram o valor de cada ponta o tempo todo. */
-        [data-testid="stSlider"] [role="group"] > div[data-orientation="horizontal"] {
-          padding: 16px 4px 4px; }
-        [data-testid="stSlider"] [role="group"] > div[data-orientation="horizontal"] > div:first-child {
-          height: 7px !important; border-radius: 999px !important;
-          background: linear-gradient(90deg, var(--accent-red) 0%, var(--accent-amber) 50%,
-                      var(--accent-teal) 100%) !important;
-          box-shadow: inset 0 1px 3px rgba(0,0,0,.22); }
-        [data-testid="stSliderThumbValue"] {
-          background: var(--dark-card) !important; color: var(--text-1) !important;
-          border: 2px solid var(--accent-teal) !important; border-radius: 999px !important;
-          padding: 2px 10px !important; font-size: 12px !important; font-weight: 700 !important;
-          box-shadow: 0 3px 10px var(--sombra) !important;
-          transition: transform 160ms ease, box-shadow 160ms ease; }
-        [data-testid="stSliderThumbValue"] p {
-          color: inherit !important; margin: 0 !important; }
-        [data-testid="stSlider"] [role="group"] > div[data-orientation="horizontal"] > div:hover [data-testid="stSliderThumbValue"],
-        [data-testid="stSlider"] [role="group"] > div[data-orientation="horizontal"] > div:has(input:focus-visible) [data-testid="stSliderThumbValue"] {
-          transform: scale(1.1);
-          box-shadow: 0 0 0 3px rgba(var(--rgb-teal),.3), 0 4px 14px rgba(var(--rgb-teal),.45) !important; }
-        [data-testid="stSliderTickBar"] { display: none !important; }
-        /* As duas pontas do slider, quando bem proximas (ex: as duas em
-           100%), ficam uma em cima da outra -- a de cima bloqueia o clique na
-           de baixo e trava o arraste. [data-rac] marca so as pontas (o rastro
-           nao tem esse atributo). A ponta sob o mouse ou com foco sobe de
-           camada, entao da pra pegar qualquer uma das duas mesmo grudadas. */
-        [data-testid="stSlider"] [role="group"] > div[data-orientation="horizontal"] > div[data-rac] {
-          z-index: 1; }
-        [data-testid="stSlider"] [role="group"] > div[data-orientation="horizontal"] > div[data-rac]:hover,
-        [data-testid="stSlider"] [role="group"] > div[data-orientation="horizontal"] > div[data-rac]:has(input:focus-visible) {
-          z-index: 2; }
-        /* Campinhos de min/max acima do slider: atalho pro numero exato, nao
-           um formulario -- por isso pequenos, sem esticar a coluna toda. */
-        .st-key-pesq_avanco_min, .st-key-pesq_avanco_max { max-width: 68px; }
-        .st-key-pesq_avanco_max { margin-left: auto; }
-        .st-key-pesq_avanco_min [data-testid="stWidgetLabel"] p,
-        .st-key-pesq_avanco_max [data-testid="stWidgetLabel"] p {
-          font-size: 10px !important; }
-        .st-key-pesq_avanco_min input, .st-key-pesq_avanco_max input {
-          padding: 3px 6px !important; font-size: 12px !important; }
-
         /* a lista de opcoes e portalada para fora do widget: sem regra propria
            ela nasce com o fundo do config e o texto some */
         [role="listbox"], [role="dialog"] [role="listbox"], [data-baseweb="menu"],
@@ -4030,7 +3982,8 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
     # quem esta em compra: numa tag calibrada nao quer dizer nada.
     bloco_fornecimento = painel_previsao_fornecimento(
         da_base("STATUS_FINAL"),
-        t.get("PREVISAO_FORNECIMENTO") if hasattr(t, "get") else None)
+        t.get("PREVISAO_FORNECIMENTO") if hasattr(t, "get") else None,
+        t.get("STATUS_FORNECIMENTO") if hasattr(t, "get") else None)
 
     # o que esta segurando o avanco: o documento parado ha mais tempo leva
     # direto para a ficha dele, com o parecer da inspecao
@@ -4090,35 +4043,130 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
     )
 
 
-def _pesq_avanco_do_slider():
-    """Arrastar o slider tambem atualiza os dois campos numericos.
-
-    So mexe nos OUTROS widgets (nunca no proprio "pesq_avanco"): passar value=
-    pro slider depois de escrever em st.session_state["pesq_avanco"] no mesmo
-    ciclo e o que gera o aviso "created with a default value but also had its
-    value set via Session State API" -- por isso os widgets abaixo nascem so
-    com key=, sem value=, e o valor inicial entra so uma vez, via setdefault.
-    """
-    lo, hi = st.session_state["pesq_avanco"]
-    st.session_state["pesq_avanco_min"] = lo
-    st.session_state["pesq_avanco_max"] = hi
+def _pesq_faixa_nada():
+    """Callback vazio: so existe pra habilitar default={"faixa": ...} no
+    componente -- a API exige um on_<evento>_change registrado pra cada
+    chave do default. O valor de verdade sai de resultado.faixa, lido direto
+    depois de montar; nao precisa reagir a nada aqui."""
 
 
-def _pesq_avanco_do_min():
-    """Digitar o minimo tambem move a ponta esquerda do slider -- travado no
-    maximo atual, senao o campo digitavel conseguiria inverter a faixa."""
-    hi = st.session_state["pesq_avanco"][1]
-    lo = min(st.session_state["pesq_avanco_min"], hi)
-    st.session_state["pesq_avanco_min"] = lo
-    st.session_state["pesq_avanco"] = (lo, hi)
+# Componente bidirecional de verdade (st.components.v2), nao mais o iframe
+# com truque de alcancar o number_input escondido no documento pai: aquilo
+# so atualizava o valor visual, o Streamlit nunca recebia o "input" sintetico
+# como disparo de on_change (aparenta exigir evento confiavel/genuino, que
+# JS nao produz). Aqui a bolha e o proprio DOM do componente (dentro de uma
+# shadow root, sem fronteira de iframe) e setStateValue() e o canal oficial
+# de volta pro Python -- testado isoladamente antes de entrar aqui.
+#
+# Registrado uma unica vez, no nivel do modulo: registrar de novo a cada
+# render (dentro de render_pesquisa_tag) e o que o proprio Streamlit despreza
+# ("evite juntar definicao e montagem").
+PESQ_FAIXA_JS = r"""
+export default function (component) {
+  const { data, setStateValue, parentElement } = component;
+  parentElement.innerHTML = `
+    <style>
+      *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+      .faixa{position:relative;height:48px;
+        font:400 12px ui-sans-serif,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+        font-variant-numeric:tabular-nums}
+      .trilho{position:absolute;top:32px;left:16px;right:16px;height:7px;border-radius:999px;
+        background:linear-gradient(90deg,${data.nao},${data.and} 50%,${data.ok});
+        box-shadow:inset 0 1px 3px rgba(0,0,0,.22)}
+      .alca{position:absolute;top:0;height:26px;transform:translateX(-50%);
+        display:flex;align-items:flex-end;justify-content:center;
+        cursor:grab;touch-action:none;user-select:none;z-index:1}
+      .alca.ativa{z-index:2}
+      .alca:active{cursor:grabbing}
+      .bolha{background:${data.card};color:${data.t1};border:2px solid ${data.ok};
+        border-radius:999px;padding:2px 0;font:inherit;font-weight:700;font-size:12px;
+        width:32px;text-align:center;box-shadow:0 3px 10px ${data.sombra};outline:none;
+        transition:transform .15s ease,box-shadow .15s ease;cursor:text}
+      .alca.ativa .bolha,.bolha:focus{transform:scale(1.14);
+        box-shadow:0 0 0 3px ${data.okA3},0 4px 14px ${data.okA45}}
+    </style>
+    <div class="faixa" id="faixa">
+      <div class="trilho" id="trilho"></div>
+      <div class="alca" id="hMin"><input class="bolha" id="bMin" inputmode="numeric" maxlength="3"></div>
+      <div class="alca" id="hMax"><input class="bolha" id="bMax" inputmode="numeric" maxlength="3"></div>
+    </div>`;
 
+  const faixa = parentElement.querySelector('#faixa');
+  const trilho = parentElement.querySelector('#trilho');
+  const hMin = parentElement.querySelector('#hMin'), hMax = parentElement.querySelector('#hMax');
+  const bMin = parentElement.querySelector('#bMin'), bMax = parentElement.querySelector('#bMax');
+  let vMin = data.min, vMax = data.max;
 
-def _pesq_avanco_do_max():
-    """Mesma logica do minimo, do lado de cima."""
-    lo = st.session_state["pesq_avanco"][0]
-    hi = max(st.session_state["pesq_avanco_max"], lo)
-    st.session_state["pesq_avanco_max"] = hi
-    st.session_state["pesq_avanco"] = (lo, hi)
+  function coloca() {
+    const r = trilho.getBoundingClientRect(), f = faixa.getBoundingClientRect();
+    const largura = Math.max(0, r.width);
+    const base = r.left - f.left;
+    hMin.style.left = (base + (vMin / 100) * largura) + 'px';
+    hMax.style.left = (base + (vMax / 100) * largura) + 'px';
+    bMin.value = vMin;
+    bMax.value = vMax;
+  }
+  coloca();
+  window.addEventListener('resize', coloca);
+
+  function commit() { setStateValue('faixa', { min: vMin, max: vMax }); }
+
+  function valorDoPonteiro(clientX) {
+    const r = trilho.getBoundingClientRect();
+    const largura = Math.max(1, r.width);
+    const pct = (clientX - r.left) / largura;
+    return Math.round(Math.max(0, Math.min(1, pct)) * 100);
+  }
+
+  function arrasta(alvo) {
+    const alca = alvo === 'min' ? hMin : hMax;
+    alca.classList.add('ativa');
+    function mover(e) {
+      const x = e.touches ? e.touches[0].clientX : e.clientX;
+      const v = valorDoPonteiro(x);
+      if (alvo === 'min') vMin = Math.min(v, vMax); else vMax = Math.max(v, vMin);
+      coloca();
+    }
+    function soltar() {
+      alca.classList.remove('ativa');
+      document.removeEventListener('pointermove', mover);
+      document.removeEventListener('pointerup', soltar);
+      commit();
+    }
+    document.addEventListener('pointermove', mover);
+    document.addEventListener('pointerup', soltar);
+  }
+  hMin.addEventListener('pointerdown', e => {
+    if (e.target === bMin) return; e.preventDefault(); arrasta('min'); });
+  hMax.addEventListener('pointerdown', e => {
+    if (e.target === bMax) return; e.preventDefault(); arrasta('max'); });
+
+  function ligaBolha(input, alvo) {
+    input.addEventListener('focus', () => input.select());
+    input.addEventListener('input', () => {
+      input.value = input.value.replace(/[^0-9]/g, '').slice(0, 3); });
+    // Aplica direto no keydown do Enter (nao so via blur): dentro de uma
+    // shadow root sem delegatesFocus, .blur() programatico as vezes nao
+    // dispara o evento 'blur' de verdade, entao depender so dele deixava o
+    // Enter sem efeito. O blur continua de reserva pra quando o usuario
+    // clica fora sem apertar Enter.
+    function aplicar() {
+      let v = parseInt(input.value, 10);
+      if (isNaN(v)) v = alvo === 'min' ? vMin : vMax;
+      v = Math.max(0, Math.min(100, v));
+      if (alvo === 'min') vMin = Math.min(v, vMax); else vMax = Math.max(v, vMin);
+      coloca();
+      commit();
+    }
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); aplicar(); input.blur(); } });
+    input.addEventListener('blur', aplicar);
+  }
+  ligaBolha(bMin, 'min');
+  ligaBolha(bMax, 'max');
+}
+"""
+PESQ_FAIXA_COMP = st.components.v2.component("pesq_faixa", js=PESQ_FAIXA_JS)
 
 
 def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.DataFrame,
@@ -4177,34 +4225,25 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
 
     # Duas pontas: uma so ponta (min ou max fixo) responderia "acima de X" ou
     # "abaixo de X" -- as duas juntas fecham uma faixa fechada, entao 90-100
-    # mostra so quem esta nesse intervalo, nao tudo acima de 90. As pontas do
-    # slider se encostam perto de 0% ou 100% e ficam dificeis de pegar uma sem
-    # mexer na outra -- os dois campinhos acima resolvem isso: da pra escrever
-    # o numero exato em vez de arrastar. Um em cima do inicio e outro em cima
-    # do final do slider (min a esquerda, max a direita), pequenos: sao um
-    # atalho do slider, nao um controle a parte.
-    # setdefault em vez de value=: cada um dos tres widgets abaixo nasce so
-    # com key=, sem value=. So assim um callback pode escrever direto no
-    # session_state de OUTRO widget (o que sincroniza os tres) sem que o
-    # Streamlit reclame de "value definido nos dois lugares" -- o valor
-    # inicial (ou o que sobrou de antes de trocar de aba, via mem_) entra uma
-    # unica vez, so quando a chave ainda nao existe.
-    st.session_state.setdefault("pesq_avanco", st.session_state.get("mem_pesq_avanco", (0, 100)))
-    st.session_state.setdefault("pesq_avanco_min", st.session_state["pesq_avanco"][0])
-    st.session_state.setdefault("pesq_avanco_max", st.session_state["pesq_avanco"][1])
-
-    c_min, _c_meio, c_max = st.columns([1, 6, 1])
-    with c_min:
-        st.number_input("Mín. %", min_value=0, max_value=100, step=1,
-                        key="pesq_avanco_min", on_change=_pesq_avanco_do_min)
-    with c_max:
-        st.number_input("Máx. %", min_value=0, max_value=100, step=1,
-                        key="pesq_avanco_max", on_change=_pesq_avanco_do_max)
-    faixa_avanco = st.slider("Avanço documental (%)", min_value=0, max_value=100, step=1,
-                             key="pesq_avanco", on_change=_pesq_avanco_do_slider)
-    st.session_state["mem_pesq_avanco"] = faixa_avanco
-    st.session_state["mem_pesq_avanco_min"] = st.session_state["pesq_avanco_min"]
-    st.session_state["mem_pesq_avanco_max"] = st.session_state["pesq_avanco_max"]
+    # mostra so quem esta nesse intervalo, nao tudo acima de 90.
+    #
+    # mem_ sobrevive a troca de aba (mesmo raciocinio do lembrado()); dentro
+    # da MESMA aba quem manda e o proprio componente, via key= estavel.
+    lo0 = st.session_state.get("mem_pesq_avanco_min", 0)
+    hi0 = st.session_state.get("mem_pesq_avanco_max", 100)
+    t = TEMAS.get(tema_ativo(), TEMAS[TEMA_PADRAO])
+    resultado_faixa = PESQ_FAIXA_COMP(
+        data={"min": lo0, "max": hi0,
+             "nao": t["vermelho"], "and": t["ambar"], "ok": t["teal"],
+             "card": t["card"], "t1": t["texto1"], "sombra": t["sombra"],
+             "okA3": f"rgba({t['rgb_teal']},.3)", "okA45": f"rgba({t['rgb_teal']},.45)"},
+        default={"faixa": {"min": lo0, "max": hi0}},
+        key="pesq_faixa", height=48,
+        on_faixa_change=_pesq_faixa_nada)
+    faixa_bruta = resultado_faixa.get("faixa") or {"min": lo0, "max": hi0}
+    faixa_avanco = (int(faixa_bruta["min"]), int(faixa_bruta["max"]))
+    st.session_state["mem_pesq_avanco_min"] = faixa_avanco[0]
+    st.session_state["mem_pesq_avanco_max"] = faixa_avanco[1]
 
     list_df = resumo[["TAG", "DESCRICAO", "GRUPO_REGRA", "ITEM_PPU", "RELATORIOS_ESPERADOS", "AVANCO_DOCUMENTAL"]].copy()
     if painel_de:
@@ -4920,6 +4959,27 @@ def cert_alvos(lanc: pd.DataFrame, cache_key: str) -> list:
 
 
 @st.cache_data(show_spinner=False, max_entries=3)
+def _cert_traduz(depara: pd.DataFrame) -> dict[str, list]:
+    """Ponta da planilha de cabos -> lista de TAGs reais da 01_BASE_TAGS.
+
+    A mesma tradução que cert_painel_por_tag e cert_montagem já usam, agora
+    reaproveitada: a direção varia por tipo de instrumento -- ZSH/L-120001 (uma
+    ponta) vira ZSH-120001 e ZSL-120001 (duas TAGs separadas na base), enquanto
+    HS-120610A1 e HS-120610A2 (duas pontas) viram a mesma HS-120610A1/A2 (uma
+    TAG só, combinada, na base). Sem essa tradução, contagens que cruzam a
+    planilha de cabos com a 01_BASE_TAGS por igualdade de texto nunca casam
+    essas mais de 400 TAGs -- elas têm cabo lançado, só que escrito diferente.
+    """
+    if depara.empty:
+        return {}
+    traduz: dict[str, list] = {}
+    for ponta, grupo in depara.groupby(cert_txt(depara["PONTA"])):
+        if not ponta or ponta == "nan":
+            continue
+        traduz[ponta] = [t for t in cert_txt(grupo["TAG"]) if t and t != "nan"]
+    return traduz
+
+
 def cert_indice(lanc: pd.DataFrame, cache_key: str) -> dict:
     """De cada instrumento para a cadeia dele. É o que a busca consulta."""
     if lanc.empty:
@@ -6174,6 +6234,25 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     # a busca escolhe dentro dele. Num campo só, escolher "TAG apta" e depois
     # digitar uma travada devolveria lista vazia sem dizer por quê.
     por_tag = pan["por_tag"]
+
+    # indice e por_tag nascem com a chave da PONTA da planilha de cabos, que
+    # escreve a mesma TAG de forma diferente da 01_BASE_TAGS -- ZSH/L-120001
+    # lá vira ZSH-120001 e ZSL-120001 aqui; HS-120610A1 e HS-120610A2 lá viram
+    # a mesma HS-120610A1/A2 aqui. Sem isso, mais de 400 TAGs com cabo lançado
+    # nunca cruzavam com a base e sumiam de "TAGs mapeadas" e da busca. A
+    # chave crua continua no dicionário (a ficha da cadeia ainda busca por
+    # ela) -- isto só ACRESCENTA a TAG real como sinônimo, apontando pro
+    # mesmo valor.
+    traduz = _cert_traduz(depara)
+    pior_tom = {"ok": 0, "desc": 1, "warn": 2, "crit": 3}
+    for cru, valor in list(indice.items()):
+        for alvo in traduz.get(cru, ()):
+            indice.setdefault(alvo, valor)
+    for cru, valor in list(por_tag.items()):
+        for alvo in traduz.get(cru, ()):
+            atual = por_tag.get(alvo)
+            if atual is None or pior_tom[valor["tom"]] > pior_tom[atual["tom"]]:
+                por_tag[alvo] = valor
 
     # Recorte pela cadeia física, direto da 01_BASE_TAGS. Vem antes do status
     # porque muda o universo: a contagem de cada recorte tem que ser a do
@@ -7878,21 +7957,33 @@ STATUS_RUINS = {"NAO LOCALIZADO", "NÃO LOCALIZADO", "REPROVADO", "NAO MONTADO",
 EM_COMPRA = {"ON DEMAND", "EM COMPRA"}
 
 
-def painel_previsao_fornecimento(status_final: object, previsao: object) -> str:
+def painel_previsao_fornecimento(status_final: object, previsao: object,
+                                 status_fornecimento: object = None) -> str:
     """O card "Previsão de fornecimento" da ficha da TAG.
 
     Só existe para ON DEMAND e EM COMPRA -- nos outros estados a coluna vem
     vazia na base, e mostrar o card assim mesmo sugeriria que falta preencher
     algo, quando na verdade não se aplica.
 
-    Com data, diz se atrasou e de quanto, ou em quantos dias chega. Sem data,
-    diz que não há definição: é diferente de não se aplicar, e por isso o card
-    aparece do mesmo jeito, com o traço.
+    Concluído (status_fornecimento) é uma pergunta diferente de atrasado: o
+    material já chegou, e a data é so informativa -- mesmo no passado, não e
+    atraso. So quando NAO esta concluido e que uma data no passado quer dizer
+    atraso de verdade. Sem essa distincao, um material que chegou no prazo
+    (mas com Real no passado, que e a natureza de "ja aconteceu") aparecia
+    como atrasado igual a um que realmente esta parado.
     """
     if str(status_final).strip().upper() not in EM_COMPRA:
         return ""
 
     d = pd.to_datetime(previsao, dayfirst=True, errors="coerce")
+    concluido = str(status_fornecimento or "").strip().upper() == "CONCLUIDO"
+
+    if concluido:
+        corpo = (fx_linha("Situação", '<span class="gtbl-badge ok">Recebido</span>')
+                 + fx_linha("Data", f"<b>{d:%d/%m/%Y}</b>" if not pd.isna(d)
+                            else '<span class="gtbl-muted">—</span>'))
+        return fx_painel("Previsão de fornecimento", "caixa", corpo)
+
     if pd.isna(d):
         corpo = (fx_linha("Data prevista", '<span class="gtbl-muted">—</span>')
                  + fx_linha("Situação",
