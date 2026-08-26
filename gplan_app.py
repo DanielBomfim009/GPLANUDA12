@@ -2442,6 +2442,12 @@ def inject_css():
         .pl-res .pl6 { color:#4F9130; }
         .pl-res .pl7 { color:#2F7D32; }
 
+        /* Cabo e avanço geral lado a lado: mesma pergunta, dois pesos
+           diferentes. Cada .pl-pn dentro mantém seu próprio card -- só a
+           largura é que divide ao meio. */
+        .cs-duas { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start; }
+        @media (max-width:900px) { .cs-duas { grid-template-columns:1fr; } }
+
         /* Fundo branco fixo, desenho sem filtro nem esmaecer -- igual ao mapa
            de infra de instrumentacao, que nao inverte tema nenhum. Antes o
            escuro invertia a prancha pra nao virar um retangulo branco solto
@@ -5921,8 +5927,11 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
             if nome_seg not in visiveis:
                 continue
             s = segs.setdefault(nome_seg,
-                                {"m": 0.0, "real": 0.0, "tags": 0, "caixas": set()})
+                                {"m": 0.0, "real": 0.0, "tags": 0, "caixas": set(),
+                                 "montadas": 0})
             s["tags"] += 1
+            if por_tag[tag]["montada"]:
+                s["montadas"] += 1
             prev, real = metros_org.get(tag, (0.0, 0.0))
             s["m"] += prev
             s["real"] += real
@@ -5935,23 +5944,16 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                 s["m"] += prev
                 s["real"] += real
         if segs:
-            # Em andamento no topo, do mais adiantado para o menos: é o grupo
-            # em que olhar muda alguma coisa. Depois os não iniciados, pelo
-            # maior previsto -- é o trabalho que ainda vai vir, e o tamanho diz
-            # quanto pesa. Concluídos por último: já não pedem nada.
-            # As duas ordens anteriores erravam pelo mesmo motivo, cada uma
-            # numa direção: pior primeiro abria a tela com barras zeradas, e
-            # melhor primeiro abria com barras cheias.
-            def por_atencao(kv):
+            # Do mais adiantado para o menos, sem separar concluído de não
+            # iniciado: é o ranking que Daniel pediu, cabo e geral na mesma
+            # ordem. Empate no percentual desempata pelo maior previsto -- é
+            # o tamanho que diz quanto aquele número pesa na obra.
+            def por_avanco(kv):
                 s = kv[1]
                 p = s["real"] / s["m"] * 100 if s["m"] else 0.0
-                if p >= 99.5:
-                    return (2, 0.0, -s["m"])
-                if p > 0:
-                    return (0, -p, -s["m"])
-                return (1, 0.0, -s["m"])
+                return (-p, -s["m"])
 
-            ordem = sorted(segs.items(), key=por_atencao)
+            ordem = sorted(segs.items(), key=por_avanco)
             andando = sum(1 for _, s in ordem
                           if s["m"] and 0 < s["real"] / s["m"] * 100 < 99.5)
             prontos = sum(1 for _, s in ordem
@@ -5971,7 +5973,7 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                     f' · {br_num(int(s["real"]))}/{br_num(int(s["m"]))} m'
                     f' · {br_num(len(s["caixas"]))} cx'
                     f' · {br_num(s["tags"])} TAG{"s" if s["tags"] > 1 else ""}</span></div>')
-            render_html(
+            painel_cabo = (
                 '<div class="gplan-panel pl-pn"><div class="gplan-panel-title">'
                 'Avanço do cabo por segmento'
                 f'<span class="pl-res">{br_num(len(ordem))} '
@@ -5979,6 +5981,49 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                 f'<b class="andando">{br_num(andando)}</b> em andamento · '
                 f'<b class="feito">{br_num(prontos)}</b> com cabo pronto'
                 f'</span></div><div class="cs-lista">{"".join(linhas_seg)}</div></div>')
+
+            # Avanço geral: o cabo do segmento pesa 1 unidade (a própria
+            # porcentagem dele) e cada TAG pesa outra (100 se montada, 0 se
+            # não) -- a média simples das duas é quanto do segmento inteiro,
+            # cabo e instrumento junto, já fechou.
+            def peso_geral(s):
+                p_cabo = s["real"] / s["m"] * 100 if s["m"] else 0.0
+                unidades = 1 + s["tags"]
+                return (p_cabo + 100 * s["montadas"]) / unidades
+
+            def por_avanco_geral(kv):
+                s = kv[1]
+                p = peso_geral(s)
+                unidades = 1 + s["tags"]
+                return (-p, -unidades)
+
+            ordem_geral = sorted(segs.items(), key=por_avanco_geral)
+            andando_geral = sum(1 for _, s in ordem_geral
+                                if 0 < peso_geral(s) < 99.5)
+            prontos_geral = sum(1 for _, s in ordem_geral
+                                if peso_geral(s) >= 99.5)
+            linhas_geral = []
+            for nome_seg, s in ordem_geral:
+                p = peso_geral(s)
+                linhas_geral.append(
+                    f'<div class="cs-lin"><span class="cs-seg">{esc(nome_seg)}</span>'
+                    f'<div class="cs-trilho"><i class="{classe_avanco(p)}" '
+                    f'style="width:{min(max(p, 0), 100):.1f}%"></i></div>'
+                    f'<span class="cs-num"><b class="{classe_avanco(p)}">{br_pct(p)}</b>'
+                    f' · {br_num(s["montadas"])}/{br_num(s["tags"])}'
+                    f' TAG{"s" if s["tags"] != 1 else ""} montada'
+                    f'{"s" if s["montadas"] != 1 else ""}</span></div>')
+            painel_geral = (
+                '<div class="gplan-panel pl-pn"><div class="gplan-panel-title">'
+                'Avanço geral por segmento'
+                f'<span class="pl-res">{br_num(len(ordem_geral))} '
+                f'segmento{"s" if len(ordem_geral) > 1 else ""} · '
+                f'<b class="andando">{br_num(andando_geral)}</b> em andamento · '
+                f'<b class="feito">{br_num(prontos_geral)}</b> completo'
+                f'{"s" if prontos_geral > 1 else ""}'
+                f'</span></div><div class="cs-lista">{"".join(linhas_geral)}</div></div>')
+
+            render_html(f'<div class="cs-duas">{painel_cabo}{painel_geral}</div>')
     # Um recorte vazio não pode apagar a tela: "TAG apta" hoje tem zero, e a
     # aba inteira sumia junto. A busca cai de volta para todas, e quem explica
     # o vazio é a tabela, no lugar dela.
