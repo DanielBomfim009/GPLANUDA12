@@ -574,6 +574,10 @@ TEMAS = {
         "rgb_chapa": "8,12,22",
         # o metal do equipamento no desenho da Certificação
         "metal": "#2a3350", "metal2": "#212942", "metal3": "#39456b",
+        # o desenho da planta vem preto sobre branco: invertido, o traço fica
+        # claro sobre o escuro e a prancha para de ser um retângulo branco
+        "planta_filtro": "invert(1) brightness(.86) contrast(1.22)",
+        "planta_opacidade": ".52",
         "esquema": "dark",
     },
     "claro": {
@@ -593,6 +597,10 @@ TEMAS = {
         "sobre_cor": "#ffffff", "teal2": "#0a6f65",
         "rgb_chapa": "255,255,255",
         "metal": "#c4cdde", "metal2": "#b2bcd2", "metal3": "#dbe1ee",
+        # no claro o desenho já é escuro sobre branco: inverter deixaria a
+        # prancha preta no meio de uma tela clara
+        "planta_filtro": "grayscale(1) contrast(1.35) brightness(.82)",
+        "planta_opacidade": ".55",
         "esquema": "light",
     },
 }
@@ -683,7 +691,9 @@ def tokens_css(tema: str) -> str:
           --txt-teal: {t['txt_teal']};
           --sobre-cor: {t['sobre_cor']};
           --teal-2: {t['teal2']};
-          --rgb-chapa: {t['rgb_chapa']};"""
+          --rgb-chapa: {t['rgb_chapa']};
+          --planta-filtro: {t['planta_filtro']};
+          --planta-opacidade: {t['planta_opacidade']};"""
 
 
 def trocar_tema():
@@ -2583,19 +2593,17 @@ def inject_css():
         .cs-duas { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start; }
         @media (max-width:900px) { .cs-duas { grid-template-columns:1fr; } }
 
-        /* Fundo branco fixo, desenho sem filtro nem esmaecer -- igual ao mapa
-           de infra de instrumentacao, que nao inverte tema nenhum. Antes o
-           escuro invertia a prancha pra nao virar um retangulo branco solto
-           na tela escura; agora o padrao pedido pra apresentacao pesa mais
-           que essa coerencia. */
         .pl-tela { position:relative; width:100%; height:0;
                    border:1px solid var(--border-color); border-radius:11px;
-                   overflow:hidden; background:#fff; }
-        /* Com o fundo branco cheio (sem mais opacidade reduzida escondendo o
-           traco), o desborrar do redimensionamento do navegador passou a
-           aparecer -- pede a imagem nitida, e nao a suavizacao padrao. */
+                   overflow:hidden; background:var(--fundo-3); }
+        /* O desenho vem preto sobre branco. Invertido, o traco fica claro sobre
+           o escuro e a prancha deixa de ser um retangulo branco no meio de uma
+           tela escura -- e as zonas passam a ler por cima dele. image-rendering
+           evita o desfoque do navegador ao redimensionar o desenho tecnico. */
         .pl-tela img { position:absolute; inset:0; width:100%; height:100%;
-                       object-fit:fill; image-rendering:-webkit-optimize-contrast;
+                       object-fit:fill; filter:var(--planta-filtro);
+                       opacity:var(--planta-opacidade);
+                       image-rendering:-webkit-optimize-contrast;
                        image-rendering:crisp-edges; }
 
         /* a zona virou link para abrir a ficha: sem isto o navegador sublinha
