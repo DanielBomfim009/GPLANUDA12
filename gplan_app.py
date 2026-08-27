@@ -6152,7 +6152,15 @@ def cert_onde(trava, aberto: bool) -> str:
     if trava is None:
         return "predecessora sem circuito cadastrado"
     org, dst = str(trava["ORIGEM"]).strip(), str(trava["DESTINO"]).strip()
-    if str(trava["DISCIPLINA"]).strip() == "ELÉTRICA":
+    # o circuito de alimentação de um painel para outro (ou pra um
+    # dispositivo como um CBZ) às vezes vem em INSTRUMENTAÇÃO, não em
+    # ELÉTRICA -- o "-P" no nome é quem marca isso, mesmo critério do campo
+    # "pot" de _cert_circuito. Só conta quando quem envia já é painel: um
+    # circuito de potência entre instrumentos não é alimentação de painel.
+    eh_alimentacao = (str(trava["DISCIPLINA"]).strip() == "ELÉTRICA"
+                      or (cert_nivel(org) == 2
+                          and re.search(r"-P\d*$", str(trava["CIRCUITO"]).strip(), re.I)))
+    if eh_alimentacao:
         return f"alimentação do painel {dst}"
     if cert_nivel(org) == 0:
         return "ramal até o instrumento"
@@ -6217,6 +6225,22 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
         painel_da_cadeia = atual
         if cert_nivel(atual) == 2:
             alim = eletrica.get(atual)
+            if not alim:
+                # eletrica() só acha linha ELÉTRICA->painel; alguns painéis
+                # (PN-12-236/237 -> PN-12102, PN-12-238 -> CBZ-12-001, achado
+                # no diagrama YST em 2026-08-27) sobem pra outro painel ou
+                # dispositivo com o circuito em INSTRUMENTAÇÃO, marcado só
+                # pelo "-P" no nome -- o mesmo criterio que o campo "pot" de
+                # _cert_circuito já usa. Sem isso a alimentação ficava sempre
+                # "desconhecida" mesmo quando o circuito real existe na base.
+                no = atual
+                for _ in range(15):
+                    pot = [r for r in saida.get(no, [])
+                           if re.search(r"-P\d*$", str(r["CIRCUITO"]).strip(), re.I)]
+                    if not pot:
+                        break
+                    alim = pot
+                    no = str(pot[0]["DESTINO"]).strip()
             if alim:
                 cadeia.extend(alim)
             else:
