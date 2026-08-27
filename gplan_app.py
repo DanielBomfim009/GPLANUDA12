@@ -6482,7 +6482,7 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     # E uma pergunta diferente dos filtros abaixo ("o que falta lancar pra
     # estes tipos", nao um recorte da tela) e funciona independente deles,
     # e independente de estar olhando um painel/caixa especifico ou nao.
-    with st.expander("Exportar pendências de lançamento de cabo por prefixo de TAG"):
+    with st.expander("Exportar pendências de cabo"):
         prefixos_txt = st.text_input(
             "Prefixos de TAG, separados por vírgula", value="AST,OST",
             key="cert_export_prefixos")
@@ -6526,7 +6526,7 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                 "Baixar pendências de cabo (CSV)", csv,
                 file_name=f"pendencias_cabo_{'_'.join(prefixos)}.csv",
                 mime="text/csv", key="cert_export_download")
-            st.dataframe(df_export, hide_index=True, use_container_width=True)
+            st.dataframe(df_export, hide_index=True, width="stretch")
 
     escolhido = {c: st.session_state.get(f"cert_f_{c}", "Todos") for c, _ in campos}
 
