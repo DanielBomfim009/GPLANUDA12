@@ -4989,18 +4989,57 @@ def _cert_traduz(depara: pd.DataFrame) -> dict[str, list]:
 
 
 def cert_indice(lanc: pd.DataFrame, cache_key: str) -> dict:
-    """De cada instrumento para a cadeia dele. É o que a busca consulta."""
+    """De cada instrumento para a cadeia dele. É o que a busca consulta.
+
+    Nem todo instrumento liga direto numa caixa de junção -- detecção de
+    fumaça/gás (YST) e varios outros tipos correm em loop, instrumento a
+    instrumento (YST-121101 -> YST-121100 -> YST-121165 -> ... -> painel),
+    sem caixa nenhuma no meio; outros ligam direto no painel, pulando a caixa.
+    Andar so um salto (o antigo comportamento) nunca achava caixa nenhuma
+    nesses casos, e o instrumento inteiro sumia da busca -- mesmo com cabo
+    lancado e concluido. Aqui anda pela cadeia ate achar a primeira caixa OU,
+    na falta dela, o painel; 15 saltos cobrem com folga a maior cadeia real
+    da base (10, medido em 2026-08-27).
+    """
     if lanc.empty:
         return {}
+    proximo: dict[str, str] = {}
+    for _, r in lanc.iterrows():
+        org = str(r["ORIGEM"]).strip()
+        if org and org != "nan":
+            proximo.setdefault(org, str(r["DESTINO"]).strip())
+
     saida: dict[str, str] = {}
     for _, r in lanc.iterrows():
         org, dst = str(r["ORIGEM"]).strip(), str(r["DESTINO"]).strip()
         # ponta em branco vira um instrumento fantasma na busca; ela ja aparece
         # na aba Correções, que e onde alguem trata
-        if org in ("", "nan"):
+        if org in ("", "nan") or cert_nivel(org) != 0:
             continue
-        if cert_nivel(org) == 0 and cert_nivel(dst) == 1:
-            saida[org] = re.sub(r"[A-Z]$", "", dst) if dst.startswith("CFF") else dst
+        atual = dst
+        for _ in range(15):
+            if cert_nivel(atual) >= 1:
+                saida[org] = re.sub(r"[A-Z]$", "", atual) if atual.startswith("CFF") else atual
+                break
+            prox = proximo.get(atual)
+            if not prox:
+                break
+            atual = prox
+
+    # Ponta que só aparece como DESTINO nunca acha caixa/painel andando pela
+    # própria origem -- ela não tem uma (fim de loop instrumento-a-instrumento,
+    # ou alimentada direto por um painel). Repete a busca olhando quem a
+    # alimenta: se o alimentador já achou um alvo, essa TAG usa o mesmo (é a
+    # mesma cadeia física); se o alimentador já é o próprio painel/caixa, o
+    # alvo é ele mesmo.
+    for _, r in lanc.iterrows():
+        org, dst = str(r["ORIGEM"]).strip(), str(r["DESTINO"]).strip()
+        if dst in ("", "nan") or cert_nivel(dst) != 0 or dst in proximo or dst in saida:
+            continue
+        if cert_nivel(org) >= 1:
+            saida[dst] = re.sub(r"[A-Z]$", "", org) if org.startswith("CFF") else org
+        elif org in saida:
+            saida[dst] = saida[org]
     return saida
 
 
@@ -5038,7 +5077,10 @@ def cert_painel_por_tag(lanc: pd.DataFrame, depara: pd.DataFrame, cache_key: str
         if ponta in ("", "nan") or cert_nivel(ponta) == 2:
             continue
         atual = ponta
-        for _ in range(6):
+        # 15 saltos, mesmo teto do cert_panorama: cadeia instrumento-a-instrumento
+        # (sem caixa) pode ser mais longa que a caixa-a-caixa que o "seis" original
+        # media
+        for _ in range(15):
             if cert_nivel(atual) == 2:
                 for nome in traduz.get(ponta, [ponta]):
                     por_tag[nome] = atual
@@ -5145,7 +5187,7 @@ def cert_paineis(lanc: pd.DataFrame, cache_key: str) -> dict:
     def sobe(no):
         """O caminho de um nó até o painel, do primeiro passo ao último."""
         caminho, atual = [], no
-        for _ in range(6):
+        for _ in range(15):
             prox = saida.get(atual)
             if not prox:
                 return caminho, None
@@ -5166,19 +5208,30 @@ def cert_paineis(lanc: pd.DataFrame, cache_key: str) -> dict:
         raiz, circ = caminho[-1]      # a caixa que fala direto com o painel
         p = paineis.setdefault(painel, {})
         b = p.setdefault(raiz, {"nome": raiz, "tronco": _cert_circuito(circ, {}),
-                                "caixas": set(), "inst": 0, "cabo_ok": 0, "tags": []})
+                                "caixas": set(), "inst": 0, "cabo_ok": 0, "tags": [],
+                                "direto": False})
         b["caixas"].add(ponta)
     # cada instrumento entra na conta da caixa de primeiro nível que o alimenta
     for ponta, circuitos in saida.items():
         if cert_nivel(ponta) != 0:
             continue
         caminho, painel = sobe(ponta)
-        if not painel or painel not in paineis:
+        if not painel:
             continue
         raiz = caminho[-1][0]
-        b = paineis[painel].get(raiz)
+        p = paineis.setdefault(painel, {})
+        b = p.get(raiz)
         if b is None:
-            continue
+            # sem caixa nenhuma no meio -- loop de instrumento a instrumento
+            # (deteccao de fumaca/gas, por exemplo) ou instrumento ligado
+            # direto no painel. "raiz" aqui e o ultimo instrumento antes do
+            # painel, o mesmo pra todo mundo que faz parte dessa cadeia --
+            # e o que agrupa o loop inteiro num bloco so, do jeito que uma
+            # caixa agruparia quem pendura nela. Sem isso o instrumento
+            # simplesmente sumia do desenho do painel.
+            b = p.setdefault(raiz, {"nome": raiz, "tronco": _cert_circuito(caminho[-1][1], {}),
+                                    "caixas": set(), "inst": 0, "cabo_ok": 0, "tags": [],
+                                    "direto": True})
         b["inst"] += 1
         pronto = all(cert_num(c["PCT"]) >= 99.5 for _, c in caminho)
         if pronto:
@@ -5222,6 +5275,42 @@ def cert_cadeia(alvo: str, lanc: pd.DataFrame, mont: dict) -> dict:
         e = d[(cert_txt(d["DISCIPLINA"]) == "ELÉTRICA") & (dst == painel)]
         return [_cert_circuito(r, mont) for _, r in e.iterrows()]
 
+    chegada: dict[str, list] = {}
+    for _, r in d.iterrows():
+        ds = str(r["DESTINO"]).strip()
+        if ds and ds != "nan":
+            chegada.setdefault(ds, []).append(r)
+
+    def upstream(destinos, excluir_prefixo):
+        """As linhas que chegam nos destinos dados, inclusive quem vem por
+        trás de outro instrumento sem caixa no meio -- o mesmo loop de
+        instrumento a instrumento (detecção de fumaça/gás, por exemplo) que o
+        cert_panorama já atravessa. Sem isso só o último instrumento antes da
+        caixa aparecia no desenho, e o resto da cadeia ficava escondido.
+
+        Cada linha sai marcada com a "raiz": qual dos destinos originais essa
+        cadeia alcança, pra quem chama saber de qual caixa/segmento aquele
+        instrumento -- mesmo vários saltos atrás -- pendura.
+        """
+        vistos = set(destinos)
+        coletadas: list[tuple] = []
+        fronteira = [(no, no) for no in destinos]
+        for _ in range(15):
+            proxima = []
+            for no, raiz in fronteira:
+                for r in chegada.get(no, []):
+                    o = str(r["ORIGEM"]).strip()
+                    if o.startswith(excluir_prefixo):
+                        continue
+                    coletadas.append((r, raiz))
+                    if cert_nivel(o) == 0 and o not in vistos:
+                        vistos.add(o)
+                        proxima.append((o, raiz))
+            if not proxima:
+                break
+            fronteira = proxima
+        return sorted(coletadas, key=lambda x: str(x[0]["ORIGEM"]).strip())
+
     segs = sorted({v for v in pd.concat([org, dst])
                    if re.fullmatch(re.escape(alvo) + r"[A-Z]", v)})
     if segs:
@@ -5239,7 +5328,7 @@ def cert_cadeia(alvo: str, lanc: pd.DataFrame, mont: dict) -> dict:
         # que o terminador fecha o segmento
         destinos = {str(v).strip() for v in entre["DESTINO"]}
         fim = [x for x in segs if x not in destinos]
-        ins = d[dst.isin(segs) & ~org.str.startswith("CFF")]
+        ins = upstream(segs, "CFF")
         return {
             "tipo": "cff", "caixa": alvo, "painel": painel, "painel_indef": painel is None,
             "terminador": fim[-1] if fim else segs[-1],
@@ -5251,8 +5340,7 @@ def cert_cadeia(alvo: str, lanc: pd.DataFrame, mont: dict) -> dict:
                           for i, x in enumerate(segs)],
             "ligacoes": ligacoes,
             "ramais": cert_agrupar(
-                [{**_cert_circuito(r, mont), "seg": str(r["DESTINO"]).strip()}
-                 for _, r in ins.sort_values("ORIGEM").iterrows()]),
+                [{**_cert_circuito(r, mont), "seg": raiz} for r, raiz in ins]),
         }
 
     sai = d[org == alvo]
@@ -5260,15 +5348,14 @@ def cert_cadeia(alvo: str, lanc: pd.DataFrame, mont: dict) -> dict:
     # painel nao some do desenho por isso -- aparece sem tag, com a observacao,
     # e a etapa fica inconclusiva.
     painel = str(sai["DESTINO"].iloc[0]).strip() if len(sai) else None
-    ent = d[(dst == alvo) & ~org.str.startswith("CJ")]
+    ent = upstream([alvo], "CJ")
     return {
         "tipo": "caixa", "caixa": alvo, "painel": painel, "painel_indef": painel is None,
         "mont": mont.get(alvo, {}).get("mont", ""),
         "eletrica": eletrica(painel),
         "tronco": [_cert_circuito(r, mont) for _, r in sai.iterrows()],
         "segmentos": [], "ligacoes": [],
-        "ramais": cert_agrupar([_cert_circuito(r, mont)
-                                for _, r in ent.sort_values("ORIGEM").iterrows()]),
+        "ramais": cert_agrupar([_cert_circuito(r, mont) for r, _ in ent]),
     }
 
 
@@ -5499,7 +5586,7 @@ function cartaoCaixa(x, y, b, aberto) {
   const w = 150, h = 74;
   const pct = b.inst ? b.cabo_ok / b.inst * 100 : 0;
   const tom = !b.inst ? 'roxo' : pct >= 99.5 ? 'ok' : pct > 0 ? 'and' : 'nao';
-  const dica = cab('caixa de junção', b.nome) +
+  const dica = cab(b.direto ? 'sem caixa · loop direto no painel' : 'caixa de junção', b.nome) +
     dl('montagem', nomeMont(b.mont), corMont(b.mont)) +
     dl('instrumentos', b.inst) +
     dl('com cabo pronto', b.inst ? `${b.cabo_ok} · ${br(pct, 0)}%` : '—', tom) +
@@ -5680,7 +5767,7 @@ function cena(c) {
       p.push(`<path d="M${xPain + 106} ${espinha[0]} V${espinha[espinha.length - 1]}"
         stroke="rgba(var(--rgb-tinta),.16)" stroke-width="3" fill="none"/>`);
     return `<svg class="cena" viewBox="0 0 ${Math.max(xFim + 40, 1100)} ${y + 30}" role="img"
-      aria-label="Segmento do painel ${esc(String(c.painel))}: ${B.length} caixas e
+      aria-label="Segmento do painel ${esc(String(c.painel))}: ${B.length} bloco${B.length === 1 ? '' : 's'} e
       ${B.reduce((a, b) => a + b.inst, 0)} instrumentos">${p.join('')}</svg>`;
   }
 
@@ -6103,12 +6190,16 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
     por_tag: dict[str, dict] = {}
     for r in linhas:
         org, dst = str(r["ORIGEM"]).strip(), str(r["DESTINO"]).strip()
-        if org in ("", "nan") or cert_nivel(org) != 0 or cert_nivel(dst) != 1:
+        if org in ("", "nan") or cert_nivel(org) != 0:
             continue
         cadeia, aberto, atual = [r], False, dst
-        # a caixa puxa a seguinte ate chegar no painel; seis saltos e folga de
-        # sobra para a maior cadeia da base, e corta ciclo de dado sujo
-        for _ in range(6):
+        # a caixa puxa a seguinte ate chegar no painel; alguns instrumentos
+        # (deteccao de fumaca/gas, entre outros) correm em loop de instrumento
+        # a instrumento antes de qualquer caixa, ou ligam direto no painel --
+        # o "if cert_nivel(atual)==2: break" logo abaixo cobre o caso direto, e
+        # os saltos seguintes cobrem o loop. 15 saltos e a maior cadeia real da
+        # base (10, medido em 2026-08-27) com folga, e corta ciclo de dado sujo
+        for _ in range(15):
             if cert_nivel(atual) == 2:
                 break
             prox = saida.get(atual)
@@ -6117,6 +6208,12 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
                 break
             cadeia.extend(prox)
             atual = str(prox[0]["DESTINO"]).strip()
+        else:
+            # 15 saltos sem parar em painel nem em beco sem saida: e um par
+            # ida-e-volta entre dois instrumentos (ex: YST-121125<->YST-121112)
+            # girando em circulo. Sem isso o "aberto" ficava False por engano
+            # e a cadeia saia como "ok" sem nunca ter chegado num painel de verdade
+            aberto = True
         painel_da_cadeia = atual
         if cert_nivel(atual) == 2:
             alim = eletrica.get(atual)
@@ -6150,6 +6247,49 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
                             # cabo apto e a cadeia inteira lancada; TAG apta e
                             # isso mais o instrumento no lugar
                             "cabo": tom == "ok", "apta": tom == "ok" and montada}
+
+    # Ponta que só aparece como DESTINO (nunca ORIGEM) não entra no loop acima
+    # -- é o fim de um loop instrumento-a-instrumento (detecção de fumaça/gás,
+    # por exemplo) ou um instrumento alimentado direto por um painel, sem
+    # caixa no meio, na direção contrária do que o loop principal varre. Sem
+    # isso a TAG some da Certificação mesmo tendo cabo lançado e cadastro
+    # próprio -- foi o caso de 10 dos 88 TAGs do diagrama YST conferido em
+    # 2026-08-27.
+    for r in linhas:
+        org, dst = str(r["ORIGEM"]).strip(), str(r["DESTINO"]).strip()
+        if dst in ("", "nan") or cert_nivel(dst) != 0 or dst in saida:
+            continue
+        if cert_nivel(org) == 0:
+            base = por_tag.get(org)
+            if base is None:
+                continue
+            tom, onde, cabo = base["tom"], base["onde"], base["cabo"]
+        elif cert_nivel(org) == 2:
+            cadeia, aberto = [r], False
+            alim = eletrica.get(org)
+            if alim:
+                cadeia.extend(alim)
+            else:
+                aberto = True
+            trava = next((c for c in cadeia if cert_num(c["PCT"]) < 99.5), None)
+            if trava is None:
+                tom = "desc" if aberto else "ok"
+            elif str(trava["STATUS"]).strip() == "Em Andamento":
+                tom = "warn"
+            else:
+                tom = "crit"
+            onde = ("—" if tom == "ok" else
+                    cert_onde(trava, aberto) if trava is not None else
+                    f"alimentação do painel {org}")
+            cabo = tom == "ok"
+        else:
+            continue
+        antes = por_tag.get(dst)
+        if antes is None or PIOR[tom] > PIOR[antes["tom"]]:
+            montada = mont.get(dst, {}).get("mont", "") == "Montado"
+            por_tag[dst] = {"tom": tom, "caixa": org, "onde": onde,
+                            "montada": montada,
+                            "cabo": cabo, "apta": tom == "ok" and montada}
 
     previsto = lanc["METROS"].fillna(0)
     metros = float(previsto.sum())
@@ -6272,8 +6412,16 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     # filtro geral da lateral -- so a 01_BASE_TAGS passa. Sem cruzar aqui, a
     # Certificacao continuava mostrando a obra inteira mesmo com um filtro
     # ativo, a unica aba que escapava do recorte.
+    #
+    # universo NAO exige mais "t in indice": indice so registra um alvo
+    # quando a cadeia acha caixa ou painel, e uma cadeia genuinamente aberta
+    # (loop de instrumento que nunca fecha, por exemplo) nao acha nenhum --
+    # exigir os dois escondia a TAG de "TAGs mapeadas" mesmo com por_tag já
+    # sabendo que ela existe e que o cabo esta incompleto. A busca (linha
+    # abaixo, "if nome in indice") ja cai de volta pro nome puro quando falta
+    # indice, entao soltar essa exigencia aqui nao quebra ela.
     tags_no_filtro_geral = set(tags["TAG"])
-    universo = [t for t in indice if t in por_tag and t in tags_no_filtro_geral]
+    universo = [t for t in por_tag if t in tags_no_filtro_geral]
 
     # Tudo em TAG. Metro e circuito são a unidade da planilha de cabos, não a
     # do controle: o que se certifica é o instrumento. Os cartões usam so o
@@ -6486,7 +6634,8 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     # O painel entra na busca como alvo: e a unica forma de ver o segmento
     # inteiro sem abrir uma caixa por vez.
     paineis = cert_paineis(lanc, cache_key)
-    opcoes = ([f"{p}  ·  painel · {len(b)} caixas" for p, b in sorted(paineis.items())]
+    opcoes = ([f"{p}  ·  painel · {len(b)} bloco{'s' if len(b) != 1 else ''}"
+               for p, b in sorted(paineis.items())]
               + [f"{t}  ·  TAG" for t in base_busca]
               + ([f"{a}  ·  {'fieldbus' if a.startswith('CFF') else 'caixa'}"
                   for a in alvos] if not tags_no_filtro or alvo_recorte == "Todos" else []))
@@ -6578,7 +6727,12 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
 
     if alvo in paineis:
         cad = cert_cadeia_painel(alvo, paineis[alvo], mont)
-        titulo = (f"{alvo} → {len(cad['blocos'])} caixas → "
+        n_caixas = sum(1 for b in cad["blocos"] if not b["direto"])
+        n_diretos = sum(1 for b in cad["blocos"] if b["direto"])
+        partes = [f"{n_caixas} caixas"] if n_caixas else []
+        if n_diretos:
+            partes.append(f"{n_diretos} loop{'s' if n_diretos > 1 else ''} sem caixa")
+        titulo = (f"{alvo} → {' + '.join(partes) or '0 caixas'} → "
                   f"{sum(b['inst'] for b in cad['blocos'])} instrumentos")
         render_html(f'<div class="gplan-panel-title" style="margin:4px 0 10px">'
                     f'Segmento do painel <span class="gtbl-muted" '
