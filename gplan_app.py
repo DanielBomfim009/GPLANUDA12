@@ -6270,7 +6270,10 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
                             "montada": montada,
                             # cabo apto e a cadeia inteira lancada; TAG apta e
                             # isso mais o instrumento no lugar
-                            "cabo": tom == "ok", "apta": tom == "ok" and montada}
+                            "cabo": tom == "ok", "apta": tom == "ok" and montada,
+                            # a cadeia inteira, nao so o trecho travado -- e o
+                            # que a exportacao de pendencias de lancamento usa
+                            "cadeia": cadeia}
 
     # Ponta que só aparece como DESTINO (nunca ORIGEM) não entra no loop acima
     # -- é o fim de um loop instrumento-a-instrumento (detecção de fumaça/gás,
@@ -6288,6 +6291,7 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
             if base is None:
                 continue
             tom, onde, cabo = base["tom"], base["onde"], base["cabo"]
+            cadeia = base.get("cadeia", [])
         elif cert_nivel(org) == 2:
             cadeia, aberto = [r], False
             alim = eletrica.get(org)
@@ -6313,7 +6317,8 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
             montada = mont.get(dst, {}).get("mont", "") == "Montado"
             por_tag[dst] = {"tom": tom, "caixa": org, "onde": onde,
                             "montada": montada,
-                            "cabo": cabo, "apta": tom == "ok" and montada}
+                            "cabo": cabo, "apta": tom == "ok" and montada,
+                            "cadeia": cadeia}
 
     previsto = lanc["METROS"].fillna(0)
     metros = float(previsto.sum())
@@ -6471,6 +6476,58 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
           <div class="v">{br_num(montadas_travadas)}</div>
           <div class="s">montadas, esperando cabo</div></div>
       </div>""")
+
+    # Exportar pendencia de LANCAMENTO DE CABO por prefixo de TAG (ex.: AST,
+    # OST) -- pra montar programacao de campo sem abrir TAG por TAG na tela.
+    # E uma pergunta diferente dos filtros abaixo ("o que falta lancar pra
+    # estes tipos", nao um recorte da tela) e funciona independente deles,
+    # e independente de estar olhando um painel/caixa especifico ou nao.
+    with st.expander("Exportar pendências de lançamento de cabo por prefixo de TAG"):
+        prefixos_txt = st.text_input(
+            "Prefixos de TAG, separados por vírgula", value="AST,OST",
+            key="cert_export_prefixos")
+        prefixos = tuple(p.strip().upper() for p in prefixos_txt.split(",") if p.strip())
+        alvo_export = sorted(t for t in universo if prefixos and t.upper().startswith(prefixos))
+        circuitos_export: dict[str, dict] = {}
+        for tag in alvo_export:
+            for c in por_tag[tag].get("cadeia", []):
+                # so o que ainda falta lancar -- montagem do instrumento e
+                # outra pendencia, essa exportacao e so sobre o cabo
+                if cert_num(c["PCT"]) >= 99.5:
+                    continue
+                cid = str(c["CIRCUITO"]).strip()
+                linha = circuitos_export.setdefault(cid, {
+                    "CIRCUITO": cid, "ORIGEM": str(c["ORIGEM"]).strip(),
+                    "DESTINO": str(c["DESTINO"]).strip(),
+                    "DISCIPLINA": str(c["DISCIPLINA"]).strip(),
+                    "STATUS": str(c["STATUS"]).strip(),
+                    "PCT": round(cert_num(c["PCT"]), 1),
+                    "METROS": cert_num(c["METROS"]),
+                    "METROS_REAL": cert_metro_real(c),
+                    "TAGS": set(),
+                })
+                linha["TAGS"].add(tag)
+        linhas_export = sorted(
+            ({**v, "TAGS": ", ".join(sorted(v["TAGS"]))} for v in circuitos_export.values()),
+            key=lambda v: (v["PCT"], v["CIRCUITO"]))
+        if not prefixos:
+            st.caption("Digite ao menos um prefixo (ex.: AST, OST).")
+        elif not alvo_export:
+            st.caption("Nenhum TAG mapeado com esse prefixo.")
+        elif not linhas_export:
+            st.caption(f"{len(alvo_export)} TAGs com esse prefixo · "
+                      "nenhum circuito de cabo pendente, já está tudo lançado.")
+        else:
+            st.caption(f"{len(alvo_export)} TAGs com esse prefixo · "
+                      f"{len(linhas_export)} circuitos de cabo pendentes")
+            df_export = pd.DataFrame(linhas_export)
+            csv = df_export.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig")
+            st.download_button(
+                "Baixar pendências de cabo (CSV)", csv,
+                file_name=f"pendencias_cabo_{'_'.join(prefixos)}.csv",
+                mime="text/csv", key="cert_export_download")
+            st.dataframe(df_export, hide_index=True, use_container_width=True)
+
     escolhido = {c: st.session_state.get(f"cert_f_{c}", "Todos") for c, _ in campos}
 
     def combina(tag, exceto=""):
