@@ -5254,6 +5254,11 @@ def cert_paineis(lanc: pd.DataFrame, cache_key: str) -> dict:
                           # fisica do laco (ver ordem_tags mais abaixo)
                           "prof": len(caminho)})
     def ordem_tags(v):
+        if v.get("ordem_fixa"):
+            # loop com identidade conferida no diagrama (CERT_LOOPS_YST) --
+            # a ordem ja e a fisica de verdade, nao a estimada pela
+            # profundidade da caminhada
+            return v["tags"]
         if v["direto"]:
             # num loop de instrumento a instrumento a ordem que importa e a
             # da fiacao fisica: quem esta mais longe do painel vem primeiro,
@@ -5264,9 +5269,84 @@ def cert_paineis(lanc: pd.DataFrame, cache_key: str) -> dict:
             return sorted(v["tags"], key=lambda t: -t["prof"])
         return sorted(v["tags"], key=lambda t: t["org"])
 
+    # Os loops de deteccao de fumaca/gas (YST) tem identidade fixa, conferida
+    # contra o diagrama de interligacao DE-5290.00-2111-800-CHZ-135 -- nao
+    # dependem mais da caminhada por grafo pra dizer QUEM e do mesmo loop.
+    # A caminhada quebrava exatamente quando um instrumento tem ligacao
+    # direta com o painel ALEM de continuar o loop (ex.: YST-121149 liga em
+    # YST-121150 E direto no painel): sobe() achava o atalho primeiro e
+    # isolava 149 num bloco de 1, longe do resto do loop dele. Aqui o grupo,
+    # a ordem e o nome vem do desenho; o status de cada TAG (cabo pronto,
+    # pct) continua vindo da caminhada de verdade, sem mudar a matematica.
+    for nome_loop, (painel_loop, ordem) in CERT_LOOPS_YST.items():
+        p = paineis.get(painel_loop)
+        if p is None:
+            continue
+        achados: dict[str, dict] = {}
+        tronco_loop = None
+        for raiz, b in list(p.items()):
+            restantes = []
+            for t in b["tags"]:
+                if t["org"] in ordem:
+                    achados[t["org"]] = t
+                    if raiz == t["org"] and tronco_loop is None:
+                        tronco_loop = b["tronco"]
+                else:
+                    restantes.append(t)
+            if len(restantes) != len(b["tags"]):
+                if restantes:
+                    b["tags"] = restantes
+                    b["inst"] = len(restantes)
+                    b["cabo_ok"] = sum(1 for x in restantes if x["cabo"])
+                else:
+                    del p[raiz]
+        if not achados:
+            continue
+        tags_loop = [achados[t] for t in ordem if t in achados]
+        if tronco_loop is None:
+            tronco_loop = {"id": "", "disc": "", "status": "—", "pct": 0, "m": 0,
+                           "m_real": 0, "pot": False, "org": "", "dst": ""}
+        p[nome_loop] = {
+            "nome": nome_loop, "tronco": tronco_loop, "caixas": set(),
+            "inst": len(tags_loop), "cabo_ok": sum(1 for t in tags_loop if t["cabo"]),
+            "tags": tags_loop, "direto": True, "ordem_fixa": True,
+        }
+
     return {p: sorted((dict(v, caixas=len(v["caixas"]), tags=ordem_tags(v))
                        for v in cs.values()), key=lambda x: x["nome"])
             for p, cs in paineis.items()}
+
+
+# Ordem fisica real de cada loop de deteccao de fumaca/gas, do diagrama de
+# interligacao DE-5290.00-2111-800-CHZ-135 (posicao das caixas + a ligacao de
+# margem entre a 1a caixa de cada fileira, conferida em 2026-08-28). So os 8
+# loops com ordem limpa e ja confirmada entram aqui -- LOOP7 tem topologia em
+# Y (duas pontas saindo do painel e convergindo num beco sem saida) e LOOP8
+# nao deu pra ler com confianca no desenho (pagina em zigue-zague), entao
+# os dois continuam pela caminhada automatica ate serem conferidos direito.
+CERT_LOOPS_YST: dict[str, tuple[str, list[str]]] = {
+    "LOOP1": ("PN-12-236", ["YST-121102", "YST-121178", "YST-121177", "YST-121101",
+                           "YST-121100", "YST-121165", "YST-121166"]),
+    "LOOP2": ("PN-12-236", ["YST-121179", "YST-121109", "YST-121110", "YST-121198",
+                           "YST-121108", "YST-121104", "YST-121103"]),
+    "LOOP3": ("PN-12-236", ["YST-121113", "YST-121114", "YST-121115", "YST-121116",
+                           "YST-121117", "YST-121118", "YST-121119", "YST-121120",
+                           "YST-121121", "YST-121122"]),
+    "LOOP4": ("PN-12-236", ["YST-121111", "YST-121112", "YST-121125", "YST-121126",
+                           "YST-121127", "YST-121128", "YST-121167", "YST-121168",
+                           "YST-121169", "YST-121170"]),
+    "LOOP5": ("PN-12-237", ["YST-121171", "YST-121172", "YST-121173", "YST-121174",
+                           "YST-121175", "YST-121176", "YST-121124", "YST-121123"]),
+    "LOOP6": ("PN-12-237", ["YST-121129", "YST-121130", "YST-121131", "YST-121132",
+                           "YST-121133", "YST-121134", "YST-121135", "YST-121136",
+                           "YST-121137", "YST-121138"]),
+    "LOOP9": ("PN-12-238", ["YST-121149", "YST-121150", "YST-121151", "YST-121152",
+                           "YST-121153", "YST-121155", "YST-121156", "YST-121157",
+                           "YST-121158", "YST-121159"]),
+    "LOOP10": ("PN-12-238", ["YST-121148", "YST-121180", "YST-121181", "YST-121182",
+                            "YST-121183", "YST-121184", "YST-121185", "YST-121186",
+                            "YST-121187", "YST-121188"]),
+}
 
 
 def cert_cadeia_painel(painel: str, blocos: list, mont: dict) -> dict:
@@ -5808,11 +5888,16 @@ function cena(c) {
           const clU = ultimoI % porLinha, flU = Math.floor(ultimoI / porLinha);
           const xU = xInst + clU * passo + 36;
           const yU = yCalha + flU * passoFil + 44;
+          // a volta vai ate o proprio eixo do painel (mesmo x da espinha
+          // que junta as entradas), nao so ate o cartao do loop -- e o que
+          // deixa visivel que o laco ENTRA e SAI do painel, os dois lados
+          // que o desenho de interligacao mostra (terminais OUT e IN da
+          // mesma central).
           const yVolta = yCalha + (fil - 1) * passoFil + 78;
-          p.push(`<path d="M${xU} ${yU + 20} V${yVolta} H${xCx + 75} V${y + 74}"
+          p.push(`<path d="M${xU} ${yU + 20} V${yVolta} H${xPain + 106} V${meio}"
             stroke="var(--t3)" stroke-width="1.5" fill="none" stroke-dasharray="1 5"
             stroke-linecap="round" opacity=".55"/>
-            <polygon points="${xCx + 75},${y + 74} ${xCx + 69},${y + 66} ${xCx + 81},${y + 66}"
+            <polygon points="${xPain + 106},${meio} ${xPain + 100},${meio - 6} ${xPain + 112},${meio - 6}"
             fill="var(--t3)" opacity=".55"/>`);
         }
       }
