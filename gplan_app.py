@@ -5185,18 +5185,29 @@ def cert_paineis(lanc: pd.DataFrame, cache_key: str) -> dict:
             saida.setdefault(org, []).append(r)
 
     def sobe(no):
-        """O caminho de um nó até o painel, do primeiro passo ao último."""
-        caminho, atual = [], no
-        for _ in range(15):
-            prox = saida.get(atual)
-            if not prox:
-                return caminho, None
-            destino = str(prox[0]["DESTINO"]).strip()
-            caminho.append((atual, prox[0]))
-            if cert_nivel(destino) == 2:
-                return caminho, destino
-            atual = destino
-        return caminho, None
+        """O caminho de um nó até o painel, do primeiro passo ao último.
+
+        Quando o nó tem mais de uma saída (loop de instrumento a instrumento
+        com duas pontas, por exemplo), seguir sempre a primeira registrada
+        podia cair num ramo que nunca chega no painel e perder o instrumento
+        inteiro do desenho -- mesmo com outro ramo que fecharia certinho.
+        Por isso tenta os ramos por busca, não só o primeiro da lista.
+        """
+        pilha = [(no, [])]
+        vistos = {no}
+        while pilha:
+            atual, caminho = pilha.pop()
+            if len(caminho) >= 15:
+                continue
+            for prox_r in saida.get(atual, []):
+                destino = str(prox_r["DESTINO"]).strip()
+                novo = caminho + [(atual, prox_r)]
+                if cert_nivel(destino) == 2:
+                    return novo, destino
+                if destino not in vistos:
+                    vistos.add(destino)
+                    pilha.append((destino, novo))
+        return [], None
 
     paineis: dict[str, dict] = {}
     for ponta in saida:
