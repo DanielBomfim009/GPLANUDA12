@@ -5238,9 +5238,22 @@ def cert_paineis(lanc: pd.DataFrame, cache_key: str) -> dict:
             b["cabo_ok"] += 1
         b["tags"].append({"org": ponta, "cabo": pronto,
                           "status": str(circuitos[0]["STATUS"]).strip(),
-                          "pct": round(cert_num(circuitos[0]["PCT"]), 1)})
-    return {p: sorted((dict(v, caixas=len(v["caixas"]),
-                            tags=sorted(v["tags"], key=lambda t: t["org"]))
+                          "pct": round(cert_num(circuitos[0]["PCT"]), 1),
+                          # distancia ate o painel/caixa -- e o que da a ordem
+                          # fisica do laco (ver ordem_tags mais abaixo)
+                          "prof": len(caminho)})
+    def ordem_tags(v):
+        if v["direto"]:
+            # num loop de instrumento a instrumento a ordem que importa e a
+            # da fiacao fisica: quem esta mais longe do painel vem primeiro,
+            # quem fecha nele vem por ultimo -- a mesma sequencia que o
+            # diagrama de interligacao desenha (instrumento A -> B -> ... ->
+            # painel). Numa caixa comum os instrumentos sao ramais
+            # independentes, nao um laco, e a ordem alfabetica continua.
+            return sorted(v["tags"], key=lambda t: -t["prof"])
+        return sorted(v["tags"], key=lambda t: t["org"])
+
+    return {p: sorted((dict(v, caixas=len(v["caixas"]), tags=ordem_tags(v))
                        for v in cs.values()), key=lambda x: x["nome"])
             for p, cs in paineis.items()}
 
@@ -5758,6 +5771,21 @@ function cena(c) {
             fill="none" stroke-linecap="round"/>`);
           p.push(cartaoMini(xi, yi, t));
           xFim = Math.max(xFim, xi + 46);
+          // num loop de instrumento a instrumento (sem caixa), a seta entre
+          // um cartao e o seguinte mostra a ordem fisica da fiacao -- a
+          // mesma sequencia A -> B -> C do diagrama de interligacao. Numa
+          // caixa comum os instrumentos sao ramais independentes, e a seta
+          // nao faz sentido.
+          if (b.direto && k < b.tags.length - 1) {
+            const flProx = Math.floor((k + 1) / porLinha);
+            if (flProx === fl) {
+              const xProx = xInst + ((k + 1) % porLinha) * passo + 36;
+              p.push(`<path d="M${xi + 34} ${yi} H${xProx - 41}" stroke="var(--t3)"
+                stroke-width="1.4" fill="none" opacity=".6"/>
+                <polygon points="${xProx - 34},${yi} ${xProx - 41},${yi - 4} ${xProx - 41},${yi + 4}"
+                fill="var(--t3)" opacity=".6"/>`);
+            }
+          }
         });
       }
       y += aberto ? Math.max(96, 22 + fil * 76 + 34) : 96;
