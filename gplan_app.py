@@ -5000,14 +5000,36 @@ def cert_indice(lanc: pd.DataFrame, cache_key: str) -> dict:
     lancado e concluido. Aqui anda pela cadeia ate achar a primeira caixa OU,
     na falta dela, o painel; 15 saltos cobrem com folga a maior cadeia real
     da base (10, medido em 2026-08-27).
+
+    A caminhada tenta TODOS os ramos, não só o primeiro registrado na
+    planilha -- mesmo ajuste que o cert_paineis já faz. Um nó com duas
+    saídas (o cruzamento entre dois loops YST, por exemplo: YST-121156 liga
+    tanto no resto do loop dele quanto, à parte, em YST-121144, de outro
+    loop) tinha o ramo errado vencendo só por vir primeiro na planilha, e
+    toda a cadeia dali pra trás (5 TAGs do LOOP9, neste caso) nunca achava
+    caixa nem painel -- sumindo da busca por TAG mesmo com cabo lançado.
     """
     if lanc.empty:
         return {}
-    proximo: dict[str, str] = {}
+    adj: dict[str, list] = {}
     for _, r in lanc.iterrows():
         org = str(r["ORIGEM"]).strip()
         if org and org != "nan":
-            proximo.setdefault(org, str(r["DESTINO"]).strip())
+            adj.setdefault(org, []).append(str(r["DESTINO"]).strip())
+
+    def alcanca(no):
+        pilha, vistos = [(no, 0)], {no}
+        while pilha:
+            atual, prof = pilha.pop()
+            if cert_nivel(atual) >= 1:
+                return atual
+            if prof >= 15:
+                continue
+            for prox in adj.get(atual, []):
+                if prox not in vistos:
+                    vistos.add(prox)
+                    pilha.append((prox, prof + 1))
+        return None
 
     saida: dict[str, str] = {}
     for _, r in lanc.iterrows():
@@ -5016,15 +5038,9 @@ def cert_indice(lanc: pd.DataFrame, cache_key: str) -> dict:
         # na aba Correções, que e onde alguem trata
         if org in ("", "nan") or cert_nivel(org) != 0:
             continue
-        atual = dst
-        for _ in range(15):
-            if cert_nivel(atual) >= 1:
-                saida[org] = re.sub(r"[A-Z]$", "", atual) if atual.startswith("CFF") else atual
-                break
-            prox = proximo.get(atual)
-            if not prox:
-                break
-            atual = prox
+        alvo = alcanca(dst)
+        if alvo:
+            saida[org] = re.sub(r"[A-Z]$", "", alvo) if alvo.startswith("CFF") else alvo
 
     # Ponta que só aparece como DESTINO nunca acha caixa/painel andando pela
     # própria origem -- ela não tem uma (fim de loop instrumento-a-instrumento,
@@ -5034,12 +5050,24 @@ def cert_indice(lanc: pd.DataFrame, cache_key: str) -> dict:
     # alvo é ele mesmo.
     for _, r in lanc.iterrows():
         org, dst = str(r["ORIGEM"]).strip(), str(r["DESTINO"]).strip()
-        if dst in ("", "nan") or cert_nivel(dst) != 0 or dst in proximo or dst in saida:
+        if dst in ("", "nan") or cert_nivel(dst) != 0 or dst in adj or dst in saida:
             continue
         if cert_nivel(org) >= 1:
             saida[dst] = re.sub(r"[A-Z]$", "", org) if org.startswith("CFF") else org
         elif org in saida:
             saida[dst] = saida[org]
+
+    # Os loops YST de CERT_LOOPS_YST têm o painel conferido contra o desenho
+    # de interligação -- vale mais que a caminhada por grafo. Alguns desses
+    # loops têm uma ligação de cruzamento com OUTRO loop (YST-121156, por
+    # exemplo, também liga em YST-121144, de um loop de outro painel); a
+    # caminhada pode achar esse painel vizinho antes do painel de verdade,
+    # dependendo só da ordem em que as linhas aparecem na planilha -- e
+    # nenhuma ordem é confiável o bastante pra decidir isso. Aqui, o painel
+    # de cada TAG de um loop conhecido é sempre o do loop, sem ambiguidade.
+    for nome_loop, (painel_loop, tags_loop) in CERT_LOOPS_YST.items():
+        for t in tags_loop:
+            saida[t] = painel_loop
     return saida
 
 
@@ -5179,10 +5207,14 @@ def cert_paineis(lanc: pd.DataFrame, cache_key: str) -> dict:
     if lanc.empty:
         return {}
     saida: dict[str, list] = {}
+    entrada: dict[str, list] = {}
     for r in lanc.to_dict("records"):
         org = str(r["ORIGEM"]).strip()
+        dst = str(r["DESTINO"]).strip()
         if org not in ("", "nan"):
             saida.setdefault(org, []).append(r)
+        if dst not in ("", "nan"):
+            entrada.setdefault(dst, []).append(r)
 
     def sobe(no):
         """O caminho de um nó até o painel, do primeiro passo ao último.
@@ -5300,6 +5332,25 @@ def cert_paineis(lanc: pd.DataFrame, cache_key: str) -> dict:
                     b["cabo_ok"] = sum(1 for x in restantes if x["cabo"])
                 else:
                     del p[raiz]
+        # Um membro do loop pode nunca ter sido visitado pela caminhada: ela
+        # so parte de quem TEM saida propria (organizada por ORIGEM), e um
+        # instrumento que so recebe cabo -- ultimo do trecho antes do painel,
+        # sem nada saindo dele -- nunca vira "ponta" pra caminhada nenhuma.
+        # Sem isto o loop ficava incompleto no desenho (YST-121103/111/113/116
+        # sumiam de LOOP2/3/4 inteiros, mesmo com cabo cadastrado): aqui o
+        # circuito que chega nele -- a propria convencao da base, que nomeia
+        # o circuito pelo destino -- vira a fonte do status desse instrumento.
+        for t_org in ordem:
+            if t_org in achados:
+                continue
+            linhas = saida.get(t_org) or entrada.get(t_org) or []
+            achados[t_org] = {
+                "org": t_org,
+                "cabo": bool(linhas) and all(cert_num(rr["PCT"]) >= 99.5 for rr in linhas),
+                "status": str(linhas[0]["STATUS"]).strip() if linhas else "—",
+                "pct": round(cert_num(linhas[0]["PCT"]), 1) if linhas else 0.0,
+                "prof": 0,
+            }
         if not achados:
             continue
         tags_loop = [achados[t] for t in ordem if t in achados]
@@ -5312,9 +5363,44 @@ def cert_paineis(lanc: pd.DataFrame, cache_key: str) -> dict:
             "tags": tags_loop, "direto": True, "ordem_fixa": True,
         }
 
-    return {p: sorted((dict(v, caixas=len(v["caixas"]), tags=ordem_tags(v))
-                       for v in cs.values()), key=lambda x: x["nome"])
-            for p, cs in paineis.items()}
+    def circ_entre(a, b):
+        """O circuito real entre duas pontas, em qualquer das duas direções --
+        a planilha grava a partir da ponta de campo, que varia por linha."""
+        for r in saida.get(a, []):
+            if str(r["DESTINO"]).strip() == b:
+                return r
+        for r in saida.get(b, []):
+            if str(r["DESTINO"]).strip() == a:
+                return r
+        return None
+
+    def com_fiacao(v, painel):
+        """A ordem final, com o fio real (da base de cabos) até o próximo
+        instrumento do laço -- e até o painel, no último. Sem isto o desenho
+        ligava um cartão no outro com um traço decorativo, sem metragem nem
+        status: exatamente a informação "como de costume" que falta na busca
+        por TAG de um laço YST.
+        """
+        ordenados = ordem_tags(v)
+        if not (v.get("direto") and len(ordenados) > 1):
+            return ordenados, None
+        ordenados = [dict(t) for t in ordenados]
+        for i, t in enumerate(ordenados):
+            prox = ordenados[i + 1]["org"] if i + 1 < len(ordenados) else painel
+            r = circ_entre(t["org"], prox)
+            t["circ_prox"] = _cert_circuito(r, {}) if r is not None else None
+        r_saida = circ_entre(ordenados[-1]["org"], painel)
+        return ordenados, (_cert_circuito(r_saida, {}) if r_saida is not None else None)
+
+    saida_final: dict[str, list] = {}
+    for painel, cs in paineis.items():
+        blocos = []
+        for v in cs.values():
+            tags_fio, circ_saida = com_fiacao(v, painel)
+            blocos.append(dict(v, caixas=len(v["caixas"]), tags=tags_fio,
+                               circ_saida=circ_saida))
+        saida_final[painel] = sorted(blocos, key=lambda x: x["nome"])
+    return saida_final
 
 
 # Ordem fisica real de cada loop de deteccao de fumaca/gas, do diagrama de
@@ -5501,8 +5587,11 @@ CERT_JS = r"""
 const D = __DADOS__;
 let zoom = 1;
 // quais caixas estao abertas na vista do painel. Vive aqui dentro: abrir uma
-// caixa nao e pergunta para o servidor.
-const abertos = new Set();
+// caixa nao e pergunta para o servidor. Uma cena de bloco so (a busca por
+// uma TAG de laco YST cai nisso, ver render_certificacao) ja nasce aberta --
+// pedir um clique a mais pra ver a unica coisa na tela nao ajuda ninguem.
+const abertos = new Set(D.cadeia.tipo === 'painel' && D.cadeia.blocos.length === 1
+  ? [D.cadeia.blocos[0].nome] : []);
 
 const br = (n, c) => Number(n).toLocaleString('pt-BR',
   {minimumFractionDigits: c || 0, maximumFractionDigits: c || 0});
@@ -5862,18 +5951,23 @@ function cena(c) {
             fill="none" stroke-linecap="round"/>`);
           p.push(cartaoMini(xi, yi, t));
           xFim = Math.max(xFim, xi + 46);
-          // num loop de instrumento a instrumento (sem caixa), a seta entre
-          // um cartao e o seguinte mostra a ordem fisica da fiacao -- a
-          // mesma sequencia A -> B -> C do diagrama de interligacao. Numa
-          // caixa comum os instrumentos sao ramais independentes, e a seta
-          // nao faz sentido.
+          // num loop de instrumento a instrumento (sem caixa), o fio entre um
+          // cartao e o seguinte e o circuito real da base de cabos -- mesma
+          // metragem, status e percentual que a busca por caixa mostra, so
+          // que na ordem fisica do diagrama de interligacao (A -> B -> ...),
+          // nao alfabetica. Sem circuito cadastrado nesse trecho, fica so a
+          // seta indicando a ordem, sem inventar dado.
           if (b.direto && k < b.tags.length - 1) {
             const flProx = Math.floor((k + 1) / porLinha);
             if (flProx === fl) {
               const xProx = xInst + ((k + 1) % porLinha) * passo + 36;
-              p.push(`<path d="M${xi + 34} ${yi} H${xProx - 41}" stroke="var(--t3)"
-                stroke-width="1.4" fill="none" opacity=".6"/>
-                <polygon points="${xProx - 34},${yi} ${xProx - 41},${yi - 4} ${xProx - 41},${yi + 4}"
+              if (t.circ_prox)
+                p.push(fio(`M${xi + 34} ${yi} H${xProx - 41}`, t.circ_prox, 2.2,
+                           'cabo · ' + esc(t.org) + ' → próximo do laço'));
+              else
+                p.push(`<path d="M${xi + 34} ${yi} H${xProx - 41}" stroke="var(--t3)"
+                  stroke-width="1.4" fill="none" opacity=".6"/>`);
+              p.push(`<polygon points="${xProx - 34},${yi} ${xProx - 41},${yi - 4} ${xProx - 41},${yi + 4}"
                 fill="var(--t3)" opacity=".6"/>`);
             }
           }
@@ -5894,10 +5988,13 @@ function cena(c) {
           // que o desenho de interligacao mostra (terminais OUT e IN da
           // mesma central).
           const yVolta = yCalha + (fil - 1) * passoFil + 78;
-          p.push(`<path d="M${xU} ${yU + 20} V${yVolta} H${xPain + 106} V${meio}"
-            stroke="var(--t3)" stroke-width="1.5" fill="none" stroke-dasharray="1 5"
-            stroke-linecap="round" opacity=".55"/>
-            <polygon points="${xPain + 106},${meio} ${xPain + 100},${meio - 6} ${xPain + 112},${meio - 6}"
+          const dVolta = `M${xU} ${yU + 20} V${yVolta} H${xPain + 106} V${meio}`;
+          if (b.circ_saida)
+            p.push(fio(dVolta, b.circ_saida, 2, 'cabo · laço → painel'));
+          else
+            p.push(`<path d="${dVolta}" stroke="var(--t3)" stroke-width="1.5" fill="none"
+              stroke-dasharray="1 5" stroke-linecap="round" opacity=".55"/>`);
+          p.push(`<polygon points="${xPain + 106},${meio} ${xPain + 100},${meio - 6} ${xPain + 112},${meio - 6}"
             fill="var(--t3)" opacity=".55"/>`);
         }
       }
@@ -6948,32 +7045,93 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
             f'</span></div>{corpo}</div>')
 
     if alvo in paineis:
-        cad = cert_cadeia_painel(alvo, paineis[alvo], mont)
+        blocos_alvo = paineis[alvo]
+        # Pesquisar uma TAG que mora num laço sem caixa (deteccao de
+        # fumaca/gas, YST) resolvia pro PAINEL inteiro -- indice() nao tem
+        # como apontar pra caixa nenhuma nesses casos -- e a tela abria TODOS
+        # os lacos do painel, nao so o da TAG procurada. Aqui, com uma TAG
+        # especifica escolhida na busca, o recorte cai pro laco dela; buscar
+        # o PAINEL (sem TAG) continua abrindo todos, do jeito que ja era.
+        bloco_tag = None
+        if tag_sel:
+            bloco_tag = next((b for b in blocos_alvo
+                              if any(t["org"] == tag_sel for t in b["tags"])), None)
+            if bloco_tag is not None:
+                blocos_alvo = [bloco_tag]
+        cad = cert_cadeia_painel(alvo, blocos_alvo, mont)
         n_caixas = sum(1 for b in cad["blocos"] if not b["direto"])
         n_diretos = sum(1 for b in cad["blocos"] if b["direto"])
         partes = [f"{n_caixas} caixas"] if n_caixas else []
         if n_diretos:
             partes.append(f"{n_diretos} loop{'s' if n_diretos > 1 else ''} sem caixa")
-        titulo = (f"{alvo} → {' + '.join(partes) or '0 caixas'} → "
-                  f"{sum(b['inst'] for b in cad['blocos'])} instrumentos")
+        if bloco_tag is not None:
+            titulo_painel, sub = "Laço da TAG", (
+                f"{tag_sel} → laço {bloco_tag['nome']} → {bloco_tag['inst']} instrumentos")
+        else:
+            titulo_painel, sub = "Segmento do painel", (
+                f"{alvo} → {' + '.join(partes) or '0 caixas'} → "
+                f"{sum(b['inst'] for b in cad['blocos'])} instrumentos")
         render_html(f'<div class="gplan-panel-title" style="margin:4px 0 10px">'
-                    f'Segmento do painel <span class="gtbl-muted" '
-                    f'style="font-weight:500">{titulo}</span></div>')
+                    f'{titulo_painel} <span class="gtbl-muted" '
+                    f'style="font-weight:500">{sub}</span></div>')
         for bl in cad["blocos"]:
             for t in bl["tags"]:
                 t["ancora"] = ficha_anchor(t["org"]) if t["org"] in com_ficha else ""
         # A moldura nasce do tamanho da vista fechada -- uma faixa de 96 px por
         # caixa. Abrir cresce por dentro, e a moldura rola: dimensionar pelo
         # pior caso deixaria meia tela vazia enquanto tudo estivesse fechado.
-        alt_cena = 56 + 96 * len(cad["blocos"]) + 30
+        # O laço de uma TAG já nasce aberto (ver "abertos" no JS), então esse
+        # bloco sozinho entra com a altura de aberto, não a de fechado --
+        # senão a moldura vinha baixa e cortava o próprio laço que é o motivo
+        # da busca.
+        if bloco_tag is not None:
+            n_tags = len(bloco_tag["tags"])
+            fil = max(1, -(-n_tags // 12))
+            alt_cena = 56 + max(96, 22 + fil * 76 + 34 + (14 if n_tags > 1 else 0)) + 30
+        else:
+            alt_cena = 56 + 96 * len(cad["blocos"]) + 30
         larg = max(1100, 240 + 200 + 12 * 84 + 190)
         altura_p = int(min(700, max(360, 1320 * alt_cena / larg + 46)))
-        st.components.v1.html(cert_cena_html(cad, "", tema_ativo(), altura_p),
+        st.components.v1.html(cert_cena_html(cad, tag_sel or "", tema_ativo(), altura_p),
                               height=altura_p, scrolling=False)
         render_html('<div class="ct-leg"><span style="color:var(--text-3)">'
-                    "uma faixa por caixa: o cartão dela e, na mesma linha, os "
-                    "instrumentos que penduram nela · clique numa TAG para abrir a ficha "
-                    "· a barra do cartão é quanto da caixa já tem cabo pronto</span></div>")
+                    + ("mostrando só o laço desta TAG · pesquise o painel "
+                       f"{alvo} para ver todos os laços dele"
+                       if bloco_tag is not None else
+                       "uma faixa por caixa: o cartão dela e, na mesma linha, os "
+                       "instrumentos que penduram nela · clique numa TAG para abrir a ficha "
+                       "· a barra do cartão é quanto da caixa já tem cabo pronto")
+                    + "</span></div>")
+        # No laco (sem caixa), o desenho ja mostra o fio real entre os
+        # instrumentos -- mas so no hover. A tabela repete isso em texto: a
+        # metragem e o avanco de cada trecho, vindos da base completa de
+        # cabos, e nao so o resumo (cabo pronto/nao) que o cartao mostra.
+        if bloco_tag is not None:
+            circuitos_tag = cert_circuitos_por_tag(lanc, cache_key)
+            linhas_loop = []
+            for t in bloco_tag["tags"]:
+                cs = circuitos_tag.get(t["org"], [])
+                m = sum(c["m"] for c in cs)
+                m_real = sum(c["m_real"] for c in cs)
+                pct_t = round(m_real / m * 100, 1) if m else 0.0
+                status_t = ("Concluído" if pct_t >= 99.5 else
+                           "Em Andamento" if pct_t > 0 else
+                           (cs[0]["status"] if cs else "Não Iniciado"))
+                marca = "ok" if pct_t >= 99.5 else "warn" if pct_t > 0 else "crit"
+                atual = " sel" if t["org"] == tag_sel else ""
+                linhas_loop.append(
+                    f'<tr class="ct-lin{atual}"><td class="gtbl-mono">{t["org"]}</td>'
+                    f'<td><span class="gtbl-badge {marca}">{status_t}</span></td>'
+                    f'<td class="gtbl-mono">{br_pct(pct_t)}</td>'
+                    f'<td class="gtbl-mono">{br_num(int(m_real))} de {br_num(int(m))} m</td></tr>')
+            render_html(
+                '<div class="gplan-panel ct-painel">'
+                f'<div class="gplan-panel-title">Cabo do laço {bloco_tag["nome"]}'
+                '<span class="gtbl-muted" style="font-weight:500">circuito próprio de '
+                'cada instrumento até o próximo do laço, da base completa de cabos'
+                '</span></div><div class="ct-rolo"><table class="gtbl"><thead><tr>'
+                '<th>TAG</th><th>Cabo deste trecho</th><th>%</th><th>Metragem</th>'
+                f'</tr></thead><tbody>{"".join(linhas_loop)}</tbody></table></div></div>')
         # As fichas saem so pelo render_fichas: ele e o unico caminho que gera
         # tambem as de nivel para os degraus da trilha abrirem aqui. Uma
         # chamada direta a fichas_modais_html ficou esquecida aqui, gerando as
