@@ -5787,8 +5787,25 @@ function cena(c) {
             }
           }
         });
+        // um loop de verdade fecha nas duas pontas do painel -- nao e uma
+        // corrente que termina no vazio. A volta pontilhada do ultimo
+        // instrumento ate o proprio cartao do loop e so pra deixar isso
+        // visivel, do jeito que o diagrama de interligacao desenha (a central
+        // tem OUT e IN do mesmo loop, nao so uma saida).
+        if (b.direto && b.tags.length > 1) {
+          const ultimoI = b.tags.length - 1;
+          const clU = ultimoI % porLinha, flU = Math.floor(ultimoI / porLinha);
+          const xU = xInst + clU * passo + 36;
+          const yU = yCalha + flU * passoFil + 44;
+          const yVolta = yCalha + (fil - 1) * passoFil + 78;
+          p.push(`<path d="M${xU} ${yU + 20} V${yVolta} H${xCx + 75} V${y + 74}"
+            stroke="var(--t3)" stroke-width="1.5" fill="none" stroke-dasharray="1 5"
+            stroke-linecap="round" opacity=".55"/>
+            <polygon points="${xCx + 75},${y + 74} ${xCx + 69},${y + 66} ${xCx + 81},${y + 66}"
+            fill="var(--t3)" opacity=".55"/>`);
+        }
       }
-      y += aberto ? Math.max(96, 22 + fil * 76 + 34) : 96;
+      y += aberto ? Math.max(96, 22 + fil * 76 + 34 + (b.direto && b.tags.length > 1 ? 14 : 0)) : 96;
     });
     p.push(painel(xPain, 56, c.painel, false));
     if (espinha.length > 1)
