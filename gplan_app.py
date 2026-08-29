@@ -4876,6 +4876,84 @@ def cert_metro_real(linha) -> float:
     return round(previsto * cert_num(linha.get("PCT")) / 100, 1)
 
 
+# O que o pipeline escreve em DOC_REF nas ligações que ELE acrescentou para
+# fechar a topologia do desenho (_aplicar_correcoes_conhecidas). É o único
+# marcador confiável: duas dessas linhas reaproveitam de propósito o nome de
+# circuito do próprio desenho (C-YST-121166, C-YST-121188), então olhar o
+# nome não separa remendo de circuito de verdade.
+CERT_MARCA_REMENDO = "ausente na base de cabos"
+
+# Largura real da moldura do desenho nesta aba, medida no navegador. O SVG
+# escala pela largura, então é ela que decide a altura útil: com uma
+# estimativa maior que a real, a moldura ficava mais alta que o desenho e
+# sobrava um vão escuro embaixo.
+CERT_MOLDURA_PX = 970
+
+
+def cert_so_potencia(linhas_do_no: list, destino: str) -> bool:
+    """Se o único cabo entre este nó e esse destino é de potência.
+
+    O instrumento costuma ter dois cabos: o de sinal, que define a qual
+    painel ele pertence, e o de potência (-P), que vai ao painel de
+    alimentação. Só o primeiro responde "de quem é este instrumento".
+    """
+    irmaos = [x for x in linhas_do_no if str(x["DESTINO"]).strip() == destino]
+    return bool(irmaos) and all(
+        re.search(r"-P\d*$", str(x["CIRCUITO"]).strip(), re.I) for x in irmaos)
+
+
+def cert_metro_medido(linha) -> float:
+    """O metro que o campo mediu, SEM teto no previsto.
+
+    O cert_metro_real capa no previsto porque o avanço geral é "quanto do
+    previsto já foi feito" -- ali passar de 100% não quer dizer nada. Mas na
+    leitura de um cabo específico o metro a mais é fato: a estimativa é que
+    estava curta, e esconder isso apaga metade do que há para ver.
+    """
+    real = cert_num(linha.get("METROS_REAL"))
+    if real > 0:
+        return real
+    return round(cert_num(linha.get("METROS")) * cert_num(linha.get("PCT")) / 100, 1)
+
+
+def cert_status_conjunto(circuitos: list) -> str:
+    """O status de um conjunto de circuitos, tirado do que a base informa.
+
+    Status e metragem são fatos independentes, e os dois importam:
+
+    * um cabo pode estar **Concluído com menos metro que o previsto** -- foi
+      previsto mais do que a obra precisou, e isso não o torna inacabado;
+    * um cabo pode ter **mais metro que o previsto e seguir Em Andamento** --
+      a estimativa é que estava curta, e o serviço não acabou.
+
+    Deduzir o status do percentual de metragem (o que esta aba fazia) apagava
+    os dois casos: o primeiro virava "Em Andamento" por engano, e o segundo
+    virava "Concluído" antes da hora. Aqui o status vem da coluna STATUS, e a
+    metragem é mostrada ao lado, sem um decidir pelo outro.
+
+    Entre vários circuitos vale o mais atrasado: a TAG não está pronta porque
+    um dos cabos dela ficou pronto.
+    """
+    if not circuitos:
+        return "sem circuito"
+    vistos = [str(c["STATUS"]).strip() for c in circuitos]
+    for pior in ("Não Iniciado", "Em Andamento"):
+        if pior in vistos:
+            return pior
+    return vistos[0] or "sem circuito"
+
+
+def cert_remendo(linha) -> bool:
+    """Se a linha é uma ligação que nós acrescentamos, não um cabo medido.
+
+    Ela existe só para o grafo fechar onde a planilha ainda não tem o
+    circuito, e nasce sempre "Não Iniciado / 0 m". Contada como cabo pendente
+    de verdade, ela reprova o laço inteiro -- era o que fazia 18 TAGs com o
+    cabo real 100% lançado aparecerem como "Bloqueado".
+    """
+    return CERT_MARCA_REMENDO in str(linha.get("DOC_REF") or "")
+
+
 def cert_txt(serie: pd.Series) -> pd.Series:
     """Coluna de texto sem nulo, em qualquer versão do pandas.
 
@@ -5208,6 +5286,10 @@ def cert_paineis(lanc: pd.DataFrame, cache_key: str) -> dict:
         return {}
     saida: dict[str, list] = {}
     entrada: dict[str, list] = {}
+    # Índice por nome de circuito: o cabo de um instrumento leva o nome dele
+    # (C-YST-X), e é por aqui que ele é achado -- as colunas ORIGEM/DESTINO
+    # gravam a partir da ponta de campo e não servem para isso.
+    por_circ: dict[str, list] = {}
     for r in lanc.to_dict("records"):
         org = str(r["ORIGEM"]).strip()
         dst = str(r["DESTINO"]).strip()
@@ -5215,6 +5297,7 @@ def cert_paineis(lanc: pd.DataFrame, cache_key: str) -> dict:
             saida.setdefault(org, []).append(r)
         if dst not in ("", "nan"):
             entrada.setdefault(dst, []).append(r)
+        por_circ.setdefault(str(r["CIRCUITO"]).strip(), []).append(r)
 
     def sobe(no):
         """O caminho de um nó até o painel, do primeiro passo ao último.
@@ -5276,12 +5359,36 @@ def cert_paineis(lanc: pd.DataFrame, cache_key: str) -> dict:
                                     "caixas": set(), "inst": 0, "cabo_ok": 0, "tags": [],
                                     "direto": True})
         b["inst"] += 1
-        pronto = all(cert_num(c["PCT"]) >= 99.5 for _, c in caminho)
-        if pronto:
+        # o cartao mostra o cabo DO INSTRUMENTO (o circuito proprio dele na
+        # planilha), nao a cadeia inteira ate a alimentacao do painel: pintar
+        # de vermelho um instrumento cujo cabo esta Concluido, porque falta o
+        # cabo do painel muitos saltos acima, e dizer o oposto do que a
+        # planilha de cabos diz. A cadeia continua no "cabo_cadeia", e e ela
+        # que a coluna Certificacao e o cert_panorama usam.
+        # o cabo do instrumento e o circuito que leva o NOME dele (C-YST-X),
+        # quando existe: e assim que o desenho identifica o cabo de cada
+        # detector, e e a leitura que bate com o campo
+        proprios = [c for c in circuitos if not cert_remendo(c)] or circuitos
+        # procurado na base INTEIRA, não só nas linhas onde esta TAG é ponta:
+        # o último ponto do laço só recebe cabo, e limitar a busca às pontas
+        # dele devolvia metragem zero para um cabo que está lançado
+        nomeado = [c for c in por_circ.get(f"C-YST-{ponta.split('-')[-1]}", [])
+                   if not cert_remendo(c)]
+        if nomeado:
+            proprios = nomeado
+        pronto_tag = all(cert_num(c["PCT"]) >= 99.5 for c in proprios)
+        pronto_cadeia = all(cert_num(c["PCT"]) >= 99.5 for _, c in caminho)
+        if pronto_tag:
             b["cabo_ok"] += 1
-        b["tags"].append({"org": ponta, "cabo": pronto,
-                          "status": str(circuitos[0]["STATUS"]).strip(),
-                          "pct": round(cert_num(circuitos[0]["PCT"]), 1),
+        m = sum(cert_num(c["METROS"]) for c in proprios)
+        m_real = sum(cert_metro_medido(c) for c in proprios)
+        b["tags"].append({"org": ponta, "cabo": pronto_tag,
+                          "cabo_cadeia": pronto_cadeia,
+                          # status da base, metragem à parte -- ver
+                          # cert_status_conjunto
+                          "status": cert_status_conjunto(proprios),
+                          "pct": round(m_real / m * 100, 1) if m else 0.0,
+                          "m": m, "m_real": m_real,
                           # distancia ate o painel/caixa -- e o que da a ordem
                           # fisica do laco (ver ordem_tags mais abaixo)
                           "prof": len(caminho)})
@@ -5344,11 +5451,37 @@ def cert_paineis(lanc: pd.DataFrame, cache_key: str) -> dict:
             if t_org in achados:
                 continue
             linhas = saida.get(t_org) or entrada.get(t_org) or []
+            # O remendo de topologia e um preenchimento so pra fechar o
+            # grafo -- nunca o status de verdade da TAG. Sem isto,
+            # YST-121111 (que so recebe: o circuito de painel direto
+            # C-YST-121111, Concluido, E o remendo 112->111, sempre "Nao
+            # Iniciado" por definicao) tinha o remendo decidindo o status,
+            # trocando "Concluido" por "pendente" so por causa de qual das
+            # duas linhas veio primeiro na planilha.
+            reais = [rr for rr in linhas if not cert_remendo(rr)]
+            if reais:
+                linhas = reais
+            # O cabo do instrumento e o circuito com o NOME dele (C-YST-X), e
+            # ele e procurado na base INTEIRA -- nao so entre as linhas onde
+            # esta TAG aparece como ponta. O ultimo ponto do laco so recebe
+            # cabo, entao procurar pelas pontas dele nao achava nada e a
+            # tabela mostrava "Concluido, 0 de 0 m": status certo com
+            # metragem zerada, que e pior que erro, e contradicao na mesma
+            # linha.
+            proprio = [rr for rr in por_circ.get(f"C-YST-{t_org.split('-')[-1]}", [])
+                       if not cert_remendo(rr)]
+            if proprio:
+                linhas = proprio
+            pronto_t = bool(linhas) and all(cert_num(rr["PCT"]) >= 99.5 for rr in linhas)
+            m_t = sum(cert_num(rr["METROS"]) for rr in linhas)
+            m_real_t = sum(cert_metro_medido(rr) for rr in linhas)
             achados[t_org] = {
                 "org": t_org,
-                "cabo": bool(linhas) and all(cert_num(rr["PCT"]) >= 99.5 for rr in linhas),
-                "status": str(linhas[0]["STATUS"]).strip() if linhas else "—",
-                "pct": round(cert_num(linhas[0]["PCT"]), 1) if linhas else 0.0,
+                "cabo": pronto_t,
+                "cabo_cadeia": pronto_t,
+                "status": cert_status_conjunto(linhas),
+                "pct": round(m_real_t / m_t * 100, 1) if m_t else 0.0,
+                "m": m_t, "m_real": m_real_t,
                 "prof": 0,
             }
         if not achados:
@@ -5374,6 +5507,28 @@ def cert_paineis(lanc: pd.DataFrame, cache_key: str) -> dict:
                 return r
         return None
 
+    def circuito_do_trecho(a, b, usados):
+        """O cabo de um trecho quando a linha da base traz a outra ponta.
+
+        A base nomeia o circuito pela ponta de DESTINO -- conferido em 88 de
+        88 circuitos C-YST-*. Então o cabo do trecho A–B chama-se
+        C-YST-<A> ou C-YST-<B>. Em 9 trechos dos laços a linha existe,
+        está Concluída, e só a ORIGEM aponta o vizinho errado: o cabo está
+        lançado e o desenho mostrava "não iniciado" por causa do remendo.
+
+        Só entra circuito LIVRE -- que nenhum outro trecho deste laço já usa.
+        Sem essa trava, o cabo do trecho vizinho seria contado duas vezes:
+        em LOOP1 o C-YST-121178 é o cabo de 121177–121178, e aceitá-lo
+        também em 121102–121178 somaria o mesmo metro nos dois.
+        """
+        for cand in (f"C-YST-{b.split('-')[-1]}", f"C-YST-{a.split('-')[-1]}"):
+            if cand in usados:
+                continue
+            achadas = por_circ.get(cand)
+            if achadas:
+                return achadas[0]
+        return None
+
     def com_fiacao(v, painel):
         """A ordem final, com o fio real (da base de cabos) até o próximo
         instrumento do laço -- e até o painel, no último. Sem isto o desenho
@@ -5385,11 +5540,45 @@ def cert_paineis(lanc: pd.DataFrame, cache_key: str) -> dict:
         if not (v.get("direto") and len(ordenados) > 1):
             return ordenados, None
         ordenados = [dict(t) for t in ordenados]
+        fixa = bool(v.get("ordem_fixa"))
+        if fixa:
+            # REGRA DO DESENHO: o cabo de um instrumento leva o NOME DELE --
+            # o cabo que sai do YST-121159 é o C-YST-121159, e é ele que vai
+            # ao próximo ponto do laço (ou ao painel, no último).
+            #
+            # As colunas ORIGEM/DESTINO não montam o laço: a base grava a
+            # partir da ponta de campo, então o sentido inverte de linha para
+            # linha e a ponta gravada nem sempre é a vizinha do desenho. Ler
+            # o laço por elas foi o que fez o trecho até o painel ficar sem
+            # metragem e sem avanço, e o que me levou a criar remendos em 0%
+            # por cima de cabo lançado. Pelo nome do circuito, as 80 TAGs dos
+            # laços têm cabo próprio e todas estão Concluídas -- que é o que
+            # o campo confirma.
+            for t in ordenados:
+                achadas = por_circ.get(f"C-YST-{t['org'].split('-')[-1]}")
+                t["circ_prox"] = _cert_circuito(achadas[0], {}) if achadas else None
+            ult = por_circ.get(f"C-YST-{ordenados[-1]['org'].split('-')[-1]}")
+            return ordenados, (_cert_circuito(ult[0], {}) if ult else None)
+        # duas passadas: a primeira anota o que a base já resolve e reserva
+        # esses circuitos; só depois os vãos procuram cabo livre
+        trechos, usados = [], set()
         for i, t in enumerate(ordenados):
             prox = ordenados[i + 1]["org"] if i + 1 < len(ordenados) else painel
             r = circ_entre(t["org"], prox)
+            if r is not None and not cert_remendo(r):
+                usados.add(str(r["CIRCUITO"]).strip())
+            trechos.append((t, prox, r))
+        for t, prox, r in trechos:
+            if fixa and (r is None or cert_remendo(r)):
+                alt = circuito_do_trecho(t["org"], prox, usados)
+                if alt is not None:
+                    usados.add(str(alt["CIRCUITO"]).strip())
+                    r = alt
             t["circ_prox"] = _cert_circuito(r, {}) if r is not None else None
         r_saida = circ_entre(ordenados[-1]["org"], painel)
+        if fixa and (r_saida is None or cert_remendo(r_saida)):
+            alt = circuito_do_trecho(ordenados[-1]["org"], painel, usados)
+            r_saida = alt if alt is not None else r_saida
         return ordenados, (_cert_circuito(r_saida, {}) if r_saida is not None else None)
 
     saida_final: dict[str, list] = {}
@@ -5426,6 +5615,13 @@ CERT_LOOPS_YST: dict[str, tuple[str, list[str]]] = {
     "LOOP6": ("PN-12-237", ["YST-121129", "YST-121130", "YST-121131", "YST-121132",
                            "YST-121133", "YST-121134", "YST-121135", "YST-121136",
                            "YST-121137", "YST-121138"]),
+    # LOOP8 tem formato proprio: passa por um dispositivo (CBZ-12-001, o
+    # BZ-500 do desenho) no meio do percurso, entre YST-121160 e YST-121145.
+    # Fica aqui pelo mesmo motivo dos outros -- a base cruza este laco com o
+    # LOOP9 (121147 -> 121157 e 121156 -> 121144), e sem a identidade fixa os
+    # dois apareciam grudados num bloco so. Laco nenhum e junto com outro.
+    "LOOP8": ("PN-12-238", ["YST-121189", "YST-121190", "YST-121191", "YST-121160",
+                           "YST-121145", "YST-121146", "YST-121147", "YST-121144"]),
     "LOOP9": ("PN-12-238", ["YST-121149", "YST-121150", "YST-121151", "YST-121152",
                            "YST-121153", "YST-121155", "YST-121156", "YST-121157",
                            "YST-121158", "YST-121159"]),
@@ -5435,13 +5631,56 @@ CERT_LOOPS_YST: dict[str, tuple[str, list[str]]] = {
 }
 
 
-def cert_cadeia_painel(painel: str, blocos: list, mont: dict) -> dict:
-    """A cena do painel: ele e as caixas de primeiro nível dele."""
+@st.cache_data(show_spinner=False, max_entries=3)
+def cert_alimentacao_painel(lanc: pd.DataFrame, painel: str, cache_key: str) -> list:
+    """Os circuitos que alimentam um painel, na mesma regra do cert_panorama.
+
+    Primeiro a ELÉTRICA que chega nele; na falta dela, o circuito "-P" que
+    sai dele para outro painel ou dispositivo -- em PN-12-236/237 a
+    alimentação vem assim, em INSTRUMENTAÇÃO, marcada só pelo sufixo.
+    """
+    if lanc.empty or not painel:
+        return []
+    linhas = lanc.to_dict("records")
+    alim = [r for r in linhas
+            if str(r["DESTINO"]).strip() == painel
+            and str(r["DISCIPLINA"]).strip() == "ELÉTRICA"]
+    if not alim:
+        no, vistos = painel, set()
+        for _ in range(15):
+            if no in vistos:
+                break
+            vistos.add(no)
+            pot = [r for r in linhas if str(r["ORIGEM"]).strip() == no
+                   and re.search(r"-P\d*$", str(r["CIRCUITO"]).strip(), re.I)]
+            if not pot:
+                break
+            alim = pot
+            no = str(pot[0]["DESTINO"]).strip()
+    return [_cert_circuito(r, {}) for r in alim]
+
+
+def cert_cadeia_painel(painel: str, blocos: list, mont: dict,
+                       alimentacao: list | None = None) -> dict:
+    """A cena do painel: ele, a alimentação dele e as caixas de primeiro nível.
+
+    A alimentação entra no desenho porque é ela que costuma travar tudo: no
+    laço YST todos os trechos estão lançados e mesmo assim a certificação
+    reprova, porque o cabo que alimenta o painel (C-PN-12-236-P → PN-12102)
+    está em 0%. Sem ele desenhado, a tela mostrava só trecho verde e escrevia
+    "Bloqueado" do lado, sem nada vermelho que explicasse -- o desenho dizia
+    uma coisa e a tabela outra.
+    """
     return {"tipo": "painel", "caixa": painel, "painel": painel,
             "painel_indef": False, "mont": mont.get(painel, {}).get("mont", ""),
-            "eletrica": [], "tronco": [], "segmentos": [], "ligacoes": [],
+            "eletrica": alimentacao or [], "tronco": [], "segmentos": [],
+            "ligacoes": [],
             "ramais": [], "blocos": [
-                {**b, "mont": mont.get(b["nome"], {}).get("mont", ""),
+                # o laço não é TAG: não se monta, e por isso não recebe
+                # montagem nenhuma. Só a caixa de junção, que é TAG de
+                # verdade e tem instalação própria, é consultada aqui.
+                {**b, "mont": ("" if b.get("ordem_fixa")
+                               else mont.get(b["nome"], {}).get("mont", "")),
                  "tags": [{**t, "mont": mont.get(t["org"], {}).get("mont", "")}
                           for t in b["tags"]]}
                 for b in blocos]}
@@ -5779,8 +6018,14 @@ function cartaoCaixa(x, y, b, aberto) {
   const w = 150, h = 74;
   const pct = b.inst ? b.cabo_ok / b.inst * 100 : 0;
   const tom = !b.inst ? 'roxo' : pct >= 99.5 ? 'ok' : pct > 0 ? 'and' : 'nao';
+  // O laco NAO e uma TAG: nao tem montagem, nao esta na base de TAGs e nao
+  // se instala. Tratado como caixa, ele saia roxo com "sem correspondente na
+  // base de TAGs" -- cobrando a montagem de uma coisa que nao se monta. A
+  // borda dele segue o cabo, que e o que o laco tem de proprio.
+  const eLaco = !!b.ordem_fixa;
+  const corBorda = eLaco ? tom : corMont(b.mont);
   const dica = cab(b.direto ? 'sem caixa · loop direto no painel' : 'caixa de junção', b.nome) +
-    dl('montagem', nomeMont(b.mont), corMont(b.mont)) +
+    (eLaco ? '' : dl('montagem', nomeMont(b.mont), corMont(b.mont))) +
     dl('instrumentos', b.inst) +
     dl('com cabo pronto', b.inst ? `${b.cabo_ok} · ${br(pct, 0)}%` : '—', tom) +
     (b.caixas > 1 ? dl('caixas em série', b.caixas) : '') +
@@ -5796,9 +6041,9 @@ function cartaoCaixa(x, y, b, aberto) {
         stroke="var(--t2)" stroke-width="2" stroke-linecap="round"/></g>` : '';
   return `<g class="bloco" ${dd(dica)}>
     <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10"
-      fill="var(--metal2)" stroke="var(--${corMont(b.mont)})" stroke-width="1.6"
+      fill="var(--metal2)" stroke="var(--${corBorda})" stroke-width="1.6"
       stroke-opacity="${aberto ? 1 : .7}"/>
-    <rect x="${x}" y="${y}" width="${w}" height="4" rx="2" fill="var(--${corMont(b.mont)})"/>
+    <rect x="${x}" y="${y}" width="${w}" height="4" rx="2" fill="var(--${corBorda})"/>
     <text x="${x + 11}" y="${y + 26}" fill="var(--t1)" font-size="11.5" font-weight="700"
       font-family="ui-monospace,Consolas,monospace">${esc(b.nome).slice(0, 16)}</text>
     <text x="${x + 11}" y="${y + 44}" fill="var(--t3)" font-size="9.5">${b.inst}
@@ -5815,8 +6060,15 @@ function cartaoCaixa(x, y, b, aberto) {
 // tag. O detalhe é da vista da caixa -- aqui o que importa é enxergar o conjunto.
 function cartaoMini(x, y, t) {
   const cm = corMont(t.mont), cc = t.cabo ? 'ok' : t.pct > 0 ? 'and' : 'nao';
+  // a cor e o cabo DO INSTRUMENTO; a cadeia inteira (o que a certificacao
+  // exige) entra como linha propria, pra nao dizer que o cabo esta faltando
+  // quando o que falta e a alimentacao do painel la em cima
   const dica = cab('instrumento', t.org) +
-    dl('cabo', t.status + (t.pct > 0 && t.pct < 100 ? ' · ' + br(t.pct, 1) + '%' : ''), cc) +
+    dl('cabo do instrumento',
+       t.status + (t.pct > 0 && t.pct < 100 ? ' · ' + br(t.pct, 1) + '%' : ''), cc) +
+    (t.m ? dl('metragem', br(t.m_real) + ' de ' + br(t.m) + ' m') : '') +
+    (t.cabo && t.cabo_cadeia === false
+      ? dl('certificação', 'presa antes deste instrumento', 'and') : '') +
     dl('montagem', nomeMont(t.mont), cm) +
     "<div class='solta'>clique para abrir a ficha da TAG</div>";
   return `<g class="inst" data-ficha="${esc(t.ancora || '')}" ${dd(dica)}>
@@ -5918,11 +6170,38 @@ function cena(c) {
     // exigia seguir o fio com o olho.
     const B = c.blocos, xCx = xPain + 240, xInst = xCx + 200, passo = 84;
     const porLinha = 12;
-    let y = 56;
+    // a faixa da alimentacao ocupa o topo; sem a folga, o primeiro bloco
+    // subia por cima dos fios dela
+    const topo = 56 + Math.max(0, (E.length - 1)) * 14;
+    let y = topo;
     const espinha = [];
     B.forEach(b => {
       const aberto = abertos.has(b.nome);
-      const fil = aberto ? Math.max(1, Math.ceil(b.tags.length / porLinha)) : 0;
+      // Um loop YST com identidade fixa (CERT_LOOPS_YST) sempre desenha em
+      // DUAS fileiras no diagrama de interligacao de verdade, dobrando bem
+      // no meio -- nao numa linha so que so cresce pro lado. Uma caixa comum
+      // continua na grade generica (porLinha), onde a ordem das colunas nao
+      // significa nada.
+      const fixa = b.ordem_fixa && b.tags.length > 3;
+      const metadeA = fixa ? Math.floor(b.tags.length / 2) : b.tags.length;
+      const nB = b.tags.length - metadeA;
+      const fil = aberto ? (fixa ? 2 : Math.max(1, Math.ceil(b.tags.length / porLinha))) : 0;
+      // SERPENTINA, como no diagrama: a 1a fileira corre para a direita e a
+      // 2a volta para a esquerda. Com as duas no mesmo sentido, a dobra tinha
+      // de atravessar o desenho inteiro na diagonal, cortando os cartoes --
+      // com a volta, ela vira um trecho curto na ponta, que e o que o desenho
+      // mostra.
+      const colDe = k => !fixa ? k % porLinha
+                       : k < metadeA ? k : (nB - 1) - (k - metadeA);
+      const filDe = k => fixa ? (k < metadeA ? 0 : 1) : Math.floor(k / porLinha);
+      // a fileira de baixo corre ao contrario: a seta e o fio saem pela
+      // esquerda do cartao, nao pela direita
+      const invertida = k => fixa && k >= metadeA;
+      // No laco o cabo entre instrumentos E a informacao -- no diagrama ele
+      // corre solto, com o nome do circuito escrito em cima. Com o passo de
+      // 84 os cartoes (68 de largura) ficavam a 16 px um do outro e o cabo
+      // virava um toco de 9 px, sem espaco para o nome: amontoado e mudo.
+      const pas = fixa ? 168 : passo;
       const meio = y + 37;
       espinha.push(meio);
       p.push(fio(zigue(xPain + 106, meio, xCx, meio, 6), b.tronco, 2.6,
@@ -5933,42 +6212,83 @@ function cena(c) {
         // altura deles, o cabo de um atravessava todos os anteriores -- é o
         // mesmo defeito que a vista da caixa já tinha tido.
         const yCalha = y + 22, passoFil = 76;
-        for (let f = 0; f < fil; f++) {
-          const fatia = b.tags.slice(f * porLinha, (f + 1) * porLinha);
-          p.push(calha(`M${xInst - 14} ${yCalha + f * passoFil}
-            H${xInst + (fatia.length - 1) * passo + 36}`, fatia, 2.4));
+        // No laco YST a ligacao e TAG -> TAG, como no desenho de
+        // interligacao: a linha sai de um instrumento e entra no seguinte, na
+        // mesma altura. A calha por cima com uma descida para cada cartao e
+        // uma leitura de barramento -- certa para uma caixa de juncao, onde
+        // os ramais sao independentes, e errada para o laco, onde o cabo
+        // passa de um instrumento ao outro em serie.
+        if (!fixa) {
+          for (let f = 0; f < fil; f++) {
+            const fatia = b.tags.slice(f * porLinha, (f + 1) * porLinha);
+            p.push(calha(`M${xInst - 14} ${yCalha + f * passoFil}
+              H${xInst + (fatia.length - 1) * pas + 36}`, fatia, 2.4));
+          }
+          if (fil > 1)
+            p.push(calha(`M${xInst - 14} ${yCalha} V${yCalha + (fil - 1) * passoFil}`,
+                         b.tags, 2.4));
+          p.push(calha(`M${xCx + 150} ${meio} H${xInst - 14} V${yCalha}`, b.tags, 2.4));
+        } else {
+          // a entrada do painel chega na primeira TAG da fileira de cima,
+          // num percurso continuo, sem barramento no meio
+          const xPri = xInst + colDe(0) * pas + 36, yPri = yCalha + 44;
+          p.push(`<path d="M${xCx + 150} ${meio} H${xInst - 30} V${yPri} H${xPri - 34}"
+            stroke="var(--${b.tags[0].cabo ? 'ok' : b.tags[0].pct > 0 ? 'and' : 'nao'})"
+            stroke-width="2.2" fill="none" stroke-linejoin="round"/>`);
         }
-        if (fil > 1)
-          p.push(calha(`M${xInst - 14} ${yCalha} V${yCalha + (fil - 1) * passoFil}`,
-                       b.tags, 2.4));
-        p.push(calha(`M${xCx + 150} ${meio} H${xInst - 14} V${yCalha}`, b.tags, 2.4));
         b.tags.forEach((t, k) => {
-          const cl = k % porLinha, fl = Math.floor(k / porLinha);
-          const xi = xInst + cl * passo + 36, yr = yCalha + fl * passoFil;
+          const cl = colDe(k), fl = filDe(k);
+          const xi = xInst + cl * pas + 36, yr = yCalha + fl * passoFil;
           const yi = yr + 44;
-          p.push(`<path d="M${xi} ${yr} V${yi - 20}" stroke="var(--${
-            t.cabo ? 'ok' : t.pct > 0 ? 'and' : 'nao'})" stroke-width="2"
-            fill="none" stroke-linecap="round"/>`);
+          if (!fixa)
+            p.push(`<path d="M${xi} ${yr} V${yi - 20}" stroke="var(--${
+              t.cabo ? 'ok' : t.pct > 0 ? 'and' : 'nao'})" stroke-width="2"
+              fill="none" stroke-linecap="round"/>`);
           p.push(cartaoMini(xi, yi, t));
           xFim = Math.max(xFim, xi + 46);
           // num loop de instrumento a instrumento (sem caixa), o fio entre um
           // cartao e o seguinte e o circuito real da base de cabos -- mesma
           // metragem, status e percentual que a busca por caixa mostra, so
           // que na ordem fisica do diagrama de interligacao (A -> B -> ...),
-          // nao alfabetica. Sem circuito cadastrado nesse trecho, fica so a
-          // seta indicando a ordem, sem inventar dado.
+          // nao alfabetica.
+          //
+          // A ligacao e so a linha, como no desenho tecnico: sai da borda de
+          // um instrumento e entra na borda do seguinte. Sem seta -- o
+          // desenho de interligacao nao tem nenhuma, e a ordem ja esta na
+          // sequencia dos cartoes.
           if (b.direto && k < b.tags.length - 1) {
-            const flProx = Math.floor((k + 1) / porLinha);
+            const flProx = filDe(k + 1);
+            const xProx = xInst + colDe(k + 1) * pas + 36;
             if (flProx === fl) {
-              const xProx = xInst + ((k + 1) % porLinha) * passo + 36;
+              // mesma fileira: a linha liga as duas bordas, na mesma altura
+              const dir = xProx > xi ? 1 : -1;
+              const de = xi + 34 * dir, ate = xProx - 34 * dir;
               if (t.circ_prox)
-                p.push(fio(`M${xi + 34} ${yi} H${xProx - 41}`, t.circ_prox, 2.2,
+                p.push(fio(`M${de} ${yi} H${ate}`, t.circ_prox, 2.2,
                            'cabo · ' + esc(t.org) + ' → próximo do laço'));
               else
-                p.push(`<path d="M${xi + 34} ${yi} H${xProx - 41}" stroke="var(--t3)"
+                p.push(`<path d="M${de} ${yi} H${ate}" stroke="var(--t3)"
                   stroke-width="1.4" fill="none" opacity=".6"/>`);
-              p.push(`<polygon points="${xProx - 34},${yi} ${xProx - 41},${yi - 4} ${xProx - 41},${yi + 4}"
-                fill="var(--t3)" opacity=".6"/>`);
+              // o nome do circuito em cima do trecho, como no diagrama de
+              // interligacao -- e o que permite conferir a tela contra a
+              // planilha sem passar o mouse cabo por cabo
+              if (fixa && t.circ_prox && t.circ_prox.id)
+                p.push(`<text x="${(de + ate) / 2}" y="${yi - 8}" text-anchor="middle"
+                  class="rot-circ">${esc(t.circ_prox.id).slice(0, 16)}</text>`);
+            } else {
+              // A DOBRA: fim da fileira de cima, comeco da de baixo. Como a
+              // de baixo volta no sentido contrario, as duas pontas ficam na
+              // mesma coluna -- a dobra e um trecho continuo descendo pela
+              // lateral, igual ao desenho, e nao uma diagonal cruzando tudo.
+              const yProx = yCalha + flProx * passoFil + 44;
+              const xLado = Math.max(xi, xProx) + 52;
+              const dDobra = `M${xi + 34} ${yi} H${xLado} V${yProx} H${xProx + 34}`;
+              if (t.circ_prox)
+                p.push(fio(dDobra, t.circ_prox, 2.2,
+                           'cabo · ' + esc(t.org) + ' → próximo do laço (dobra)'));
+              else
+                p.push(`<path d="${dDobra}" stroke="var(--t3)" stroke-width="1.4"
+                  fill="none" opacity=".6"/>`);
             }
           }
         });
@@ -5979,31 +6299,55 @@ function cena(c) {
         // tem OUT e IN do mesmo loop, nao so uma saida).
         if (b.direto && b.tags.length > 1) {
           const ultimoI = b.tags.length - 1;
-          const clU = ultimoI % porLinha, flU = Math.floor(ultimoI / porLinha);
-          const xU = xInst + clU * passo + 36;
+          const clU = colDe(ultimoI), flU = filDe(ultimoI);
+          const xU = xInst + clU * pas + 36;
           const yU = yCalha + flU * passoFil + 44;
           // a volta vai ate o proprio eixo do painel (mesmo x da espinha
           // que junta as entradas), nao so ate o cartao do loop -- e o que
           // deixa visivel que o laco ENTRA e SAI do painel, os dois lados
           // que o desenho de interligacao mostra (terminais OUT e IN da
           // mesma central).
+          // no laco a volta sai pela BORDA do ultimo instrumento e corre por
+          // baixo ate o eixo do painel: percurso continuo, do mesmo jeito que
+          // o desenho fecha o laco. Sem seta -- o desenho tecnico nao tem.
           const yVolta = yCalha + (fil - 1) * passoFil + 78;
-          const dVolta = `M${xU} ${yU + 20} V${yVolta} H${xPain + 106} V${meio}`;
+          const dVolta = fixa
+            ? `M${xU - 34} ${yU} H${xInst - 30} V${yVolta} H${xPain + 106} V${meio}`
+            : `M${xU} ${yU + 20} V${yVolta} H${xPain + 106} V${meio}`;
           if (b.circ_saida)
             p.push(fio(dVolta, b.circ_saida, 2, 'cabo · laço → painel'));
           else
             p.push(`<path d="${dVolta}" stroke="var(--t3)" stroke-width="1.5" fill="none"
               stroke-dasharray="1 5" stroke-linecap="round" opacity=".55"/>`);
-          p.push(`<polygon points="${xPain + 106},${meio} ${xPain + 100},${meio - 6} ${xPain + 112},${meio - 6}"
-            fill="var(--t3)" opacity=".55"/>`);
+          if (!fixa)
+            p.push(`<polygon points="${xPain + 106},${meio} ${xPain + 100},${meio - 6} ${xPain + 112},${meio - 6}"
+              fill="var(--t3)" opacity=".55"/>`);
         }
       }
       y += aberto ? Math.max(96, 22 + fil * 76 + 34 + (b.direto && b.tags.length > 1 ? 14 : 0)) : 96;
     });
-    p.push(painel(xPain, 56, c.painel, false));
+    p.push(painel(xPain, topo, c.painel, false));
     if (espinha.length > 1)
       p.push(`<path d="M${xPain + 106} ${espinha[0]} V${espinha[espinha.length - 1]}"
         stroke="rgba(var(--rgb-tinta),.16)" stroke-width="3" fill="none"/>`);
+    // A alimentacao do painel entra no desenho: e ela que trava o laco YST
+    // inteiro (todos os trechos lancados e mesmo assim "Bloqueado"). Sem
+    // desenhar, o vermelho ficava so na palavra, sem trecho vermelho nenhum.
+    if (E.length) {
+      E.forEach((e, i) => {
+        const yA = 26 + i * 14;
+        p.push(fio(`M40 ${yA} H${xPain + 48} V${topo}`, e, 2.4, 'alimentação do painel'));
+      });
+      const travada = E.some(e => e.pct < 99.5);
+      p.push(`<text x="40" y="16" fill="var(--${travada ? 'nao' : 'ok'})" font-size="9"
+        font-weight="800" letter-spacing=".7">ALIMENTAÇÃO DO PAINEL${
+        travada ? ' · PENDENTE' : ''}</text>`);
+    } else {
+      p.push(`<path d="M40 26 H${xPain + 48} V${topo}" stroke="var(--roxo)"
+        stroke-width="2" fill="none" stroke-dasharray="2 6" opacity=".55"/>`);
+      p.push(`<text x="40" y="16" fill="var(--roxo)" font-size="9" font-weight="800"
+        letter-spacing=".7">ALIMENTAÇÃO · SEM CIRCUITO CADASTRADO</text>`);
+    }
     return `<svg class="cena" viewBox="0 0 ${Math.max(xFim + 40, 1100)} ${y + 30}" role="img"
       aria-label="Segmento do painel ${esc(String(c.painel))}: ${B.length} bloco${B.length === 1 ? '' : 's'} e
       ${B.reduce((a, b) => a + b.inst, 0)} instrumentos">${p.join('')}</svg>`;
@@ -6150,7 +6494,13 @@ function redesenhar() {
   aplicarZoom();
 }
 redesenhar();
-if (D.tag) requestAnimationFrame(() => focar(1.6));
+// Aproximar na TAG faz sentido numa caixa de sessenta instrumentos, onde
+// achar o cartao no meio da grade e o problema. No laco YST, que ja vem
+// sozinho na tela, os 160% cortavam o desenho: aparecia meia fileira e o
+// resto ficava fora da moldura. Ali a vista inteira e o que interessa --
+// o laco so diz alguma coisa visto por completo.
+if (D.tag && !(D.cadeia.tipo === 'painel' && D.cadeia.blocos.length === 1))
+  requestAnimationFrame(() => focar(1.6));
 
 // A ficha da TAG e um modal da pagina de fora. Trocar a ancora seria o caminho
 // natural, mas o iframe do Streamlit e sandbox sem allow-top-navigation: mexer
@@ -6315,7 +6665,13 @@ body{{background:var(--bg);color:var(--t1);overflow:hidden;
 .zb.tx{{font-size:10px;letter-spacing:.4px}}
 .zn{{font-size:11px;color:var(--t3);min-width:42px;text-align:center;font-weight:600}}
 /* a cena rola dentro da moldura; sem isso o zoom empurraria a página inteira */
-.zona{{overflow:auto;height:calc(100vh - 43px);cursor:grab;overscroll-behavior:contain}}
+/* o desenho fica centrado na moldura: quando a cena e mais baixa que o
+   espaco (laco largo e raso, por exemplo), a sobra se divide em cima e
+   embaixo em vez de virar um vao escuro so no pe. "safe" para que, quando a
+   cena for MAIOR que a moldura, ela continue rolando do inicio em vez de
+   ficar com o topo cortado. */
+.zona{{overflow:auto;height:calc(100vh - 43px);cursor:grab;overscroll-behavior:contain;
+  display:flex;flex-direction:column;justify-content:safe center}}
 .zona.arrasta{{cursor:grabbing}}
 svg.cena{{width:100%;height:auto;display:block}}
 .eq-face{{fill:var(--metal)}}.eq-topo{{fill:var(--metal3)}}.eq-lado{{fill:var(--metal2)}}
@@ -6332,6 +6688,10 @@ svg.cena{{width:100%;height:auto;display:block}}
 /* Segmento e malha usam a mesma fonte: sao a mesma classe de informacao, e
    duas escalas de letra no mesmo desenho leem como hierarquia que nao existe. */
 .chip-sub,.rot-malha{{fill:var(--t3);font-size:6.4px;letter-spacing:.2px;
+  font-family:ui-monospace,Consolas,monospace}}
+/* o nome do circuito sobre o trecho do laco: o mesmo papel que ele tem no
+   diagrama de interligacao, identificar o cabo daquele trecho */
+.rot-circ{{fill:var(--t3);font-size:7px;letter-spacing:.2px;opacity:.85;
   font-family:ui-monospace,Consolas,monospace}}
 /* So a malha leva contorno: ela e escrita sobre o desenho, e o cabo ondula
    justamente por onde ela passa. O contorno na cor do fundo abre um vao em
@@ -6421,10 +6781,15 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
         return vazio
     linhas = lanc.to_dict("records")
     saida: dict[str, list] = {}
+    chegada: dict[str, list] = {}
     eletrica: dict[str, list] = {}
+    por_circuito: dict[str, list] = {}
     for r in linhas:
         org, dst = str(r["ORIGEM"]).strip(), str(r["DESTINO"]).strip()
         saida.setdefault(org, []).append(r)
+        if dst not in ("", "nan"):
+            chegada.setdefault(dst, []).append(r)
+        por_circuito.setdefault(str(r["CIRCUITO"]).strip(), []).append(r)
         if str(r["DISCIPLINA"]).strip() == "ELÉTRICA":
             eletrica.setdefault(dst, []).append(r)
 
@@ -6433,33 +6798,119 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
     # números brigavam na tela. Com dois ramais, vale a pior das duas cadeias --
     # certificar exige que todas fechem, não uma delas.
     PIOR = {"ok": 0, "desc": 1, "warn": 2, "crit": 3}
+
+    # O painel que o diagrama de interligacao confirma para cada TAG de loop
+    # YST. A planilha as vezes tem DUAS saidas para paineis diferentes na
+    # ultima ponta do laco -- YST-121170 vai para PN-12-236 (o do desenho,
+    # Concluido) e tambem para PN-12-239 (Nao Iniciado, painel que nem
+    # alimentacao tem na base). Sem um criterio, quem decidia era a ordem das
+    # linhas na planilha, e o laco inteiro travava no circuito errado.
+    painel_conferido: dict[str, str] = {}
+    for _painel_loop, _tags_loop in CERT_LOOPS_YST.values():
+        for _t in _tags_loop:
+            painel_conferido[_t] = _painel_loop
+
+    def trilha(inicio: str, preferido: str | None):
+        """Os circuitos do caminho que leva ao painel -- so os dele.
+
+        Somar TODAS as saidas de cada no (o que esta funcao fazia antes)
+        puxava para dentro da cadeia circuito que nem passa por ela: o LOOP4
+        inteiro reprovava por causa de C-PN-12-239-01, um cabo de outro
+        painel que nao esta no caminho de ninguem do laco.
+
+        Cabo paralelo continua entrando inteiro -- varias linhas entre as
+        MESMAS duas pontas (292 pares na base) sao cabos irmaos do mesmo
+        trecho, e todos precisam fechar para o trecho fechar.
+        """
+        pilha = [(inicio, [], {inicio})]
+        alternativo, passos = None, 0
+        while pilha and passos < 300:
+            passos += 1
+            no, trecho, vistos = pilha.pop()
+            if len(trecho) >= 15:
+                continue
+            # O SINAL decide a qual painel o instrumento pertence. Quase todo
+            # instrumento tem dois cabos saindo dele: o de sinal, que vai ao
+            # painel dele por uma caixa de junção/derivação (CJA/CJD), e o de
+            # potência (-P), que vai ao painel de alimentação por uma caixa de
+            # potência (CJP). Tratados como caminhos equivalentes, quem
+            # escolhia o painel era a ordem das linhas na planilha -- em 47
+            # TAGs (BSL, AST, AIT) o veredito mudava conforme o cabo que a
+            # caminhada pegasse primeiro. A potência continua contando na
+            # certificação; ela só não decide de quem o instrumento é.
+            saltos = sorted({str(x["DESTINO"]).strip() for x in saida.get(no, [])})
+            saltos.sort(key=lambda d: cert_so_potencia(saida.get(no, []), d))
+            for prox_no in saltos:
+                irmaos = [x for x in saida.get(no, [])
+                          if str(x["DESTINO"]).strip() == prox_no]
+                novo = trecho + irmaos
+                if cert_nivel(prox_no) == 2:
+                    so_pot = cert_so_potencia(saida.get(no, []), prox_no)
+                    if (preferido is None or prox_no == preferido) and not so_pot:
+                        return novo, prox_no
+                    if alternativo is None:
+                        alternativo = (novo, prox_no)
+                    continue
+                if prox_no not in vistos:
+                    pilha.append((prox_no, novo, vistos | {prox_no}))
+        return alternativo if alternativo else ([], None)
+
+    def cabo_da_tag(tag: str) -> dict:
+        """O cabo DO INSTRUMENTO, sem nada do que vem antes dele.
+
+        É outra pergunta que a da certificação: "o cabo desta TAG foi
+        lançado?" não é "tudo que alimenta esta TAG está pronto?". Misturar
+        as duas numa coluna só fazia a tela dizer "faltando lançamento" para
+        instrumento cujo cabo a planilha dá como Concluído -- o cabo estava
+        lançado, o que faltava era a alimentação do painel, muitos saltos
+        acima. Cada uma tem sua coluna agora.
+        """
+        # O cabo do instrumento e o circuito que leva o NOME dele: o cabo do
+        # YST-121188 e o C-YST-121188. Procurar so entre as linhas em que ele
+        # aparece como ORIGEM/DESTINO deixava de fora justamente o ultimo
+        # ponto do laco, que so recebe cabo -- e a coluna dizia "sem
+        # circuito" para um detector cujo cabo esta lancado.
+        nomeado = [c for c in por_circuito.get(f"C-YST-{tag.split('-')[-1]}", [])
+                   if not cert_remendo(c)]
+        proprios = nomeado or [c for c in (saida.get(tag) or chegada.get(tag) or [])
+                               if not cert_remendo(c)]
+        if not proprios:
+            return {"cabo_tag": False, "pct_tag": 0.0, "status_tag": "sem circuito",
+                    "m_tag": 0.0, "m_real_tag": 0.0}
+        m = sum(cert_num(c["METROS"]) for c in proprios)
+        # medido sem teto: o metro a mais que o previsto e fato para ler
+        m_real = sum(cert_metro_medido(c) for c in proprios)
+        pct = round(m_real / m * 100, 1) if m else 0.0
+        pronto = all(cert_num(c["PCT"]) >= 99.5 for c in proprios)
+        return {"cabo_tag": pronto, "pct_tag": pct,
+                # O status é o que a base informa, nunca deduzido da
+                # metragem: um cabo Concluído com menos metro que o previsto
+                # é normal (previu-se mais do que precisou), e um cabo com
+                # mais metro que o previsto pode seguir Em Andamento. Deduzir
+                # o status do percentual apagava esses dois casos, que são
+                # justamente os que interessam de olhar.
+                "status_tag": cert_status_conjunto(proprios),
+                "m_tag": m, "m_real_tag": m_real}
+
     por_tag: dict[str, dict] = {}
     for r in linhas:
         org, dst = str(r["ORIGEM"]).strip(), str(r["DESTINO"]).strip()
         if org in ("", "nan") or cert_nivel(org) != 0:
             continue
-        cadeia, aberto, atual = [r], False, dst
-        # a caixa puxa a seguinte ate chegar no painel; alguns instrumentos
-        # (deteccao de fumaca/gas, entre outros) correm em loop de instrumento
-        # a instrumento antes de qualquer caixa, ou ligam direto no painel --
-        # o "if cert_nivel(atual)==2: break" logo abaixo cobre o caso direto, e
-        # os saltos seguintes cobrem o loop. 15 saltos e a maior cadeia real da
-        # base (10, medido em 2026-08-27) com folga, e corta ciclo de dado sujo
-        for _ in range(15):
-            if cert_nivel(atual) == 2:
-                break
-            prox = saida.get(atual)
-            if not prox:
-                aberto = True
-                break
-            cadeia.extend(prox)
-            atual = str(prox[0]["DESTINO"]).strip()
+        cadeia, aberto = [r], False
+        if cert_nivel(dst) == 2:
+            # instrumento ligado direto no painel: a cadeia e o proprio ramal
+            atual = dst
         else:
-            # 15 saltos sem parar em painel nem em beco sem saida: e um par
-            # ida-e-volta entre dois instrumentos (ex: YST-121125<->YST-121112)
-            # girando em circulo. Sem isso o "aberto" ficava False por engano
-            # e a cadeia saia como "ok" sem nunca ter chegado num painel de verdade
-            aberto = True
+            trecho, painel_achado = trilha(dst, painel_conferido.get(org))
+            cadeia.extend(trecho)
+            if painel_achado:
+                atual = painel_achado
+            else:
+                # nenhum caminho chega em painel: beco sem saida ou laco que
+                # gira em circulo (ex: YST-121125 <-> YST-121112)
+                aberto = True
+                atual = str(trecho[-1]["DESTINO"]).strip() if trecho else dst
         painel_da_cadeia = atual
         if cert_nivel(atual) == 2:
             alim = eletrica.get(atual)
@@ -6483,9 +6934,23 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
                 cadeia.extend(alim)
             else:
                 aberto = True
-        trava = next((c for c in cadeia if cert_num(c["PCT"]) < 99.5), None)
+        # A correcao de topologia (CORRECAO-*) nao e cabo pendente: e um
+        # remendo nosso, para o grafo fechar onde a planilha ainda nao tem a
+        # linha. Ela nasce sempre "Nao Iniciado / 0%", entao contada como
+        # cabo de verdade ela reprovava o laco inteiro -- 18 TAGs com o cabo
+        # real 100% lancado apareciam "Bloqueado" por causa dela. O que ela
+        # diz de honesto e "falta o registro deste trecho", e isso ja tem
+        # tom proprio: "desc" (nao da para afirmar), nunca "crit".
+        reais = [c for c in cadeia if not cert_remendo(c)]
+        # remendo que herdou o avanço do circuito real NÃO é falta de
+        # registro: o cabo daquele trecho existe e está lançado, e só a
+        # ligação é que o pipeline acrescentou. Contá-lo como buraco fazia o
+        # laço inteiro cair para "não dá para afirmar" com todo o cabo pronto.
+        sem_registro = any(cert_remendo(c) and cert_num(c["PCT"]) < 99.5
+                           for c in cadeia)
+        trava = next((c for c in reais if cert_num(c["PCT"]) < 99.5), None)
         if trava is None:
-            tom = "desc" if aberto else "ok"
+            tom = "desc" if (aberto or sem_registro) else "ok"
         elif str(trava["STATUS"]).strip() == "Em Andamento":
             tom = "warn"
         else:
@@ -6497,6 +6962,8 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
             onde = "—"
         elif trava is not None:
             onde = cert_onde(trava, aberto)
+        elif sem_registro:
+            onde = "trecho do laço sem circuito cadastrado na planilha de cabos"
         elif cert_nivel(painel_da_cadeia) == 2:
             onde = f"alimentação do painel {painel_da_cadeia}"
         else:
@@ -6511,7 +6978,7 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
                             "cabo": tom == "ok", "apta": tom == "ok" and montada,
                             # a cadeia inteira, nao so o trecho travado -- e o
                             # que a exportacao de pendencias de lancamento usa
-                            "cadeia": cadeia}
+                            "cadeia": cadeia, **cabo_da_tag(org)}
 
     # Ponta que só aparece como DESTINO (nunca ORIGEM) não entra no loop acima
     # -- é o fim de um loop instrumento-a-instrumento (detecção de fumaça/gás,
@@ -6556,7 +7023,113 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
             por_tag[dst] = {"tom": tom, "caixa": org, "onde": onde,
                             "montada": montada,
                             "cabo": cabo, "apta": tom == "ok" and montada,
-                            "cadeia": cadeia}
+                            "cadeia": cadeia, **cabo_da_tag(dst)}
+
+    # ------------------------------------------------------------------
+    # Conclusão só aparece quando a lógica CONSEGUE concluir.
+    #
+    # 128 TAGs alcançam mais de um painel na base. Em 49 delas o veredito
+    # muda conforme o caminho que se pega (BSL-120700A dá "apto" pelo
+    # PN-12-264 e "em andamento" pelo PN-12102). Escolher um lado -- o que o
+    # código fazia, pela ordem das linhas na planilha -- é inventar
+    # engenharia: o número saía bonito ou feio por acaso.
+    #
+    # Onde não há conclusão, a tela não afirma nada: fica "não dá para
+    # afirmar", dizendo qual é a ambiguidade. É assim que a falta vira
+    # sinal de que há o que corrigir na base, em vez de virar um número
+    # errado que ninguém questiona.
+    def paineis_alcancaveis(tag, limite=12):
+        """Os painéis que o SINAL deste instrumento alcança.
+
+        A potência fica de fora: ela vai para o painel de alimentação, que
+        quase nunca é o painel do instrumento, e contá-la aqui inventava
+        ambiguidade em 47 TAGs que na verdade não têm nenhuma.
+        """
+        achados, pilha, vistos = set(), [(tag, 0)], {tag}
+        while pilha:
+            no, d = pilha.pop()
+            if d > limite:
+                continue
+            for r in saida.get(no, []):
+                dst = str(r["DESTINO"]).strip()
+                if cert_so_potencia(saida.get(no, []), dst):
+                    continue
+                if cert_nivel(dst) == 2:
+                    achados.add(dst)
+                elif dst not in vistos:
+                    vistos.add(dst)
+                    pilha.append((dst, d + 1))
+        return achados
+
+    def _trilha_ate(inicio, alvo, limite=15):
+        pilha = [(inicio, [], {inicio})]
+        while pilha:
+            no, tr, vis = pilha.pop()
+            if len(tr) >= limite:
+                continue
+            for prox in sorted({str(x["DESTINO"]).strip() for x in saida.get(no, [])}):
+                irmaos = [x for x in saida.get(no, [])
+                          if str(x["DESTINO"]).strip() == prox]
+                novo = tr + irmaos
+                if prox == alvo:
+                    return novo
+                if cert_nivel(prox) != 2 and prox not in vis:
+                    pilha.append((prox, novo, vis | {prox}))
+        return None
+
+    def _tom_por_painel(tag, painel):
+        cadeia_p = None
+        for r in saida.get(tag, []):
+            dst = str(r["DESTINO"]).strip()
+            if dst == painel:
+                cadeia_p = [r]
+                break
+            tr = _trilha_ate(dst, painel)
+            if tr is not None:
+                cadeia_p = [r] + tr
+                break
+        if cadeia_p is None:
+            return None
+        alim = eletrica.get(painel)
+        if not alim:
+            no, vis = painel, set()
+            for _ in range(15):
+                if no in vis:
+                    break
+                vis.add(no)
+                pot = [x for x in saida.get(no, [])
+                       if re.search(r"-P\d*$", str(x["CIRCUITO"]).strip(), re.I)]
+                if not pot:
+                    break
+                alim = pot
+                no = str(pot[0]["DESTINO"]).strip()
+        if alim:
+            cadeia_p = cadeia_p + list(alim)
+        reais_p = [c for c in cadeia_p if not cert_remendo(c)]
+        trava_p = next((c for c in reais_p if cert_num(c["PCT"]) < 99.5), None)
+        if trava_p is None:
+            return "ok" if alim else "desc"
+        return "warn" if str(trava_p["STATUS"]).strip() == "Em Andamento" else "crit"
+
+    for tag, v in por_tag.items():
+        # o loop YST tem o painel conferido no diagrama: ali a ambiguidade
+        # da planilha já está resolvida, e a conclusão vale
+        if tag in painel_conferido:
+            continue
+        alcancaveis = paineis_alcancaveis(tag)
+        if len(alcancaveis) < 2:
+            continue
+        tons = {p: _tom_por_painel(tag, p) for p in sorted(alcancaveis)}
+        distintos = {t for t in tons.values() if t}
+        if len(distintos) < 2:
+            continue
+        v["tom"] = "desc"
+        v["cabo"] = False
+        v["apta"] = False
+        v["ambiguo"] = sorted(p for p, t in tons.items() if t)
+        v["onde"] = ("caminho indefinido na base: chega em "
+                     + " e ".join(v["ambiguo"])
+                     + " com resultados diferentes")
 
     previsto = lanc["METROS"].fillna(0)
     metros = float(previsto.sum())
@@ -6803,6 +7376,12 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         "Montadas travadas": (lambda v: v["montada"] and not v["cabo"],
                               conta(lambda v: v["montada"] and not v["cabo"])),
         "Inaptas": (lambda v: not v["cabo"], conta(lambda v: not v["cabo"])),
+        # a base não deixa concluir: a TAG chega em mais de um painel com
+        # resultados diferentes. Fica num recorte próprio porque é fila de
+        # correção da base, não de campo -- ninguém vai lançar cabo para
+        # resolver, alguém vai acertar o cadastro.
+        "Corrigir na base": (lambda v: bool(v.get("ambiguo")),
+                             conta(lambda v: bool(v.get("ambiguo")))),
     }
     alvo_recorte = st.segmented_control(
         "Status de certificação", list(RECORTES),
@@ -7023,9 +7602,20 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
             marca = CERT_CLASSE[v["tom"]]
             mt = "ok" if v["montada"] else "crit"
             atual = " sel" if tag == tag_sel else ""
+            # Duas perguntas diferentes, duas colunas. "Cabo do instrumento"
+            # é o circuito da própria TAG na planilha de cabos; "Certificação"
+            # é a cadeia inteira até a alimentação do painel. Numa coluna só,
+            # instrumento com o cabo Concluído aparecia como "Bloqueado" --
+            # verdade sobre a cadeia, mentira sobre o cabo dele.
+            ct = "ok" if v.get("cabo_tag") else (
+                "warn" if v.get("pct_tag", 0) > 0 else "crit")
+            rot_cabo = v.get("status_tag", "sem circuito")
+            if v.get("pct_tag", 0) > 0 and not v.get("cabo_tag"):
+                rot_cabo += f' · {br_pct(v["pct_tag"])}'
             linhas.append(
                 f'<tr class="ct-lin{atual}"><td class="gtbl-mono">{tag}</td>'
                 f'<td class="gtbl-mono gtbl-muted">{v["caixa"]}</td>'
+                f'<td><span class="gtbl-badge {ct}">{rot_cabo}</span></td>'
                 f'<td><span class="gtbl-badge {"ok" if v["cabo"] else marca}">'
                 f'{"apto" if v["cabo"] else CERT_ROTULO[v["tom"]]}</span></td>'
                 f'<td><span class="gtbl-badge {mt}">'
@@ -7035,7 +7625,8 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         corpo = (f'<div class="gtbl-empty">Nenhuma TAG deste {rotulo or "recorte"} '
                  f'em {alvo_recorte.lower()}.</div>' if not linhas else
                  f'<div class="ct-rolo"><table class="gtbl"><thead><tr><th>TAG</th>'
-                 f'<th>Caixa</th><th>Cabo</th><th>Montagem</th><th>Trava em</th></tr>'
+                 f'<th>Caixa</th><th>Cabo do instrumento</th><th>Certificação</th>'
+                 f'<th>Montagem</th><th>Trava em</th></tr>'
                  f'</thead><tbody>{"".join(linhas)}</tbody></table></div>')
         render_html(
             f'<div class="gplan-panel ct-painel">'
@@ -7058,7 +7649,8 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                               if any(t["org"] == tag_sel for t in b["tags"])), None)
             if bloco_tag is not None:
                 blocos_alvo = [bloco_tag]
-        cad = cert_cadeia_painel(alvo, blocos_alvo, mont)
+        cad = cert_cadeia_painel(alvo, blocos_alvo, mont,
+                                 cert_alimentacao_painel(lanc, alvo, cache_key))
         n_caixas = sum(1 for b in cad["blocos"] if not b["direto"])
         n_diretos = sum(1 for b in cad["blocos"] if b["direto"])
         partes = [f"{n_caixas} caixas"] if n_caixas else []
@@ -7084,46 +7676,91 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         # bloco sozinho entra com a altura de aberto, não a de fechado --
         # senão a moldura vinha baixa e cortava o próprio laço que é o motivo
         # da busca.
+        # topo_cena espelha o "topo" do JS: a faixa da alimentação empurra
+        # tudo para baixo quando o painel tem mais de um cabo alimentando.
+        topo_cena = 56 + max(0, len(cad["eletrica"]) - 1) * 14
         if bloco_tag is not None:
             n_tags = len(bloco_tag["tags"])
-            fil = max(1, -(-n_tags // 12))
-            alt_cena = 56 + max(96, 22 + fil * 76 + 34 + (14 if n_tags > 1 else 0)) + 30
+            # mesma regra do JS (cert_cena_html): um loop YST com identidade
+            # fixa sempre dobra em duas fileiras a partir de 4 tags -- sem
+            # espelhar isso aqui, a moldura vinha baixa pela metade e cortava
+            # a segunda fileira do proprio laço que é o motivo da busca.
+            fil = 2 if (bloco_tag.get("ordem_fixa") and n_tags > 3) else max(1, -(-n_tags // 12))
+            alt_cena = topo_cena + max(96, 22 + fil * 76 + 34 + (14 if n_tags > 1 else 0)) + 30
         else:
-            alt_cena = 56 + 96 * len(cad["blocos"]) + 30
-        larg = max(1100, 240 + 200 + 12 * 84 + 190)
-        altura_p = int(min(700, max(360, 1320 * alt_cena / larg + 46)))
+            alt_cena = topo_cena + 96 * len(cad["blocos"]) + 30
+        # A largura tem de ser a REAL da cena, não uma estimativa fixa: o SVG
+        # é escalado para caber na largura da moldura, então a altura útil sai
+        # de largura_da_moldura × altura_da_cena ÷ largura_da_cena. Com a
+        # estimativa antiga (12 colunas de 84 px) o laço, que é bem mais
+        # largo, era encolhido e sobrava meia moldura vazia embaixo.
+        # A largura da CENA muda conforme o que está desenhado, e é ela que
+        # decide a altura útil: o SVG escala pela largura, então a altura na
+        # tela é largura_da_moldura × altura_da_cena ÷ largura_da_cena.
+        #
+        # Com os blocos FECHADOS (a vista do painel inteiro) não há cartão de
+        # instrumento nenhum, e a cena tem os 1.100 mínimos -- usar aqui a
+        # largura de 12 colunas de instrumento, que era o que estava, dava uma
+        # cena "mais larga" do que a real, e a moldura saía baixa e cortava os
+        # blocos. Com o laço aberto a largura é a real dos cartões.
+        fixa_cena = bool(bloco_tag and bloco_tag.get("ordem_fixa")
+                         and len(bloco_tag["tags"]) > 3)
+        if bloco_tag is not None:
+            n_t = len(bloco_tag["tags"])
+            cols_cena = max(n_t // 2, n_t - n_t // 2) if fixa_cena else min(12, n_t)
+            pas_cena = 168 if fixa_cena else 84
+            larg = max(1100, 150 + 240 + 200 + (cols_cena - 1) * pas_cena + 36 + 46 + 40)
+        else:
+            larg = 1100
+        # folga de sobra: apertado, o desenho não deixa ler nem arrastar. É a
+        # área de trabalho da aba, não um selo.
+        altura_p = int(min(900, max(420, CERT_MOLDURA_PX * alt_cena / larg + 90)))
         st.components.v1.html(cert_cena_html(cad, tag_sel or "", tema_ativo(), altura_p),
                               height=altura_p, scrolling=False)
-        render_html('<div class="ct-leg"><span style="color:var(--text-3)">'
-                    + ("mostrando só o laço desta TAG · pesquise o painel "
-                       f"{alvo} para ver todos os laços dele"
-                       if bloco_tag is not None else
-                       "uma faixa por caixa: o cartão dela e, na mesma linha, os "
-                       "instrumentos que penduram nela · clique numa TAG para abrir a ficha "
-                       "· a barra do cartão é quanto da caixa já tem cabo pronto")
-                    + "</span></div>")
+        # Só a linha que diz o recorte: a faixa que explicava a leitura do
+        # desenho repetia o que a própria cena já mostra e roubava altura de
+        # quem interessa, que é o desenho.
+        if bloco_tag is not None:
+            render_html('<div class="ct-leg"><span style="color:var(--text-3)">'
+                        f'mostrando só o laço desta TAG · pesquise o painel {alvo} '
+                        'para ver todos os laços dele</span></div>')
         # No laco (sem caixa), o desenho ja mostra o fio real entre os
         # instrumentos -- mas so no hover. A tabela repete isso em texto: a
         # metragem e o avanco de cada trecho, vindos da base completa de
         # cabos, e nao so o resumo (cabo pronto/nao) que o cartao mostra.
         if bloco_tag is not None:
-            circuitos_tag = cert_circuitos_por_tag(lanc, cache_key)
+            # m/m_real vem do proprio cert_paineis, nao de uma nova consulta:
+            # cert_circuitos_por_tag so enxerga circuito de ORIGEM, e um
+            # instrumento que so recebe cabo (fim de trecho, sem nada saindo
+            # dele) fica de fora dela -- exatamente os casos que o
+            # cert_paineis ja resolveu (inclusive ignorando a correcao de
+            # topologia, que nao e o status de verdade da TAG).
             linhas_loop = []
             for t in bloco_tag["tags"]:
-                cs = circuitos_tag.get(t["org"], [])
-                m = sum(c["m"] for c in cs)
-                m_real = sum(c["m_real"] for c in cs)
-                pct_t = round(m_real / m * 100, 1) if m else 0.0
-                status_t = ("Concluído" if pct_t >= 99.5 else
-                           "Em Andamento" if pct_t > 0 else
-                           (cs[0]["status"] if cs else "Não Iniciado"))
-                marca = "ok" if pct_t >= 99.5 else "warn" if pct_t > 0 else "crit"
+                m, m_real = t.get("m", 0.0), t.get("m_real", 0.0)
+                # Status e metragem lado a lado, sem um decidir pelo outro:
+                # Concluído com menos metro que o previsto é normal, e mais
+                # metro que o previsto pode seguir Em Andamento. Antes o
+                # status saía do percentual e esses dois casos sumiam.
+                status_t = t.get("status") or "sem circuito"
+                marca = ("ok" if status_t == "Concluído" else
+                         "warn" if status_t == "Em Andamento" else "crit")
+                # a diferença entre executado e previsto é fato para olhar,
+                # não erro para corrigir -- fica marcada, sem mudar o status
+                dif = ""
+                if m and m_real > m:
+                    dif = (f' <span class="gtbl-muted">· {br_num(int(m_real - m))} m '
+                           "acima do previsto</span>")
+                elif m and status_t == "Concluído" and m_real < m:
+                    dif = (f' <span class="gtbl-muted">· {br_num(int(m - m_real))} m '
+                           "abaixo do previsto</span>")
                 atual = " sel" if t["org"] == tag_sel else ""
                 linhas_loop.append(
                     f'<tr class="ct-lin{atual}"><td class="gtbl-mono">{t["org"]}</td>'
                     f'<td><span class="gtbl-badge {marca}">{status_t}</span></td>'
-                    f'<td class="gtbl-mono">{br_pct(pct_t)}</td>'
-                    f'<td class="gtbl-mono">{br_num(int(m_real))} de {br_num(int(m))} m</td></tr>')
+                    f'<td class="gtbl-mono">{br_pct(t.get("pct", 0.0))}</td>'
+                    f'<td class="gtbl-mono">{br_num(int(m_real))} de {br_num(int(m))} m'
+                    f'{dif}</td></tr>')
             render_html(
                 '<div class="gplan-panel ct-painel">'
                 f'<div class="gplan-panel-title">Cabo do laço {bloco_tag["nome"]}'
@@ -7137,8 +7774,11 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         # chamada direta a fichas_modais_html ficou esquecida aqui, gerando as
         # mesmas TAGs sem essa parte -- e foi exatamente essa copia
         # desatualizada que a varredura pegou no vale do painel.
+        # o nome da caixa entra na tabela porque a caixa é TAG (tem montagem e
+        # documento próprios); o nome do laço não, porque laço não é TAG
         render_tabela([t["org"] for bl in cad["blocos"] for t in bl["tags"]]
-                      + [bl["nome"] for bl in cad["blocos"]], f"painel {alvo}")
+                      + [bl["nome"] for bl in cad["blocos"]
+                         if not bl.get("ordem_fixa")], f"painel {alvo}")
         render_fichas([t["org"] for bl in cad["blocos"] for t in bl["tags"]
                        if t["org"] in com_ficha])
         return
