@@ -6105,13 +6105,13 @@ function cartaoMini(x, y, t) {
     <circle cx="${x - 22}" cy="${y + 3}" r="5" fill="var(--${cm})" fill-opacity=".35"
       stroke="var(--${cm})" stroke-width="2"/>
     <text x="${x - 12}" y="${y + 6.5}" fill="var(--t2)" font-size="7"
-      font-family="ui-monospace,Consolas,monospace">${esc(t.org).slice(0, 12)}</text></g>`;
+      font-family="ui-monospace,Consolas,monospace">${esc(t.base || t.org).slice(0, 12)}</text></g>`;
 }
 
 // O segmento vai no rodape do cartao. So cresce quando ha o que escrever:
 // TAG sem fieldbus continua com o cartao curto de antes.
 function cartao(xi, yi, r) {
-  const sel = D.tag === r.org ? ' sel' : '';
+  const sel = (D.tag === r.org || D.tag === r.base) ? ' sel' : '';
   const alt = 52 + (r.fseg ? 11 : 0);
   const extra = r.fseg ? `<text x="${xi}" y="${yi + 26}" text-anchor="middle"
       class="chip-sub">${esc(r.fseg).slice(0, 14)}</text>` : '';
@@ -6119,7 +6119,7 @@ function cartao(xi, yi, r) {
     <rect class="chip-bg" x="${xi - 36}" y="${yi - 30}" width="72" height="${alt}" rx="9"/>
     ${transmissor(xi, yi - 8, r.mont)}
     <text x="${xi}" y="${yi + 16}" text-anchor="middle" fill="var(--t2)" font-size="7.5"
-      font-family="ui-monospace,Consolas,monospace">${esc(r.org).slice(0, 13)}</text>
+      font-family="ui-monospace,Consolas,monospace">${esc(r.base || r.org).slice(0, 13)}</text>
     ${extra}</g>`;
 }
 
@@ -7260,6 +7260,21 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     # mesmo valor.
     traduz = _cert_traduz(depara)
     pior_tom = {"ok": 0, "desc": 1, "warn": 2, "crit": 3}
+
+    def nome_de_base(ponta: str) -> str:
+        """O nome da TAG como a 01_BASE_TAGS escreve.
+
+        A planilha de cabos as vezes usa menos zeros -- TJT-12-042 la,
+        TJT-12-0042 aqui -- e o de-para ja resolve isso (e o "zero" dele). Sem
+        aplicar a traducao no desenho, o cartao saia com o nome curto: sem
+        ficha para abrir, sem segmento nem malha (que sao indexados pelo nome
+        da base) e sem se reconhecer na linha da tabela ao lado, que usa o
+        nome longo. Era a mesma TAG escrita de dois jeitos na mesma tela.
+        """
+        if ponta in atrib:
+            return ponta
+        certos = [t for t in traduz.get(ponta, ()) if t in atrib]
+        return certos[0] if len(certos) == 1 else ponta
     for cru, valor in list(indice.items()):
         for alvo in traduz.get(cru, ()):
             indice.setdefault(alvo, valor)
@@ -7730,7 +7745,9 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                     f'style="font-weight:500">{sub}</span></div>')
         for bl in cad["blocos"]:
             for t in bl["tags"]:
-                t["ancora"] = ficha_anchor(t["org"]) if t["org"] in com_ficha else ""
+                t["base"] = nome_de_base(t["org"])
+                t["ancora"] = (ficha_anchor(t["base"])
+                               if t["base"] in com_ficha else "")
         # A moldura nasce do tamanho da vista fechada -- uma faixa de 96 px por
         # caixa. Abrir cresce por dentro, e a moldura rola: dimensionar pelo
         # pior caso deixaria meia tela vazia enquanto tudo estivesse fechado.
@@ -7902,11 +7919,12 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                            else cs[0]["status"])
             # a âncora só vale para TAG que existe no controle documental: sem ficha
             # para abrir, o cartão não deve parecer clicável
-            r["ancora"] = ficha_anchor(r["org"]) if r["org"] in com_ficha else ""
+            r["base"] = nome_de_base(r["org"])
+            r["ancora"] = ficha_anchor(r["base"]) if r["base"] in com_ficha else ""
             # segmento e malha no cartão: filtrado um segmento, o desenho traz
             # várias malhas juntas e não havia como saber qual cabo é de qual.
             # "fseg" e não "seg": seg já é a caixa de onde o instrumento pendura.
-            do_tag = atrib.get(r["org"], {})
+            do_tag = atrib.get(r["base"], {})
             r["fseg"] = do_tag.get("SEGMENTO", "")
             r["malha"] = do_tag.get("MALHA", "")
 
