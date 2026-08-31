@@ -1278,6 +1278,62 @@ def inject_css():
            fileiras em vez de esticar a tabela para fora da tela. */
         .med-tab td.med-selos { line-height:2; }
         .med-tab td.med-selos .gtbl-badge { margin:1px 2px 1px 0; }
+
+        /* ---------------------------------------------------------------
+           Previsão Medição: painéis próprios.
+
+           A primeira versão reaproveitava .du-pn/.du-br, que são do
+           Dashboard -- e lá tudo vive numa grade de altura fixa, com miolo
+           rolável. Numa página que rola, aquilo virava painel com barra de
+           rolagem dentro de barra de rolagem, letra de 10px e barra de 6px
+           espremida entre duas colunas de número. Aqui a altura é a do
+           conteúdo.
+           --------------------------------------------------------------- */
+        .pm-topo { display:grid; grid-template-columns:1.35fr 1fr 1fr 1fr;
+                   gap:14px; margin:4px 0 16px; }
+        .pm-card { background:var(--dark-card); border:1px solid var(--border-color);
+                   border-radius:14px; padding:16px 18px; }
+        .pm-card.destaque { border-color:rgba(var(--rgb-teal),.35);
+                            background:linear-gradient(135deg,
+                              rgba(var(--rgb-teal),.10), transparent 62%),
+                              var(--dark-card); }
+        .pm-card .rot { font-size:10.5px; font-weight:700; letter-spacing:.6px;
+                        text-transform:uppercase; color:var(--text-3); }
+        .pm-card .num { font-size:38px; font-weight:800; line-height:1.05;
+                        margin-top:6px; font-variant-numeric:tabular-nums; }
+        .pm-card.destaque .num { font-size:46px; color:var(--accent-teal); }
+        .pm-card .num.ambar { color:var(--accent-amber); }
+        .pm-card .cifra { margin-top:8px; font-size:14px; font-weight:700;
+                          color:var(--text-1); font-variant-numeric:tabular-nums; }
+        .pm-card .nota { margin-top:3px; font-size:11px; color:var(--text-3); }
+
+        .pm-duas { display:grid; grid-template-columns:1fr 1fr; gap:14px;
+                   margin-bottom:16px; }
+        @media (max-width:1000px) { .pm-duas { grid-template-columns:1fr; }
+                                    .pm-topo { grid-template-columns:1fr 1fr; } }
+        .pm-pn { background:var(--dark-card); border:1px solid var(--border-color);
+                 border-radius:14px; padding:16px 18px 18px; }
+        .pm-pn > h4 { margin:0 0 14px; font-size:12.5px; font-weight:700;
+                      color:var(--text-1); letter-spacing:.2px; }
+
+        /* Uma faixa por degrau: rótulo em cima da barra, número grande à
+           direita. Rótulo e barra na mesma linha era o que obrigava a
+           encolher os dois. */
+        .pm-lin { display:grid; grid-template-columns:1fr auto; gap:2px 12px;
+                  align-items:baseline; margin-bottom:11px; }
+        .pm-lin:last-child { margin-bottom:0; }
+        .pm-lin .nm { font-size:12px; color:var(--text-2); }
+        .pm-lin .qt { font-size:15px; font-weight:700; color:var(--text-1);
+                      font-variant-numeric:tabular-nums; }
+        .pm-lin .tr { grid-column:1/-1; height:9px; border-radius:99px;
+                      background:rgba(var(--rgb-tinta),.07); overflow:hidden;
+                      margin-top:3px; }
+        .pm-lin .tr i { display:block; height:100%; border-radius:99px; }
+        .pm-lin .tr i.feito { background:var(--accent-teal); }
+        .pm-lin .tr i.andando { background:var(--accent-amber); }
+        .pm-lin .tr i.parado { background:var(--accent-red); }
+        .pm-lin .sub { grid-column:1/-1; font-size:11px; color:var(--text-3);
+                       margin-top:4px; font-variant-numeric:tabular-nums; }
         .du-br .fr { font-size:10px; color:var(--text-3); text-align:right; }
         .du-br .pc { font-size:10.5px; font-weight:700; color:var(--text-1); text-align:right; }
 
@@ -7463,7 +7519,10 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                    for c, _ in campos if c != exceto)
 
     if campos:
-        for (campo, rotulo), col in zip(campos, st.columns(len(campos))):
+        # uma coluna a mais que os filtros: a última leva o botão de limpar,
+        # alinhado com eles em vez de solto acima ou abaixo
+        colunas = st.columns([1] * len(campos) + [0.6])
+        for (campo, rotulo), col in zip(campos, colunas):
             # As opções saem do universo já recortado pelos OUTROS filtros:
             # sem isso dá para escolher um painel e um segmento que não se
             # cruzam, e a tela volta vazia sem dizer por quê.
@@ -7477,6 +7536,18 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                 st.session_state[chave] = "Todos"
             with col:
                 escolhido[campo] = st.selectbox(rotulo, opcoes, key=chave)
+        algum = (any(escolhido[c] != "Todos" for c, _ in campos)
+                 or st.session_state.get("cert_recorte", "Todos") != "Todos")
+        with colunas[-1]:
+            # o rótulo vazio alinha o botão com a base dos selectbox, que têm
+            # rótulo em cima
+            st.markdown("<div style='height:27px'></div>",
+                        unsafe_allow_html=True)
+            st.button("Limpar filtros", key="cert_limpar",
+                      on_click=_limpar_filtros_certificacao,
+                      disabled=not algum, use_container_width=True,
+                      help="Volta painel, caixa, segmento, malha e status "
+                           "para Todos")
 
     universo_f = [t for t in universo if combina(t)]
     ativos = [f"{rot.lower()} {escolhido[c]}" for c, rot in campos
@@ -9618,6 +9689,23 @@ def consumir_filtros_url(tags: pd.DataFrame, resumo: pd.DataFrame,
             st.session_state[f"gf_{chave}"] = vindo[chave]
 
 
+def _limpar_filtros_certificacao():
+    """Zera os filtros da Certificação -- painel, caixa, segmento e malha --
+    e devolve o status para "Todos".
+
+    Callback pelo mesmo motivo do _limpar_filtros da lateral: mexer na chave
+    de um widget depois que ele já foi criado no mesmo run levanta exceção no
+    Streamlit, e o callback roda antes do rerun, quando ainda é permitido.
+
+    A busca (cert_escolha) fica de fora de propósito: ela não é filtro, é
+    onde a tela está aberta. Limpar o recorte não deve fechar o desenho que
+    a pessoa está olhando.
+    """
+    for campo, _ in CERT_FILTROS:
+        st.session_state[f"cert_f_{campo}"] = "Todos"
+    st.session_state["cert_recorte"] = "Todos"
+
+
 def _limpar_filtros():
     """Callback do botão. Precisa ser callback: mexer na chave de um widget
     depois que ele já foi criado no mesmo run levanta exceção no Streamlit --
@@ -9843,6 +9931,11 @@ MEDICAO_REGRA = [
     ("RIR", "cabo", "cabo"),
     ("RIR", "", "localização"),
     ("RIFMI", "", "montagem"),
+    # A caixa também é montada em campo, só que o relatório dela tem outro
+    # nome: RIFMI é do instrumento, RIMJBI é da caixa de junção. Tratar o
+    # RIMJBI como documento fazia 484 caixas dependerem de papel para uma
+    # etapa que o STATUS_MONTAGEM já responde.
+    ("RIMJBI", "", "montagem"),
     ("RILTCI", "", "cabo"),
     ("CTECRI", "", "cabo"),
     ("RIMTU", "", "documento"),
@@ -9980,7 +10073,14 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
             vistos.add(doc)
             etapa = medicao_etapa(texto(d["RELATORIO"]),
                                   texto(d["ORIGEM_REGRA"]))
-            if etapa == "calibração":
+            # O documento aprovado no SIGEM é o juiz final e vem NA FRENTE do
+            # físico: ninguém aprova o relatório sem o serviço ter acontecido.
+            # Quando ele está aprovado, a etapa fecha mesmo que a coluna de
+            # campo ainda não tenha sido atualizada -- a planilha de campo
+            # atrasa, o parecer não volta atrás.
+            if bool(aprovado(pd.Series([d["STATUS_SIGEM"]])).iloc[0]):
+                passou = True
+            elif etapa == "calibração":
                 passou = texto(t["STATUS_CALIBRACAO"]) == "Aprovado"
             elif etapa == "localização":
                 passou = texto(t["STATUS_LOCALIZACAO"]) == "LOCALIZADO"
@@ -10050,28 +10150,38 @@ def render_previsao_medicao(tags: pd.DataFrame, resumo: pd.DataFrame,
     etapas_tot = sum(l["total"] for l in fila)
     avanco = feitas_tot / max(etapas_tot, 1) * 100
 
+    total_fila = max(len(fila), 1)
     render_html(f"""
-      <div class="pl-kpis">
-        <div class="pl-kpi"><div class="r">Prontas para medir</div>
-          <div class="v feito">{br_num(len(prontas))}</div>
-          <div class="s">{moeda(sum(l["preco"] for l in prontas))} · todas as etapas fechadas</div></div>
-        <div class="pl-kpi"><div class="r">A uma etapa</div>
-          <div class="v andando">{br_num(len(uma))}</div>
-          <div class="s">{moeda(sum(l["preco"] for l in uma))} · logo atrás</div></div>
-        <div class="pl-kpi"><div class="r">Avanço das etapas</div>
-          <div class="v">{br_pct(avanco)}</div>
-          <div class="s">{br_num(feitas_tot)} de {br_num(etapas_tot)} etapas</div>
-          <div class="pl-barra"><i class="andando" style="width:{avanco:.1f}%"></i></div>
+      <div class="pm-topo">
+        <div class="pm-card destaque">
+          <div class="rot">Prontas para medir</div>
+          <div class="num">{br_num(len(prontas))}</div>
+          <div class="cifra">{moeda(sum(l["preco"] for l in prontas))}</div>
+          <div class="nota">todas as etapas de campo fechadas</div>
         </div>
-        <div class="pl-kpi"><div class="r">Já medido</div>
-          <div class="v">{br_num(len(medidas))}</div>
-          <div class="s">{moeda(sum(l["valor_medido"] for l in medidas))} · fora da fila</div></div>
+        <div class="pm-card">
+          <div class="rot">A uma etapa</div>
+          <div class="num ambar">{br_num(len(uma))}</div>
+          <div class="cifra">{moeda(sum(l["preco"] for l in uma))}</div>
+          <div class="nota">falta só uma para entrar na fila</div>
+        </div>
+        <div class="pm-card">
+          <div class="rot">Avanço das etapas</div>
+          <div class="num">{br_pct(avanco)}</div>
+          <div class="cifra">{br_num(feitas_tot)} de {br_num(etapas_tot)}</div>
+          <div class="nota">etapas fechadas na obra toda</div>
+        </div>
+        <div class="pm-card">
+          <div class="rot">Já medido</div>
+          <div class="num">{br_num(len(medidas))}</div>
+          <div class="cifra">{moeda(sum(l["valor_medido"] for l in medidas))}</div>
+          <div class="nota">fora da fila, no GITEC</div>
+        </div>
       </div>""")
 
-    # --- os dois gráficos ---
+    # --- os dois painéis ---
     por_falta = collections.Counter(min(l["falta"], 5) for l in fila)
-    maior = max(por_falta.values()) if por_falta else 1
-    barras_fila = ""
+    degraus = ""
     for k in sorted(por_falta):
         n = por_falta[k]
         rot = ("Pronta" if k == 0 else
@@ -10079,30 +10189,31 @@ def render_previsao_medicao(tags: pd.DataFrame, resumo: pd.DataFrame,
                f"Faltam {k} etapas" if k < 5 else "Faltam 5 ou mais")
         cor = "feito" if k == 0 else ("andando" if k == 1 else "parado")
         val = sum(l["preco"] for l in fila if min(l["falta"], 5) == k)
-        barras_fila += (
-            f'<div class="du-br moeda"><span class="nm">{rot}</span>'
+        degraus += (
+            f'<div class="pm-lin"><span class="nm">{rot}</span>'
+            f'<span class="qt">{br_num(n)}</span>'
             f'<span class="tr"><i class="{cor}" style="width:'
-            f'{max(n / maior * 100, 0.8):.1f}%"></i></span>'
-            f'<span class="fr">{br_num(n)}</span>'
-            f'<span class="pc">{moeda(val)}</span></div>')
+            f'{max(n / total_fila * 100, 0.6):.1f}%"></i></span>'
+            f'<span class="sub">{br_pct(n / total_fila * 100)} da fila · '
+            f'{moeda(val)}</span></div>')
 
     trava = collections.Counter(e for l in fila for e in l["abertas"])
-    maior_t = max(trava.values()) if trava else 1
-    barras_trava = ""
+    segura = ""
     for etapa, n in trava.most_common():
-        barras_trava += (
-            f'<div class="du-br"><span class="nm">{esc(etapa.capitalize())}</span>'
+        segura += (
+            f'<div class="pm-lin"><span class="nm">{esc(etapa.capitalize())}</span>'
+            f'<span class="qt">{br_num(n)}</span>'
             f'<span class="tr"><i class="parado" style="width:'
-            f'{max(n / maior_t * 100, 0.8):.1f}%"></i></span>'
-            f'<span class="fr">{br_num(n)}</span>'
-            f'<span class="pc">{br_pct(n / max(len(fila), 1) * 100)}</span></div>')
+            f'{max(n / total_fila * 100, 0.6):.1f}%"></i></span>'
+            f'<span class="sub">segura {br_pct(n / total_fila * 100)} das '
+            f'{br_num(total_fila)} TAGs da fila</span></div>')
 
     render_html(
-        '<div class="cs-duas">'
-        '<div class="du-pn"><div class="du-t">Quanto falta para cada TAG</div>'
-        f'<div class="du-miolo"><div class="du-barras">{barras_fila}</div></div></div>'
-        '<div class="du-pn"><div class="du-t">Etapa que mais segura</div>'
-        f'<div class="du-miolo"><div class="du-barras">{barras_trava}</div></div></div>'
+        '<div class="pm-duas">'
+        '<div class="pm-pn"><h4>Quanto falta para cada TAG</h4>'
+        f'{degraus}</div>'
+        '<div class="pm-pn"><h4>Etapa que mais segura a fila</h4>'
+        f'{segura}</div>'
         '</div>')
 
     # --- um grupo por vez: a lista misturada era o que não deixava ler ---
