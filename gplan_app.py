@@ -5250,27 +5250,53 @@ def cert_circuitos_por_tag(lanc: pd.DataFrame, cache_key: str) -> dict:
 
 
 @st.cache_data(show_spinner=False, max_entries=3)
-def cert_metros_por_origem(lanc: pd.DataFrame, cache_key: str) -> dict:
-    """Previsto e lançado de cada ponta de ORIGEM -- TAG ou caixa.
+def cert_circuitos_por_ponta(lanc: pd.DataFrame, depara: pd.DataFrame,
+                             cache_key: str) -> tuple[dict, dict]:
+    """Os circuitos que saem de cada ponta, e a metragem de cada circuito.
 
-    O avanço por segmento precisa das duas: o ramal que sai do instrumento e o
-    tronco que sai da caixa. O cert_circuitos_por_tag só devolve o primeiro,
-    porque descarta origem que não seja TAG -- e era por isso que o segmento
-    aparecia pronto com o cabo entre caixas por lançar.
+    Devolve os IDS dos circuitos, não metros já somados, porque o total de um
+    conjunto NÃO é a soma dos totais de cada um: o cabo do ZSH/L-120112 sai
+    uma vez e serve duas TAGs da base (ZSH-120112 e ZSL-120112). Somando por
+    TAG, os 129 m dele entravam duas vezes -- são 197 circuitos assim, 6.879 m
+    contados a mais no cartão do topo. Com os ids, quem soma faz a união antes
+    e cada cabo entra uma vez só.
 
-    Somar pela ORIGEM não duplica: todo circuito tem uma origem só.
+    A ponta entra pelo nome cru da planilha de cabos E pelo nome da
+    01_BASE_TAGS quando o de-para sabe traduzir. Sem isso 564 TAGs apareciam
+    em "TAGs mapeadas" e somavam zero metro, porque a chave aqui era o nome
+    cru e o universo lá em cima usa o nome da base: 24.907 m ficavam fora da
+    conta -- o cartão dizia 50.027 m onde havia 67.893.
     """
     if lanc.empty:
-        return {}
-    saida: dict[str, list[float]] = {}
-    for r in lanc.to_dict("records"):
+        return {}, {}
+    metros: dict[int, tuple[float, float]] = {}
+    da_ponta: dict[str, set] = {}
+    # A chave é a LINHA, não o nome do circuito: três nomes se repetem em
+    # linhas diferentes (C-YST-121157 sai do 121147 com 36 m e do 121156 com
+    # 0 m; C-PN-12-238-03 e C-YST-121166 idem). Chaveando pelo nome, uma
+    # linha apagava a outra e sumiam 162 m -- 141 deles no MB-RTU-03 sozinho.
+    # Isso não atrapalha a união: o cabo compartilhado do ZSH/L é UMA linha,
+    # e as duas TAGs apontam para ela.
+    for i, r in enumerate(lanc.to_dict("records")):
         org = str(r["ORIGEM"]).strip()
         if org in ("", "nan"):
             continue
-        acc = saida.setdefault(org, [0.0, 0.0])
-        acc[0] += cert_num(r["METROS"])
-        acc[1] += cert_metro_real(r)  # já vem capado no previsto
-    return saida
+        # já vem capado no previsto pelo cert_metro_real
+        metros[i] = (cert_num(r["METROS"]), cert_metro_real(r))
+        da_ponta.setdefault(org, set()).add(i)
+    for cru, alvos in _cert_traduz(depara).items():
+        if cru in da_ponta:
+            for alvo in alvos:
+                da_ponta.setdefault(alvo, set()).update(da_ponta[cru])
+    return da_ponta, metros
+
+
+def cert_metros_uniao(da_ponta: dict, metros: dict, nomes) -> tuple[float, float]:
+    """Previsto e lançado de um conjunto de pontas, cada circuito uma vez."""
+    ids: set = set()
+    for n in nomes:
+        ids |= da_ponta.get(n, set())
+    return (sum(metros[c][0] for c in ids), sum(metros[c][1] for c in ids))
 
 
 # Os quatro campos da 01_BASE_TAGS que recortam a Certificação. A ordem é a
@@ -7317,10 +7343,10 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     # do controle: o que se certifica é o instrumento. Os cartões usam so o
     # recorte do filtro geral (universo), nao o do painel/segmento local mais
     # abaixo -- esses dois continuam cada um com seu proprio escopo.
-    metros_org = cert_metros_por_origem(lanc, cache_key)
+    circ_da_ponta, metros_circ = cert_circuitos_por_ponta(lanc, depara, cache_key)
     total = len(universo)
-    metros_filtro = sum(metros_org.get(t, (0.0, 0.0))[0] for t in universo)
-    lancado_filtro = sum(metros_org.get(t, (0.0, 0.0))[1] for t in universo)
+    metros_filtro, lancado_filtro = cert_metros_uniao(
+        circ_da_ponta, metros_circ, universo)
     pct_lanc = lancado_filtro / metros_filtro * 100 if metros_filtro else 0.0
     montadas_travadas = sum(1 for t in universo
                             if por_tag[t]["montada"] and not por_tag[t]["cabo"])
@@ -7453,13 +7479,13 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         # Sem os troncos o H1-0057 aparecia 100% com o cabo da CFF-12-0057C
         # para a CFF-12-0057B por lançar. São 290 troncos e 48.846 m que
         # ficavam de fora, 152 deles não concluídos.
-        # metros_org ja foi calculado la em cima, pros cartoes do topo.
+        # circ_da_ponta/metros_circ ja vieram la de cima, dos cartoes do topo.
         caixa_seg = {}
         for v in atrib.values():
             cx, sg = v.get("CFF", ""), v.get("SEGMENTO", "")
             # exige que a caixa realmente origine circuito: descarta o "N.A."
             # que a base usa como preenchimento em 6 segmentos
-            if cx and sg and cx in metros_org:
+            if cx and sg and cx in circ_da_ponta:
                 caixa_seg[cx] = sg
 
         # Só entra o que está mapeado na lógica: TAG com cadeia de cabo até uma
@@ -7479,21 +7505,22 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                 continue
             s = segs.setdefault(nome_seg,
                                 {"m": 0.0, "real": 0.0, "tags": 0, "caixas": set(),
-                                 "montadas": 0})
+                                 "circ": set(), "montadas": 0})
             s["tags"] += 1
             if por_tag[tag]["montada"]:
                 s["montadas"] += 1
-            prev, real = metros_org.get(tag, (0.0, 0.0))
-            s["m"] += prev
-            s["real"] += real
+            # junta os IDS, soma depois: um segmento com ZSH-x e ZSL-x tem as
+            # duas penduradas no mesmo cabo, e somar por TAG contava o trecho
+            # duas vezes dentro do proprio segmento
+            s["circ"] |= circ_da_ponta.get(tag, set())
         for cx, sg in caixa_seg.items():
             if sg in segs:
                 segs[sg]["caixas"].add(cx)
         for s in segs.values():
             for cx in s["caixas"]:
-                prev, real = metros_org[cx]
-                s["m"] += prev
-                s["real"] += real
+                s["circ"] |= circ_da_ponta.get(cx, set())
+            s["m"] = sum(metros_circ[c][0] for c in s["circ"])
+            s["real"] = sum(metros_circ[c][1] for c in s["circ"])
         if segs:
             # Do mais adiantado para o menos, sem separar concluído de não
             # iniciado: é o ranking que Daniel pediu, cabo e geral na mesma
