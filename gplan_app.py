@@ -178,17 +178,34 @@ STATUS_CLASSE = {
 def classe_status(label: str) -> str:
     return STATUS_CLASSE.get(label, "mudo")
 
+# As barras do Dashboard tem que somar o KPI: mesma pergunta, mesma resposta.
+# Duas coisas quebravam isso e deixavam 598 documentos fora da conta.
+#
+# 1. Duas familias inteiras nao tinham barra nenhuma -- o RIMSI do pedestal
+#    (629 documentos) e o RILM de placa de orificio (71). O RIMSI so aparecia
+#    pela regra de infra por planta, que sao outros 20 documentos; os 629 do
+#    pedestal simplesmente nao existiam na tela.
+# 2. Todas as linhas contavam LINHA, e a linha e o par (TAG, documento). Um
+#    RILTCI de cabo serve as duas pontas e um CTECRI serve mais de uma TAG:
+#    781 linhas para 722 documentos, 1.311 para 1.268. O KPI conta documento
+#    unico, entao as barras infladas nunca fechavam com ele.
+#
+# Por isso toda linha aqui conta documento unico (o ultimo campo): e a mesma
+# unidade de totais_por_documento. Onde nao ha compartilhamento o numero nao
+# muda, e onde houver amanha a tela nao volta a divergir sozinha.
 REPORT_ROWS = [
-    ("RIR instrumentos", "RIR", "BASE: RIR obrigatorio para todos os TAGs", False),
-    ("RIR cabos", "RIR", "CONDICIONAL: RIR de cabo por TAG", False),
-    ("CCP", "CCP", None, False),
-    ("RTFCJI", "RTFCJI", None, False),
-    ("RIMITPI", "RIMITPI", None, False),
-    ("RIFMI", "RIFMI", None, False),
-    ("RIMTU", "RIMTU", None, False),
-    ("RILTCI", "RILTCI", None, False),
-    ("RIMJBI", "RIMJBI", None, False),
-    ("CTECRI", "CTECRI", None, False),
+    ("RIR instrumentos", "RIR", "BASE: RIR obrigatorio para todos os TAGs", True),
+    ("RIR cabos", "RIR", "CONDICIONAL: RIR de cabo por TAG", True),
+    ("CCP", "CCP", None, True),
+    ("RTFCJI", "RTFCJI", None, True),
+    ("RIMITPI", "RIMITPI", None, True),
+    ("RIFMI", "RIFMI", None, True),
+    ("RIMTU", "RIMTU", None, True),
+    ("RILTCI", "RILTCI", None, True),
+    ("RIMJBI", "RIMJBI", None, True),
+    ("CTECRI", "CTECRI", None, True),
+    ("RILM placa de orifício", "RILM", "BASE: descricao contem Placa de Orificio", True),
+    ("RIMSI pedestal", "RIMSI", "BASE: RIMSI do pedestal (08_BASE_PEDESTAL)", True),
     ("RIMII eletroduto", "RIMII", "CONDICIONAL: infra eletroduto por planta", True),
     ("RIMII bandeja", "RIMII", "CONDICIONAL: infra bandeja por planta", True),
     ("RIMSI suporte", "RIMSI", "CONDICIONAL: infra suporte por planta", True),
@@ -5615,6 +5632,16 @@ CERT_LOOPS_YST: dict[str, tuple[str, list[str]]] = {
     "LOOP6": ("PN-12-237", ["YST-121129", "YST-121130", "YST-121131", "YST-121132",
                            "YST-121133", "YST-121134", "YST-121135", "YST-121136",
                            "YST-121137", "YST-121138"]),
+    # LOOP7 sai e volta ao PN-12-237 como os outros, e a sequência inteira
+    # vem do encadeamento dos cabos na base: C-YST-121140 encosta em 121139,
+    # C-YST-121192 em 121140, e assim por diante. Ficava de fora por um elo
+    # só -- entre o YST-121141 e o YST-121163 não há circuito cadastrado na
+    # planilha de cabos, só o remendo CORRECAO-YST-121163-YST-121141 -- e sem
+    # fechar o laço nenhum destes 8 achava painel: sumiam do desenho, e com
+    # eles 8 das 26 TAGs do segmento MB-RTU-02. Declarado aqui, os 8 aparecem
+    # e o elo que falta continua vermelho, que é o que ele é.
+    "LOOP7": ("PN-12-237", ["YST-121139", "YST-121140", "YST-121192", "YST-121141",
+                           "YST-121163", "YST-121164", "YST-121162", "YST-121161"]),
     # LOOP8 tem formato proprio: passa por um dispositivo (CBZ-12-001, o
     # BZ-500 do desenho) no meio do percurso, entre YST-121160 e YST-121145.
     # Fica aqui pelo mesmo motivo dos outros -- a base cruza este laco com o
@@ -7554,6 +7581,17 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     else:
         alvo, tag_sel = nome, ""
 
+    # Com filtro da base ativo quem manda no desenho é o filtro, não a busca.
+    # Trocar o filtro tira a escolha anterior das opções, e a busca repousa
+    # sozinha na primeira TAG do recorte -- uma TAG que ninguém pediu, que
+    # arrastava o desenho para o laço dela: o segmento MB-RTU-03 tem 28
+    # instrumentos em três laços e a tela mostrava os 8 de um só. Aqui o alvo
+    # volta para onde as TAGs do recorte realmente moram.
+    if ativos:
+        onde_mora = collections.Counter(indice[t] for t in universo_f if t in indice)
+        if onde_mora and not onde_mora.get(alvo):
+            alvo = onde_mora.most_common(1)[0][0]
+
     com_ficha = set(resumo["TAG"].astype(str))
     def render_fichas(ids):
         """As fichas ficam no fim da página, fechadas: o clique no desenho abre
@@ -7635,7 +7673,13 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
             f'{"TAG" if len(linhas) == 1 else "TAGs"}{onde} · {alvo_recorte.lower()}'
             f'</span></div>{corpo}</div>')
 
-    if alvo in paineis:
+    def desenha_painel(alvo, escopo):
+        """Desenha um painel e devolve os blocos que desenhou.
+
+        É função porque um recorte pode morar em mais de um painel: o
+        segmento MB-RTU-02 tem 26 instrumentos repartidos entre o PN-12-236 e
+        o PN-12-237, e um desenho só mostrava 18 deles.
+        """
         blocos_alvo = paineis[alvo]
         # Pesquisar uma TAG que mora num laço sem caixa (deteccao de
         # fumaca/gas, YST) resolvia pro PAINEL inteiro -- indice() nao tem
@@ -7644,11 +7688,28 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         # especifica escolhida na busca, o recorte cai pro laco dela; buscar
         # o PAINEL (sem TAG) continua abrindo todos, do jeito que ja era.
         bloco_tag = None
-        if tag_sel:
+        if escopo:
+            # Com filtro ativo o desenho é o recorte inteiro: ficam os blocos
+            # que têm alguma TAG do filtro. É a mesma regra que a tabela já
+            # seguia -- filtrar um segmento e continuar vendo um laço só
+            # escondia justamente o que foi pedido. Recorte que cai num laço
+            # só continua abrindo esse laço, com a metragem trecho a trecho:
+            # filtrar não pode custar detalhe.
+            no_escopo = [b for b in blocos_alvo
+                         if any(t["org"] in escopo for t in b["tags"])]
+            if no_escopo:
+                blocos_alvo = no_escopo
+            if len(blocos_alvo) == 1:
+                bloco_tag = blocos_alvo[0]
+        elif tag_sel:
             bloco_tag = next((b for b in blocos_alvo
                               if any(t["org"] == tag_sel for t in b["tags"])), None)
             if bloco_tag is not None:
                 blocos_alvo = [bloco_tag]
+        # O laço aberto é o da busca só quando a TAG procurada mora nele --
+        # com filtro ativo ele pode ter vindo do recorte, sem TAG nenhuma.
+        laco_da_busca = bloco_tag is not None and any(
+            t["org"] == tag_sel for t in bloco_tag["tags"])
         cad = cert_cadeia_painel(alvo, blocos_alvo, mont,
                                  cert_alimentacao_painel(lanc, alvo, cache_key))
         n_caixas = sum(1 for b in cad["blocos"] if not b["direto"])
@@ -7657,8 +7718,9 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         if n_diretos:
             partes.append(f"{n_diretos} loop{'s' if n_diretos > 1 else ''} sem caixa")
         if bloco_tag is not None:
-            titulo_painel, sub = "Laço da TAG", (
-                f"{tag_sel} → laço {bloco_tag['nome']} → {bloco_tag['inst']} instrumentos")
+            titulo_painel = "Laço da TAG" if laco_da_busca else "Laço do recorte"
+            sub = ((f"{tag_sel} → " if laco_da_busca else "")
+                   + f"laço {bloco_tag['nome']} → {bloco_tag['inst']} instrumentos")
         else:
             titulo_painel, sub = "Segmento do painel", (
                 f"{alvo} → {' + '.join(partes) or '0 caixas'} → "
@@ -7720,7 +7782,7 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         # Só a linha que diz o recorte: a faixa que explicava a leitura do
         # desenho repetia o que a própria cena já mostra e roubava altura de
         # quem interessa, que é o desenho.
-        if bloco_tag is not None:
+        if laco_da_busca:
             render_html('<div class="ct-leg"><span style="color:var(--text-3)">'
                         f'mostrando só o laço desta TAG · pesquise o painel {alvo} '
                         'para ver todos os laços dele</span></div>')
@@ -7769,66 +7831,119 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                 '</span></div><div class="ct-rolo"><table class="gtbl"><thead><tr>'
                 '<th>TAG</th><th>Cabo deste trecho</th><th>%</th><th>Metragem</th>'
                 f'</tr></thead><tbody>{"".join(linhas_loop)}</tbody></table></div></div>')
-        # As fichas saem so pelo render_fichas: ele e o unico caminho que gera
-        # tambem as de nivel para os degraus da trilha abrirem aqui. Uma
-        # chamada direta a fichas_modais_html ficou esquecida aqui, gerando as
-        # mesmas TAGs sem essa parte -- e foi exatamente essa copia
-        # desatualizada que a varredura pegou no vale do painel.
+        return cad["blocos"]
+
+    if alvo in paineis:
+        # Um desenho por painel do recorte, na ordem de quantas TAGs cada um
+        # segura. Sem filtro continua sendo um só, o painel pesquisado.
+        escopo = set(universo_f) if ativos else set()
+        if ativos:
+            quantas = collections.Counter(
+                indice[t] for t in universo_f
+                if indice.get(t) in paineis)
+            ordem_paineis = [p for p, _ in quantas.most_common()] or [alvo]
+        else:
+            ordem_paineis = [alvo]
+        # Teto de fôlego: um recorte largo não pode virar dez desenhos e
+        # travar a aba. O que passa do teto fica dito, e a tabela abaixo
+        # continua listando o recorte inteiro de qualquer jeito.
+        sobrando, ordem_paineis = ordem_paineis[4:], ordem_paineis[:4]
+        blocos_vistos = []
+        for alvo_p in ordem_paineis:
+            blocos_vistos += desenha_painel(alvo_p, escopo)
+        if sobrando:
+            render_html('<div class="ct-leg"><span style="color:var(--text-3)">'
+                        f'mais {br_num(len(sobrando))} '
+                        f'{"painel" if len(sobrando) == 1 else "painéis"} neste '
+                        f'recorte ({", ".join(sobrando)}) · a tabela abaixo traz '
+                        'todas as TAGs</span></div>')
         # o nome da caixa entra na tabela porque a caixa é TAG (tem montagem e
         # documento próprios); o nome do laço não, porque laço não é TAG
-        render_tabela([t["org"] for bl in cad["blocos"] for t in bl["tags"]]
-                      + [bl["nome"] for bl in cad["blocos"]
-                         if not bl.get("ordem_fixa")], f"painel {alvo}")
-        render_fichas([t["org"] for bl in cad["blocos"] for t in bl["tags"]
+        render_tabela([t["org"] for bl in blocos_vistos for t in bl["tags"]]
+                      + [bl["nome"] for bl in blocos_vistos
+                         if not bl.get("ordem_fixa")],
+                      f"painel {' + '.join(ordem_paineis)}")
+        render_fichas([t["org"] for bl in blocos_vistos for t in bl["tags"]
                        if t["org"] in com_ficha])
         return
 
-    cad = cert_cadeia(alvo, lanc, mont)
-    if not cad["ramais"]:
-        render_html('<div class="gplan-panel"><div class="gtbl-empty">'
-                    f"Nenhum instrumento chega em {alvo} nesta base.</div></div>")
+    def desenha_caixa(alvo):
+        """Desenha uma caixa e devolve os ramais dela.
+
+        Mesmo motivo do desenha_painel: um segmento de fieldbus pode estar
+        repartido em mais de uma caixa, e desenhar uma só deixava de fora
+        instrumentos que o filtro tinha pedido.
+        """
+        nonlocal tag_sel
+        cad = cert_cadeia(alvo, lanc, mont)
+        if not cad["ramais"]:
+            render_html('<div class="gplan-panel"><div class="gtbl-empty">'
+                        f"Nenhum instrumento chega em {alvo} nesta base.</div></div>")
+            return []
+        if not tag_sel:
+            tag_sel = cad["ramais"][0]["org"]
+
+        # A situação vem do panorama, que é quem enxerga todos os circuitos da TAG
+        # -- inclusive os que não chegam nesta caixa. Recalcular aqui pela cadeia
+        # daria uma segunda resposta para a mesma pergunta, na mesma tela.
+        circuitos = cert_circuitos_por_tag(lanc, cache_key)
+        for r in cad["ramais"]:
+            v = por_tag.get(r["org"], {})
+            r["tom"] = v.get("tom", "desc")
+            r["rot"] = CERT_ROTULO[r["tom"]]
+            r["onde"] = v.get("onde", "—")
+            cs = circuitos.get(r["org"], r.get("circuitos") or [r])
+            r["circuitos"] = cs
+            r["m"] = sum(c["m"] for c in cs)
+            r["m_real"] = sum(c["m_real"] for c in cs)
+            r["pct"] = round(r["m_real"] / r["m"] * 100, 1) if r["m"] else 0.0
+            r["status"] = ("Concluído" if all(c["pct"] >= 99.5 for c in cs)
+                           else "Em Andamento" if any(c["pct"] > 0 for c in cs)
+                           else cs[0]["status"])
+            # a âncora só vale para TAG que existe no controle documental: sem ficha
+            # para abrir, o cartão não deve parecer clicável
+            r["ancora"] = ficha_anchor(r["org"]) if r["org"] in com_ficha else ""
+            # segmento e malha no cartão: filtrado um segmento, o desenho traz
+            # várias malhas juntas e não havia como saber qual cabo é de qual.
+            # "fseg" e não "seg": seg já é a caixa de onde o instrumento pendura.
+            do_tag = atrib.get(r["org"], {})
+            r["fseg"] = do_tag.get("SEGMENTO", "")
+            r["malha"] = do_tag.get("MALHA", "")
+
+        titulo = (f"{cad['painel'] or 'painel indefinido'} → {cad['caixa']}"
+                  + (f" ({len(cad['segmentos'])} caixas em série)" if cad["segmentos"] else "")
+                  + f" → {len(cad['ramais'])} instrumentos")
+        render_html(f'<div class="gplan-panel-title" style="margin:4px 0 10px">'
+                    f'Trajeto físico <span class="gtbl-muted" '
+                    f'style="font-weight:500">{titulo}</span></div>')
+
+        altura = cert_altura(cad)
+        st.components.v1.html(cert_cena_html(cad, tag_sel, tema_ativo(), altura),
+                              height=altura, scrolling=False)
+        return cad["ramais"]
+
+    # Um desenho por caixa do recorte. Sem filtro continua sendo uma só, a
+    # caixa pesquisada.
+    if ativos:
+        quantas_cx = collections.Counter(
+            indice[t] for t in universo_f
+            if t in indice and indice[t] not in paineis)
+        ordem_caixas = [c for c, _ in quantas_cx.most_common()] or [alvo]
+    else:
+        ordem_caixas = [alvo]
+    sobrando_cx, ordem_caixas = ordem_caixas[4:], ordem_caixas[:4]
+    ramais_vistos = []
+    for alvo_c in ordem_caixas:
+        ramais_vistos += desenha_caixa(alvo_c)
+    if not ramais_vistos:
         render_tabela()
         return
-    if not tag_sel:
-        tag_sel = cad["ramais"][0]["org"]
-
-    # A situação vem do panorama, que é quem enxerga todos os circuitos da TAG
-    # -- inclusive os que não chegam nesta caixa. Recalcular aqui pela cadeia
-    # daria uma segunda resposta para a mesma pergunta, na mesma tela.
-    circuitos = cert_circuitos_por_tag(lanc, cache_key)
-    for r in cad["ramais"]:
-        v = por_tag.get(r["org"], {})
-        r["tom"] = v.get("tom", "desc")
-        r["rot"] = CERT_ROTULO[r["tom"]]
-        r["onde"] = v.get("onde", "—")
-        cs = circuitos.get(r["org"], r.get("circuitos") or [r])
-        r["circuitos"] = cs
-        r["m"] = sum(c["m"] for c in cs)
-        r["m_real"] = sum(c["m_real"] for c in cs)
-        r["pct"] = round(r["m_real"] / r["m"] * 100, 1) if r["m"] else 0.0
-        r["status"] = ("Concluído" if all(c["pct"] >= 99.5 for c in cs)
-                       else "Em Andamento" if any(c["pct"] > 0 for c in cs)
-                       else cs[0]["status"])
-        # a âncora só vale para TAG que existe no controle documental: sem ficha
-        # para abrir, o cartão não deve parecer clicável
-        r["ancora"] = ficha_anchor(r["org"]) if r["org"] in com_ficha else ""
-        # segmento e malha no cartão: filtrado um segmento, o desenho traz
-        # várias malhas juntas e não havia como saber qual cabo é de qual.
-        # "fseg" e não "seg": seg já é a caixa de onde o instrumento pendura.
-        do_tag = atrib.get(r["org"], {})
-        r["fseg"] = do_tag.get("SEGMENTO", "")
-        r["malha"] = do_tag.get("MALHA", "")
-
-    titulo = (f"{cad['painel'] or 'painel indefinido'} → {cad['caixa']}"
-              + (f" ({len(cad['segmentos'])} caixas em série)" if cad["segmentos"] else "")
-              + f" → {len(cad['ramais'])} instrumentos")
-    render_html(f'<div class="gplan-panel-title" style="margin:4px 0 10px">'
-                f'Trajeto físico <span class="gtbl-muted" '
-                f'style="font-weight:500">{titulo}</span></div>')
-
-    altura = cert_altura(cad)
-    st.components.v1.html(cert_cena_html(cad, tag_sel, tema_ativo(), altura),
-                          height=altura, scrolling=False)
+    if sobrando_cx:
+        render_html('<div class="ct-leg"><span style="color:var(--text-3)">'
+                    f'mais {br_num(len(sobrando_cx))} '
+                    f'caixa{"" if len(sobrando_cx) == 1 else "s"} neste recorte '
+                    f'({", ".join(sobrando_cx)}) · a tabela abaixo traz todas as '
+                    'TAGs</span></div>')
 
     render_html("""
       <div class="ct-leg">
@@ -7846,8 +7961,9 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         <span><b style="background:var(--accent-purple)"></b>sem par na base de TAGs</span>
       </div>""")
 
-    render_tabela([r["org"] for r in cad["ramais"]], f"caixa {cad['caixa']}")
-    render_fichas([r["org"] for r in cad["ramais"] if r["org"] in com_ficha])
+    render_tabela([r["org"] for r in ramais_vistos],
+                  f"caixa {' + '.join(ordem_caixas)}")
+    render_fichas([r["org"] for r in ramais_vistos if r["org"] in com_ficha])
 
 
 # ===================================================================== #
