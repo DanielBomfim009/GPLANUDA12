@@ -1232,12 +1232,52 @@ def inject_css():
         .du-br { display:grid; align-items:center; min-height:0; line-height:1.15; text-decoration:none;
                  grid-template-columns:clamp(80px,7.8vw,124px) 1fr clamp(74px,6.4vw,96px) clamp(38px,3.2vw,50px);
                  gap:clamp(7px,.7vw,11px); }
+        /* A ultima coluna da .du-br foi dimensionada para percentual ("90,0%"),
+           e na Previsao Medicao ela carrega moeda -- "R$ 2.896.094,34" nao
+           cabe em 50px e quebrava em quatro linhas. Esta variante troca so as
+           larguras; o resto da barra continua igual. */
+        .du-br.moeda { grid-template-columns:clamp(92px,8vw,126px) 1fr
+                       clamp(42px,3.4vw,56px) clamp(96px,9vw,132px); }
+        .du-br.moeda .pc { font-size:10px; white-space:nowrap; }
         .du-br:hover .nm { color:var(--text-1); }
         .du-br .nm { font-size:10.5px; color:var(--text-2); white-space:nowrap;
                      overflow:hidden; text-overflow:ellipsis; }
         .du-br .tr { height:6px; border-radius:99px; background:rgba(var(--rgb-tinta),.06); overflow:hidden; }
         .du-br .tr i { display:block; height:100%; border-radius:99px;
                        background:linear-gradient(90deg,var(--teal-2),var(--accent-green)); }
+        /* variantes semanticas da mesma barra, para a fila da Previsao
+           Medicao: verde quem esta pronto, ambar quem esta a uma etapa,
+           vermelho o resto. Sem isto tudo saia com o mesmo verde do gradiente
+           e a barra deixava de dizer o que dizia. */
+        .du-br .tr i.feito { background:var(--accent-teal); }
+        .du-br .tr i.andando { background:var(--accent-amber); }
+        .du-br .tr i.parado { background:var(--accent-red); }
+        /* a barrinha que acompanha "3/4" na tabela: mesma pintura da
+           .pl-barra, sem a margem que a de cartao tem */
+        .med-barra { height:6px; width:52px; border-radius:99px; display:inline-block;
+                     margin-left:6px; vertical-align:middle; overflow:hidden;
+                     background:rgba(var(--rgb-tinta),.07); }
+        .med-barra i { display:block; height:100%; border-radius:99px; }
+        .med-barra i.feito { background:var(--accent-teal); }
+        .med-barra i.andando { background:var(--accent-amber); }
+        .med-barra i.parado { background:var(--accent-red); }
+        /* a coluna de avanco da Previsao Medicao: numero, barra e percentual
+           na mesma linha, alinhados, sem a coluna extra que empurrava a
+           tabela para o lado */
+        .med-av { white-space:nowrap; }
+        .med-pct { margin-left:8px; color:var(--text-3); font-size:11px;
+                   font-variant-numeric:tabular-nums; }
+        /* A coluna de avanco tem tres pecas na mesma linha (fracao, barra,
+           percentual) e precisa de largura propria, senao a barra encolhe
+           conforme o numero de selos da linha ao lado. */
+        .med-tab td.med-av { width:150px; white-space:nowrap; }
+        .med-frac { font-family:ui-monospace,Consolas,monospace; font-size:12px;
+                    font-weight:700; color:var(--text-1); }
+        .med-frac .med-de { font-weight:400; color:var(--text-3); }
+        /* Os selos sao o que a linha tem de mais denso: quebram em duas
+           fileiras em vez de esticar a tabela para fora da tela. */
+        .med-tab td.med-selos { line-height:2; }
+        .med-tab td.med-selos .gtbl-badge { margin:1px 2px 1px 0; }
         .du-br .fr { font-size:10px; color:var(--text-3); text-align:right; }
         .du-br .pc { font-size:10.5px; font-weight:700; color:var(--text-1); text-align:right; }
 
@@ -2607,7 +2647,7 @@ def inject_css():
         /* Cabo e avanço geral lado a lado: mesma pergunta, dois pesos
            diferentes. Cada .pl-pn dentro mantém seu próprio card -- só a
            largura é que divide ao meio. */
-        .cs-duas { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start; }
+        .cs-duas { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:stretch; }
         @media (max-width:900px) { .cs-duas { grid-template-columns:1fr; } }
 
         .pl-tela { position:relative; width:100%; height:0;
@@ -9774,6 +9814,381 @@ def dialogo_perfil():
         st.rerun()
 
 
+# ======================================================================= #
+#  Previsão Medição -- o que a obra já fez, antes de o papel acompanhar
+# ======================================================================= #
+# Cada relatório esperado tem um FATO por trás, e é o fato que autoriza medir.
+# TODO relatório da TAG entra na conta -- uma TAG de 10 relatórios só está
+# pronta com os 10; o que estiver feito vira percentual de avanço.
+#
+# O mapa é por (RELATÓRIO, REGRA DE ORIGEM), não só pelo nome do relatório: o
+# RIR aparece duas vezes com sentidos diferentes (o do instrumento é
+# localização, o do cabo é lançamento), e o RIMSI também (suporte por planta é
+# documento, pedestal tem base própria com avanço).
+#
+#   "calibração"  -> STATUS_CALIBRACAO == Aprovado
+#   "localização" -> STATUS_LOCALIZACAO == LOCALIZADO
+#   "montagem"    -> STATUS_MONTAGEM == Montado
+#   "cabo"        -> todos os circuitos da TAG Concluído
+#   "pedestal"    -> avanço 100% na 08_BASE_PEDESTAL
+#   "documento"   -> o próprio relatório aprovado no SIGEM (não há fato de
+#                    campo separado para ler; o documento É a evidência)
+# A chave é (RELATÓRIO, trecho da regra de origem). Trecho, e não o texto
+# inteiro: a regra do CCP se chama "BASE: CCP obrigatorio exceto Caixa de
+# Juncao Fieldbus e PAINEL", e casar pelo texto completo faz a etapa cair
+# calada no padrão quando o pipeline reescrever a frase. A ordem importa --
+# a primeira que casar vale, e por isso o RIR de cabo vem antes do RIR seco.
+MEDICAO_REGRA = [
+    ("CCP", "", "calibração"),
+    ("RIR", "cabo", "cabo"),
+    ("RIR", "", "localização"),
+    ("RIFMI", "", "montagem"),
+    ("RILTCI", "", "cabo"),
+    ("CTECRI", "", "cabo"),
+    ("RIMTU", "", "documento"),
+    ("RIMII", "", "documento"),
+    ("RIMSI", "pedestal", "pedestal"),
+    ("RIMSI", "", "documento"),
+]
+
+
+# As quatro famílias que o mapa não nomeia (RILM, RIMITPI, RIMJBI, RTFCJI)
+# caem em "documento": sem fato de campo declarado para elas, quem responde é
+# o próprio relatório aprovado. É o padrão conservador -- nunca dá uma TAG por
+# pronta sem prova.
+MEDICAO_PADRAO = "documento"
+
+
+def medicao_etapa(relatorio: str, origem: str) -> str:
+    """Que fato de campo aquele relatório prova, para aquela TAG."""
+    alvo = origem.lower()
+    for rel, trecho, etapa in MEDICAO_REGRA:
+        if rel == relatorio and (not trecho or trecho in alvo):
+            return etapa
+    return MEDICAO_PADRAO
+
+
+MEDICAO_ORDEM = ["calibração", "localização", "montagem", "cabo", "pedestal",
+                 "documento"]
+
+
+def vazio_para_traco(valor) -> str:
+    """"nan", "-" e "0" da base viram vazio: os três querem dizer 'não tem'."""
+    t = str(valor).strip()
+    return "" if t.lower() in ("nan", "-", "none", "0") else t
+
+
+@st.cache_data(show_spinner=False, max_entries=2)
+def medicao_pedestal(cache_key: str) -> dict:
+    """TAG -> avanço do pedestal dela, de 0 a 1.
+
+    Vem da aba 08_BASE_PEDESTAL já normalizada pelo pipeline: DOCUMENTO, as
+    doze TAGINSTR e o AVANCO da linha. O avanço é ponderado na origem --
+    montagem do pedestal pesa 0,4, aterramento 0,25, grauteamento 0,2, pintura
+    0,1 e abertura de TAG 0,05, somando 1.
+
+    Uma linha de pedestal serve até doze instrumentos, e o avanço dela vale
+    para todos. Uma TAG que apareça em mais de um pedestal fica com o PIOR:
+    certificar exige que todos fechem, não um deles.
+
+    Sem a coluna (planilha gerada por pipeline antigo) devolve vazio, e o
+    critério do pedestal passa a reprovar em vez de derrubar a tela -- o que
+    não se sabe não autoriza medir.
+    """
+    client = get_supabase_client()
+    if client is not None:
+        fonte = io.BytesIO(client.storage.from_(SUPABASE_BUCKET)
+                           .download(SUPABASE_FILE_PATH))
+    elif os.path.exists(LOCAL_EXCEL_FALLBACK):
+        fonte = LOCAL_EXCEL_FALLBACK
+    else:
+        return {}
+    try:
+        base = pd.read_excel(fonte, sheet_name="08_BASE_PEDESTAL")
+    except Exception:
+        return {}
+    if base.empty or "AVANCO" not in base.columns:
+        return {}
+    colunas = [c for c in base.columns if str(c).upper().startswith("TAGINSTR")]
+    saida: dict[str, float] = {}
+    for r in base.to_dict("records"):
+        try:
+            a = float(r.get("AVANCO") or 0)
+        except (TypeError, ValueError):
+            a = 0.0
+        for c in colunas:
+            t = vazio_para_traco(r.get(c))
+            if t:
+                saida[t] = min(saida.get(t, 1.0), a)
+    return saida
+
+
+@st.cache_data(show_spinner=False, max_entries=3)
+def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
+                      esperados: pd.DataFrame, lanc: pd.DataFrame,
+                      depara: pd.DataFrame, cache_key: str) -> list:
+    """Uma linha por TAG: quanto das etapas dela o campo já fechou.
+
+    O portão é POR TAG e sobre TODOS os relatórios que ela espera -- uma TAG
+    de dez relatórios só está pronta com os dez. Cada relatório é avaliado
+    pela regra de origem DELE, não pelo nome da família: o mesmo RIR é
+    localização numa linha e cabo na outra.
+
+    A etapa guarda "quantos passaram de quantos", não um sim/não. Uma TAG com
+    quatro relatórios de documento e três aprovados tinha a etapa contada como
+    feita e como pendente ao mesmo tempo, e a tela pintava de verde -- porque
+    olhava a lista de feitas primeiro. Agora verde exige o total.
+    """
+    if tags.empty:
+        return []
+    texto = lambda v: str(v).strip()
+    circ_da_ponta, _ = cert_circuitos_por_ponta(lanc, depara, cache_key)
+    status_circ = {i: texto(r["STATUS"])
+                   for i, r in enumerate(lanc.to_dict("records"))}
+    pedestal = medicao_pedestal(cache_key)
+
+    medidas, valor_medido = set(), {}
+    if "MEDIDO_GITEC" in resumo.columns:
+        for r in resumo.to_dict("records"):
+            if texto(r.get("MEDIDO_GITEC")).upper() == "SIM":
+                t = texto(r["TAG"])
+                medidas.add(t)
+                valor_medido[t] = cert_num(r.get("VALOR_GITEC"))
+
+    def cabo_ok(tag: str) -> bool:
+        # sem circuito cadastrado não é "pronto": é desconhecido, e
+        # desconhecido não autoriza medição
+        ids = circ_da_ponta.get(tag, set())
+        return bool(ids) and all(status_circ.get(i) == "Concluído" for i in ids)
+
+    por_tag: dict[str, list] = {}
+    for r in esperados.to_dict("records"):
+        por_tag.setdefault(texto(r["TAG"]), []).append(r)
+
+    info = {texto(r["TAG"]): r for r in tags.to_dict("records")}
+    linhas = []
+    for tag, docs in por_tag.items():
+        t = info.get(tag)
+        if t is None:
+            continue
+        etapas: dict[str, list] = {}
+        vistos = set()
+        for d in docs:
+            doc = texto(d["DOCUMENTO_ESPERADO"])
+            if doc in vistos:          # o mesmo documento não conta duas vezes
+                continue
+            vistos.add(doc)
+            etapa = medicao_etapa(texto(d["RELATORIO"]),
+                                  texto(d["ORIGEM_REGRA"]))
+            if etapa == "calibração":
+                passou = texto(t["STATUS_CALIBRACAO"]) == "Aprovado"
+            elif etapa == "localização":
+                passou = texto(t["STATUS_LOCALIZACAO"]) == "LOCALIZADO"
+            elif etapa == "montagem":
+                passou = texto(t["STATUS_MONTAGEM"]) == "Montado"
+            elif etapa == "cabo":
+                passou = cabo_ok(tag)
+            elif etapa == "pedestal":
+                passou = pedestal.get(tag, 0.0) >= 0.999
+            else:
+                passou = bool(aprovado(pd.Series([d["STATUS_SIGEM"]])).iloc[0])
+            marca = etapas.setdefault(etapa, [0, 0])
+            marca[1] += 1
+            marca[0] += 1 if passou else 0
+        if not etapas:
+            continue
+        feitos = sum(v[0] for v in etapas.values())
+        total = sum(v[1] for v in etapas.values())
+        linhas.append({
+            "tag": tag,
+            "descricao": " ".join(texto(t.get("DESCRICAO", "")).split()),
+            "etapas": etapas,
+            "n_feito": feitos,
+            "total": total,
+            "falta": total - feitos,
+            "pct": feitos / total * 100,
+            "fechadas": [e for e, v in etapas.items() if v[0] == v[1]],
+            "abertas": [e for e, v in etapas.items() if v[0] < v[1]],
+            "medida": tag in medidas,
+            "valor_medido": valor_medido.get(tag, 0.0),
+            "preco": cert_num(t.get("PRECO_UNITARIO")),
+            "sop": vazio_para_traco(t.get("SOP")),
+            "skid": vazio_para_traco(t.get("SKID")),
+        })
+    return linhas
+
+
+def render_previsao_medicao(tags: pd.DataFrame, resumo: pd.DataFrame,
+                            esperados: pd.DataFrame, lanc: pd.DataFrame,
+                            depara: pd.DataFrame, sigem: pd.DataFrame,
+                            cache_key: str = ""):
+    render_header("Previsão Medição")
+    linhas = medicao_prontidao(tags, resumo, esperados, lanc, depara, cache_key)
+    if not linhas:
+        render_html('<div class="gplan-panel"><div class="gtbl-empty">'
+                    "Nenhuma TAG com relatório esperado neste recorte."
+                    "</div></div>")
+        return
+
+    # O olho é só desta aba: tira os reais da vista sem mexer na permissão de
+    # quem está logado. Quem não tem ver_valores continua vendo traço com o
+    # olho aberto -- ele esconde, não libera.
+    olho = st.toggle("Mostrar valores", value=True, key="med_olho",
+                     help="Oculta os valores em reais desta tela")
+
+    def moeda(v: float) -> str:
+        return br_moeda(v) if olho else "•••"
+
+    # A aba é PREVISÃO: o que já foi medido sai da fila e vira um recorte à
+    # parte, senão o topo do ranking fica ocupado por quem não tem mais nada a
+    # fazer.
+    medidas = [l for l in linhas if l["medida"]]
+    fila = [l for l in linhas if not l["medida"]]
+    prontas = [l for l in fila if l["falta"] == 0]
+    uma = [l for l in fila if l["falta"] == 1]
+    feitas_tot = sum(l["n_feito"] for l in fila)
+    etapas_tot = sum(l["total"] for l in fila)
+    avanco = feitas_tot / max(etapas_tot, 1) * 100
+
+    render_html(f"""
+      <div class="pl-kpis">
+        <div class="pl-kpi"><div class="r">Prontas para medir</div>
+          <div class="v feito">{br_num(len(prontas))}</div>
+          <div class="s">{moeda(sum(l["preco"] for l in prontas))} · todas as etapas fechadas</div></div>
+        <div class="pl-kpi"><div class="r">A uma etapa</div>
+          <div class="v andando">{br_num(len(uma))}</div>
+          <div class="s">{moeda(sum(l["preco"] for l in uma))} · logo atrás</div></div>
+        <div class="pl-kpi"><div class="r">Avanço das etapas</div>
+          <div class="v">{br_pct(avanco)}</div>
+          <div class="s">{br_num(feitas_tot)} de {br_num(etapas_tot)} etapas</div>
+          <div class="pl-barra"><i class="andando" style="width:{avanco:.1f}%"></i></div>
+        </div>
+        <div class="pl-kpi"><div class="r">Já medido</div>
+          <div class="v">{br_num(len(medidas))}</div>
+          <div class="s">{moeda(sum(l["valor_medido"] for l in medidas))} · fora da fila</div></div>
+      </div>""")
+
+    # --- os dois gráficos ---
+    por_falta = collections.Counter(min(l["falta"], 5) for l in fila)
+    maior = max(por_falta.values()) if por_falta else 1
+    barras_fila = ""
+    for k in sorted(por_falta):
+        n = por_falta[k]
+        rot = ("Pronta" if k == 0 else
+               "Falta 1 etapa" if k == 1 else
+               f"Faltam {k} etapas" if k < 5 else "Faltam 5 ou mais")
+        cor = "feito" if k == 0 else ("andando" if k == 1 else "parado")
+        val = sum(l["preco"] for l in fila if min(l["falta"], 5) == k)
+        barras_fila += (
+            f'<div class="du-br moeda"><span class="nm">{rot}</span>'
+            f'<span class="tr"><i class="{cor}" style="width:'
+            f'{max(n / maior * 100, 0.8):.1f}%"></i></span>'
+            f'<span class="fr">{br_num(n)}</span>'
+            f'<span class="pc">{moeda(val)}</span></div>')
+
+    trava = collections.Counter(e for l in fila for e in l["abertas"])
+    maior_t = max(trava.values()) if trava else 1
+    barras_trava = ""
+    for etapa, n in trava.most_common():
+        barras_trava += (
+            f'<div class="du-br"><span class="nm">{esc(etapa.capitalize())}</span>'
+            f'<span class="tr"><i class="parado" style="width:'
+            f'{max(n / maior_t * 100, 0.8):.1f}%"></i></span>'
+            f'<span class="fr">{br_num(n)}</span>'
+            f'<span class="pc">{br_pct(n / max(len(fila), 1) * 100)}</span></div>')
+
+    render_html(
+        '<div class="cs-duas">'
+        '<div class="du-pn"><div class="du-t">Quanto falta para cada TAG</div>'
+        f'<div class="du-miolo"><div class="du-barras">{barras_fila}</div></div></div>'
+        '<div class="du-pn"><div class="du-t">Etapa que mais segura</div>'
+        f'<div class="du-miolo"><div class="du-barras">{barras_trava}</div></div></div>'
+        '</div>')
+
+    # --- um grupo por vez: a lista misturada era o que não deixava ler ---
+    GRUPOS = {
+        "Prontas": prontas,
+        "Falta 1 etapa": uma,
+        "Faltam 2": [l for l in fila if l["falta"] == 2],
+        "Faltam 3 ou mais": [l for l in fila if l["falta"] >= 3],
+        "Já medidas": medidas,
+    }
+    escolha = st.segmented_control(
+        "Recorte", list(GRUPOS),
+        format_func=lambda k: f"{k} · {br_num(len(GRUPOS[k]))}",
+        default="Prontas", key="med_grupo") or "Prontas"
+    grupo = GRUPOS[escolha]
+
+    TETO = 150
+    if escolha == "Já medidas":
+        ordem = sorted(grupo, key=lambda l: (-l["valor_medido"], l["tag"]))
+    else:
+        ordem = sorted(grupo, key=lambda l: (l["falta"], -l["n_feito"],
+                                             -l["preco"], l["tag"]))
+    mostradas = ordem[:TETO]
+
+    corpo = ""
+    for l in mostradas:
+        cor = ("feito" if l["falta"] == 0 else
+               "andando" if l["falta"] == 1 else "parado")
+        selos = ""
+        for e in MEDICAO_ORDEM:
+            if e not in l["etapas"]:
+                continue
+            ok, tot = l["etapas"][e]
+            classe = "ok" if ok == tot else ("warn" if ok else "crit")
+            quanto = "" if tot == 1 else f" {ok}/{tot}"
+            selos += (f'<span class="gtbl-badge {classe}">'
+                      f'{esc(e.capitalize())}{quanto}</span> ')
+        valor = (moeda(l["valor_medido"]) if escolha == "Já medidas"
+                 else moeda(l["preco"]))
+        corpo += (
+            f'<tr><td>{tag_link(l["tag"])}</td>'
+            f'<td class="med-av"><span class="med-frac">{l["n_feito"]}'
+            f'<span class="med-de">/{l["total"]}</span></span>'
+            f'<span class="med-barra">'
+            f'<i class="{cor}" style="width:{l["pct"]:.0f}%"></i></span>'
+            f'<span class="med-pct">{br_pct(l["pct"], 0)}</span></td>'
+            f'<td class="med-selos">{selos}</td>'
+            f'<td class="gtbl-mono">{valor}</td></tr>')
+
+    rodape = ""
+    if len(ordem) > TETO:
+        rodape = (f' · mostrando as {TETO} primeiras de {br_num(len(ordem))}')
+    cabecalho_valor = "Valor medido" if escolha == "Já medidas" else "Valor"
+    render_html(
+        '<div class="gplan-panel ct-painel"><div class="gplan-panel-title">'
+        f'{esc(escolha)}'
+        f'<span class="gtbl-muted" style="font-weight:500">'
+        f'{br_num(len(ordem))} TAGs{rodape} · clique na TAG para abrir a ficha'
+        '</span></div><div class="ct-rolo">'
+        '<table class="gtbl med-tab"><thead><tr><th>TAG</th><th>Avanço</th>'
+        f'<th>Etapas</th><th>{cabecalho_valor}</th></tr></thead>'
+        f'<tbody>{corpo}</tbody></table></div></div>')
+
+    # As fichas das TAGs da tabela. Só das mostradas: gerar as 4.939 custaria
+    # dezenas de MB de HTML para modais que ninguém vai abrir.
+    render_html(fichas_completas([l["tag"] for l in mostradas], resumo,
+                                 esperados, tags, sigem, cache_key,
+                                 origem="medicao"))
+
+    exportar = pd.DataFrame([{
+        "TAG": l["tag"], "DESCRICAO": l["descricao"],
+        "ETAPAS_FEITAS": l["n_feito"], "ETAPAS_TOTAL": l["total"],
+        "AVANCO_PCT": round(l["pct"], 1),
+        "FECHADAS": " + ".join(sorted(l["fechadas"], key=MEDICAO_ORDEM.index)),
+        "ABERTAS": " + ".join(sorted(l["abertas"], key=MEDICAO_ORDEM.index)),
+        "MEDIDA_NO_GITEC": "sim" if l["medida"] else "nao",
+        "VALOR_MEDIDO": l["valor_medido"],
+        "PRECO_UNITARIO": l["preco"], "SOP": l["sop"], "SKID": l["skid"],
+    } for l in sorted(linhas, key=lambda x: (x["medida"], x["falta"],
+                                             -x["preco"], x["tag"]))])
+    st.download_button(
+        "Baixar planilha completa",
+        exportar.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+        file_name="previsao_medicao.csv", mime="text/csv", key="medicao_csv")
+
+
 def render_perfil_lateral():
     """O perfil no rodapé da lateral: foto, nome e o caminho para o resto.
 
@@ -10096,6 +10511,13 @@ def main():
 
     admin_page = st.Page(render_acessos, title="Acessos",
                          icon=":material/manage_accounts:", url_path="acessos")
+    medicao_page = st.Page(
+        lambda: _sob_carga("Conferindo o que o campo já fechou",
+                           lambda: render_previsao_medicao(
+                               tags, resumo, esperados, lancamento, depara,
+                               sigem, cache_key)),
+        title="Previsão Medição", icon=":material/paid:",
+        url_path="previsao-medicao")
 
     # A aba que a permissão não cobre não entra no menu, em vez de entrar e
     # avisar que é proibida: a Gitec sem valores viraria uma tela de traços, e
@@ -10125,7 +10547,7 @@ def main():
     if avanco:
         secoes["Avanço"] = avanco
     if pode("administrar"):
-        secoes["Administração"] = [admin_page]
+        secoes["Administração"] = [medicao_page, admin_page]
 
     nav = st.navigation(secoes, position="sidebar")
     nav.run()
