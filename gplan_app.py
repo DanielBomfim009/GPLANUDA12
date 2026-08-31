@@ -3088,15 +3088,23 @@ def du_grupos(resumo: pd.DataFrame, esperados: pd.DataFrame) -> str:
     g["tags"] = g["GRUPO_REGRA"].map(tags_por_grupo).fillna(0).astype(int)
     g["avanco"] = (g["aprovados"] / g["esperados"]).fillna(0) * 100
     g = g.sort_values("tags", ascending=False)
+    # O cartao so vira link enquanto existir o filtro que consome o ?grupo=.
+    # Sem o filtro na lateral o clique levava de volta ao Dashboard sem
+    # recortar nada -- um link morto e pior que texto.
+    clicavel = any(c == "grupo" for c, *_ in FILTROS)
+    abre = ("a" if clicavel else "div")
     cartoes = "".join(
-        f'<a class="du-gp" href="{com_filtros("/?grupo=" + quote(sentence_case(r["GRUPO_REGRA"])))}" target="_self" '
-        f'title="Filtrar tudo por {esc(sentence_case(r["GRUPO_REGRA"]))}">'
+        f'<{abre} class="du-gp"'
+        + (f' href="{com_filtros("/?grupo=" + quote(sentence_case(r["GRUPO_REGRA"])))}"'
+           f' target="_self" title="Filtrar tudo por '
+           f'{esc(sentence_case(r["GRUPO_REGRA"]))}"' if clicavel else "")
+        + ">"
         f'<span class="lin"><span class="nm">{esc(sentence_case(r["GRUPO_REGRA"]))}</span>'
         f'<span class="pc">{br_pct(r["avanco"])}</span></span>'
         f'<span class="qt">{br_num(int(r["tags"]))}<em>tags</em></span>'
         f'<span class="du-trilho"><i style="width:{r["avanco"]:.1f}%;"></i></span>'
         f'<span class="pe"><span>{br_num(int(r["aprovados"]))} aprovados</span>'
-        f'<span>{br_num(int(r["esperados"]))} esp.</span></span></a>'
+        f'<span>{br_num(int(r["esperados"]))} esp.</span></span></{abre}>'
         for _, r in g.iterrows())
     return ('<div class="du-pn"><div class="du-t">Resumo por grupo de instrumento</div>'
             f'<div class="du-miolo"><div class="du-grupos">{cartoes}</div></div></div>')
@@ -9463,19 +9471,29 @@ NORMALIZA = {"grupo", "status"}
 # relatorios -- passava a recortar o app inteiro para as tags que tem aquele
 # status. Sao intencoes diferentes, entao sao parametros diferentes.
 URL_DO_FILTRO = {"status": "st_tag"}
+# Os quatro que Daniel quer na lateral por enquanto. Os outros continuam
+# implementados em _tags_do_filtro -- e so devolver a linha aqui para eles
+# voltarem, sem mexer em mais nada:
+#     ("fase", "Fase", "Todas", "tags", "FASE"),
+#     ("subgrupo_prioridade", "Subgrupo de Prioridade", "Todos", "tags", "SUBGRUPO_PRIORIDADE"),
+#     ("grupo", "Grupo de instrumento", "Todos", "resumo", "GRUPO_REGRA"),
+#     ("status", "Status SIGEM", "Todos", "esperados", "STATUS_SIGEM"),
 FILTROS = [
-    ("fase", "Fase", "Todas", "tags", "FASE"),
     ("sop", "SOP", "Todos", "tags", "SOP"),
     ("ssop_prioritario", "SSOP Prioritário", "Todos", "tags", "SSOP_PRIORITARIO"),
-    ("subgrupo_prioridade", "Subgrupo de Prioridade", "Todos", "tags", "SUBGRUPO_PRIORIDADE"),
-    ("grupo", "Grupo de instrumento", "Todos", "resumo", "GRUPO_REGRA"),
-    ("status", "Status SIGEM", "Todos", "esperados", "STATUS_SIGEM"),
+    ("skid", "SKID", "Todos", "tags", "SKID"),
+    ("cff", "CFF", "Todos", "tags", "CFF"),
 ]
 
 
 def _valores(serie: pd.Series) -> list:
+    # "0" entra na lista de descarte por causa do SKID: a base escreve 0 nas
+    # 363 TAGs que nao pertencem a skid nenhum, do mesmo jeito que escreve "-"
+    # no CFF de quem nao e fieldbus. Sem isso o filtro oferecia um "0" que nao
+    # quer dizer nada. Nenhuma das outras colunas filtraveis usa 0 como valor.
     limpo = serie.dropna().astype(str).str.strip()
-    return sorted({v for v in limpo if v and v.lower() not in ("nan", "-", "none")})
+    return sorted({v for v in limpo
+                   if v and v.lower() not in ("nan", "-", "none", "0")})
 
 
 def _tags_do_filtro(chave: str, valor: str, tags, resumo, esperados) -> set:
@@ -9491,6 +9509,10 @@ def _tags_do_filtro(chave: str, valor: str, tags, resumo, esperados) -> set:
         return set(tags.loc[tags["SSOP_PRIORITARIO"].astype(str).str.strip() == valor, "TAG"])
     if chave == "subgrupo_prioridade":
         return set(tags.loc[tags["SUBGRUPO_PRIORIDADE"].astype(str).str.strip() == valor, "TAG"])
+    if chave == "skid":
+        return set(tags.loc[tags["SKID"].astype(str).str.strip() == valor, "TAG"])
+    if chave == "cff":
+        return set(tags.loc[tags["CFF"].astype(str).str.strip() == valor, "TAG"])
     if chave == "grupo":
         return set(resumo.loc[resumo["GRUPO_REGRA"].map(sentence_case) == valor, "TAG"])
     if chave == "status":
