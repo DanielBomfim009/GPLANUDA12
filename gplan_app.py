@@ -1309,51 +1309,86 @@ def inject_css():
            espremida entre duas colunas de número. Aqui a altura é a do
            conteúdo.
            --------------------------------------------------------------- */
-        .pm-topo { display:grid; grid-template-columns:1.35fr 1fr 1fr 1fr;
-                   gap:14px; margin:4px 0 16px; }
-        .pm-card { background:var(--dark-card); border:1px solid var(--border-color);
-                   border-radius:14px; padding:16px 18px; }
-        .pm-card.destaque { border-color:rgba(var(--rgb-teal),.35);
-                            background:linear-gradient(135deg,
-                              rgba(var(--rgb-teal),.10), transparent 62%),
-                              var(--dark-card); }
-        .pm-card .rot { font-size:10.5px; font-weight:700; letter-spacing:.6px;
-                        text-transform:uppercase; color:var(--text-3); }
-        .pm-card .num { font-size:38px; font-weight:800; line-height:1.05;
-                        margin-top:6px; font-variant-numeric:tabular-nums; }
-        .pm-card.destaque .num { font-size:46px; color:var(--accent-teal); }
-        .pm-card .num.ambar { color:var(--accent-amber); }
-        .pm-card .cifra { margin-top:8px; font-size:14px; font-weight:700;
-                          color:var(--text-1); font-variant-numeric:tabular-nums; }
-        .pm-card .nota { margin-top:3px; font-size:11px; color:var(--text-3); }
+        /* Uma linha so, sempre: cartao com icone, numero e nota -- sem
+           tendencia inventada, so o que da pra calcular com dado real. */
+        .pm-topo { display:flex; gap:10px; flex-wrap:wrap; margin:4px 0 16px; }
+        .pm-card { flex:1 1 220px; display:flex; gap:11px; align-items:flex-start;
+                   background:var(--dark-card); border:1px solid var(--border-color);
+                   border-radius:12px; padding:13px 15px; }
+        .pm-card .tile { flex:none; width:30px; height:30px; border-radius:9px;
+                         display:flex; align-items:center; justify-content:center; }
+        .pm-card .tile svg { width:16px; height:16px; }
+        .pm-card .corpo { min-width:0; }
+        .pm-card .rot { font-size:10px; font-weight:700; letter-spacing:.4px;
+                        text-transform:uppercase; color:var(--text-3); white-space:nowrap; }
+        .pm-card .num { font-size:25px; font-weight:800; line-height:1.15;
+                        margin-top:3px; font-variant-numeric:tabular-nums; }
+        .pm-card .nota { margin-top:3px; font-size:10.5px; color:var(--text-3);
+                         line-height:1.35; }
 
-        .pm-duas { display:grid; grid-template-columns:1fr 1fr; gap:14px;
-                   margin-bottom:16px; }
-        @media (max-width:1000px) { .pm-duas { grid-template-columns:1fr; }
-                                    .pm-topo { grid-template-columns:1fr 1fr; } }
-        .pm-pn { background:var(--dark-card); border:1px solid var(--border-color);
-                 border-radius:14px; padding:16px 18px 18px; }
-        .pm-pn > h4 { margin:0 0 14px; font-size:12.5px; font-weight:700;
-                      color:var(--text-1); letter-spacing:.2px; }
+        /* O painel único de distribuição -- por etapa, rótulo + barra + a
+           fração de quantas TAGs da fila ainda têm ela aberta. Um painel só,
+           não dois: "o que segura" e "quão perto" eram a mesma pergunta em
+           duas caixas. */
+        .pm-dist { background:var(--dark-card); border:1px solid var(--border-color);
+                   border-radius:14px; padding:16px 18px 18px; margin-bottom:16px; }
+        .pm-dist > h4 { margin:0 0 15px; font-size:12.5px; font-weight:700;
+                        color:var(--text-1); letter-spacing:.2px;
+                        display:flex; align-items:baseline; gap:8px; }
+        /* o texto do titulo e um no de texto solto, nao um <span> proprio --
+           gap do flex nao separa confiavelmente um no de texto do span
+           seguinte em todo navegador. empurrar o span pra direita resolve
+           sem depender disso, e casa com o mesmo padrao do .ct-painel */
+        .pm-dist > h4 span { margin-left:auto; font-size:11px; font-weight:500; }
+        .pm-dist .lin { display:grid; grid-template-columns:112px 1fr auto;
+                        align-items:center; gap:12px; margin-bottom:10px; }
+        .pm-dist .lin:last-child { margin-bottom:0; }
+        .pm-dist .nm { font-size:12px; color:var(--text-2); }
+        .pm-dist .tr { height:8px; border-radius:99px; overflow:hidden;
+                       background:rgba(var(--rgb-tinta),.07); }
+        .pm-dist .tr i { display:block; height:100%; border-radius:99px; }
+        .pm-dist .tr i.parado { background:var(--accent-red); }
+        .pm-dist .tr i.andando { background:var(--accent-amber); }
+        /* Bloqueio pequeno não é vermelho -- vermelho é só para o que
+           domina. Sem este terceiro tom as seis etapas saíam na mesma cor e
+           a leitura virava "está tudo travado", que não é a história. */
+        .pm-dist .tr i.leve { background:rgba(var(--rgb-tinta),.28); }
+        .pm-dist .val { font-size:11px; color:var(--text-3); text-align:right;
+                        white-space:nowrap; font-variant-numeric:tabular-nums; }
+        .pm-dist .val b { color:var(--text-1); font-weight:700; }
 
-        /* Uma faixa por degrau: rótulo em cima da barra, número grande à
-           direita. Rótulo e barra na mesma linha era o que obrigava a
-           encolher os dois. */
-        .pm-lin { display:grid; grid-template-columns:1fr auto; gap:2px 12px;
-                  align-items:baseline; margin-bottom:11px; }
-        .pm-lin:last-child { margin-bottom:0; }
-        .pm-lin .nm { font-size:12px; color:var(--text-2); }
-        .pm-lin .qt { font-size:15px; font-weight:700; color:var(--text-1);
-                      font-variant-numeric:tabular-nums; }
-        .pm-lin .tr { grid-column:1/-1; height:9px; border-radius:99px;
-                      background:rgba(var(--rgb-tinta),.07); overflow:hidden;
-                      margin-top:3px; }
-        .pm-lin .tr i { display:block; height:100%; border-radius:99px; }
-        .pm-lin .tr i.feito { background:var(--accent-teal); }
-        .pm-lin .tr i.andando { background:var(--accent-amber); }
-        .pm-lin .tr i.parado { background:var(--accent-red); }
-        .pm-lin .sub { grid-column:1/-1; font-size:11px; color:var(--text-3);
-                       margin-top:4px; font-variant-numeric:tabular-nums; }
+        /* Físico / Medição / Documental -- três respostas diferentes, três
+           pastilhas na mesma linha. "on" é o que já aconteceu; "off" fica
+           neutro, não vermelho -- ainda não chegou lá não é um erro. */
+        .pm-status { display:flex; gap:4px; flex-wrap:wrap; }
+        .pm-chip { font-size:9.5px; font-weight:700; padding:2.5px 6px;
+                   border-radius:99px; letter-spacing:.2px; white-space:nowrap;
+                   border:1px solid transparent; }
+        .pm-chip.on { background:rgba(var(--rgb-teal),.15); color:var(--accent-teal);
+                      border-color:rgba(var(--rgb-teal),.3); }
+        .pm-chip.off { background:rgba(var(--rgb-tinta),.06); color:var(--text-3); }
+
+        /* Duas barras finas na mesma célula -- físico em cima, documental
+           embaixo -- em vez de duas colunas largas repetindo a mesma peça
+           três vezes (número, barra, percentual) que a v5 tinha. */
+        .pm-duplabar { display:flex; flex-direction:column; gap:5px; min-width:104px; }
+        .pm-duplabar .lin { display:grid; grid-template-columns:28px 1fr 34px;
+                            align-items:center; gap:6px; }
+        .pm-duplabar .lb { font-size:9px; color:var(--text-3); font-weight:700; }
+        .pm-duplabar .tr { height:6px; border-radius:99px; overflow:hidden;
+                           background:rgba(var(--rgb-tinta),.08); }
+        .pm-duplabar .tr i { display:block; height:100%; border-radius:99px; }
+        .pm-duplabar .tr i.feito { background:var(--accent-teal); }
+        .pm-duplabar .tr i.andando { background:var(--accent-amber); }
+        .pm-duplabar .tr i.parado { background:var(--accent-red); }
+        .pm-duplabar .vl { font-size:10.5px; text-align:right; color:var(--text-2);
+                           font-variant-numeric:tabular-nums; }
+
+        .pm-contexto { display:flex; gap:22px; flex-wrap:wrap; margin:2px 0 16px;
+                       font-size:12px; color:var(--text-3); }
+        .pm-contexto b { color:var(--text-1); font-variant-numeric:tabular-nums; }
+
+        .pm-busca { margin-bottom:12px; max-width:320px; }
         .du-br .fr { font-size:10px; color:var(--text-3); text-align:right; }
         .du-br .pc { font-size:10.5px; font-weight:700; color:var(--text-1); text-align:right; }
 
@@ -10082,6 +10117,13 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
     quatro relatórios de documento e três aprovados tinha a etapa contada como
     feita e como pendente ao mesmo tempo, e a tela pintava de verde -- porque
     olhava a lista de feitas primeiro. Agora verde exige o total.
+
+    Duas leituras adicionais, lado a lado com a física, sem uma decidir pela
+    outra: avanco_doc é o AVANCO_DOCUMENTAL que a 07_TAG_RESUMO já calcula
+    (a mesma fonte do Dashboard e do Progresso -- não é uma segunda conta
+    para a mesma pergunta), e relatorio_aprovado é a TAG com TODOS os
+    documentos esperados aprovados no SIGEM. Físico, medição e documental
+    são três respostas diferentes, e nenhuma substitui a outra.
     """
     if tags.empty:
         return []
@@ -10098,6 +10140,11 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
                 t = texto(r["TAG"])
                 medidas.add(t)
                 valor_medido[t] = cert_num(r.get("VALOR_GITEC"))
+
+    avanco_doc_tag = {}
+    if "AVANCO_DOCUMENTAL" in resumo.columns:
+        for r in resumo.to_dict("records"):
+            avanco_doc_tag[texto(r["TAG"])] = cert_num(r.get("AVANCO_DOCUMENTAL")) * 100
 
     # Os circuitos que CHEGAM em cada ponta -- o cert_circuitos_por_ponta
     # indexa só os que saem. A caixa precisa dos dois lados (ver cabo_ok).
@@ -10142,14 +10189,14 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
         if t is None:
             continue
         etapas: dict[str, list] = {}
-        vistos = set()
+        vistos, docs_por_id = set(), {}
         for d in docs:
             doc = texto(d["DOCUMENTO_ESPERADO"])
             if doc in vistos:          # o mesmo documento não conta duas vezes
                 continue
             vistos.add(doc)
-            etapa = medicao_etapa(texto(d["RELATORIO"]),
-                                  texto(d["ORIGEM_REGRA"]))
+            docs_por_id[doc] = texto(d["STATUS_SIGEM"])
+            etapa = medicao_etapa(texto(d["RELATORIO"]), texto(d["ORIGEM_REGRA"]))
             # O documento aprovado no SIGEM é o juiz final e vem NA FRENTE do
             # físico: ninguém aprova o relatório sem o serviço ter acontecido.
             # Quando ele está aprovado, a etapa fecha mesmo que a coluna de
@@ -10168,14 +10215,16 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
             elif etapa == "pedestal":
                 passou = pedestal.get(tag, 0.0) >= 0.999
             else:
-                passou = bool(aprovado(pd.Series([d["STATUS_SIGEM"]])).iloc[0])
+                passou = False
             marca = etapas.setdefault(etapa, [0, 0])
             marca[1] += 1
             marca[0] += 1 if passou else 0
-        if not etapas:
+        total = sum(v[1] for v in etapas.values())
+        if not total:
             continue
         feitos = sum(v[0] for v in etapas.values())
-        total = sum(v[1] for v in etapas.values())
+        relatorio_aprovado = bool(docs_por_id) and bool(
+            aprovado(pd.Series(list(docs_por_id.values()))).all())
         linhas.append({
             "tag": tag,
             "descricao": " ".join(texto(t.get("DESCRICAO", "")).split()),
@@ -10188,6 +10237,8 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
             "abertas": [e for e, v in etapas.items() if v[0] < v[1]],
             "medida": tag in medidas,
             "valor_medido": valor_medido.get(tag, 0.0),
+            "avanco_doc": avanco_doc_tag.get(tag, 0.0),
+            "relatorio_aprovado": relatorio_aprovado,
             "preco": cert_num(t.get("PRECO_UNITARIO")),
             "sop": vazio_para_traco(t.get("SOP")),
             "skid": vazio_para_traco(t.get("SKID")),
@@ -10199,6 +10250,14 @@ def render_previsao_medicao(tags: pd.DataFrame, resumo: pd.DataFrame,
                             esperados: pd.DataFrame, lanc: pd.DataFrame,
                             depara: pd.DataFrame, sigem: pd.DataFrame,
                             cache_key: str = ""):
+    """Painel operacional de prontidão: o que já está pronto para medir,
+    antes do relatório aprovado -- não um dashboard genérico de percentual.
+
+    Três respostas separadas, nenhuma decidindo pela outra: FÍSICO (as
+    etapas de campo fecharam), MEDIÇÃO (o GITEC já mediu) e DOCUMENTAL (o
+    SIGEM já aprovou). Uma TAG pode estar fisicamente pronta com a medição e
+    o documento ainda pendentes -- e é essa TAG que a tela existe para achar.
+    """
     render_header("Previsão Medição")
     linhas = medicao_prontidao(tags, resumo, esperados, lanc, depara, cache_key)
     if not linhas:
@@ -10216,96 +10275,107 @@ def render_previsao_medicao(tags: pd.DataFrame, resumo: pd.DataFrame,
     def moeda(v: float) -> str:
         return br_moeda(v) if olho else "•••"
 
-    # A aba é PREVISÃO: o que já foi medido sai da fila e vira um recorte à
-    # parte, senão o topo do ranking fica ocupado por quem não tem mais nada a
-    # fazer.
+    def cor_pct(pct: float) -> str:
+        return "feito" if pct >= 99.5 else ("andando" if pct > 0 else "parado")
+
+    # A fila é PREVISÃO: TAG já medida não está mais "perto de medir", já
+    # aconteceu. Sai do ranking operacional e vira um recorte próprio.
     medidas = [l for l in linhas if l["medida"]]
     fila = [l for l in linhas if not l["medida"]]
     prontas = [l for l in fila if l["falta"] == 0]
-    uma = [l for l in fila if l["falta"] == 1]
-    feitas_tot = sum(l["n_feito"] for l in fila)
-    etapas_tot = sum(l["total"] for l in fila)
-    avanco = feitas_tot / max(etapas_tot, 1) * 100
+    a_medir = [l for l in fila if l["falta"] == 1]
+    em_andamento = [l for l in fila if l["falta"] >= 2]
 
     total_fila = max(len(fila), 1)
+    feitas_tot = sum(l["n_feito"] for l in fila)
+    etapas_tot = sum(l["total"] for l in fila)
+    av_fisico_geral = feitas_tot / max(etapas_tot, 1) * 100
+
+    # =================================================================
+    # Indicadores -- só os calculáveis com dado real, sem tendência
+    # inventada (não há histórico salvo para calcular variação semana a
+    # semana). Uma linha só, ícone reaproveitado do Dashboard.
+    # =================================================================
     render_html(f"""
       <div class="pm-topo">
-        <div class="pm-card destaque">
-          <div class="rot">Prontas para medir</div>
-          <div class="num">{br_num(len(prontas))}</div>
-          <div class="cifra">{moeda(sum(l["preco"] for l in prontas))}</div>
-          <div class="nota">todas as etapas de campo fechadas</div>
-        </div>
-        <div class="pm-card">
-          <div class="rot">A uma etapa</div>
-          <div class="num ambar">{br_num(len(uma))}</div>
-          <div class="cifra">{moeda(sum(l["preco"] for l in uma))}</div>
-          <div class="nota">falta só uma para entrar na fila</div>
-        </div>
-        <div class="pm-card">
-          <div class="rot">Avanço das etapas</div>
-          <div class="num">{br_pct(avanco)}</div>
-          <div class="cifra">{br_num(feitas_tot)} de {br_num(etapas_tot)}</div>
-          <div class="nota">etapas fechadas na obra toda</div>
-        </div>
-        <div class="pm-card">
-          <div class="rot">Já medido</div>
+        <div class="pm-card">{du_tile("#2dd4bf", "check")}
+          <div class="corpo"><div class="rot">Prontas para medição</div>
+          <div class="num" style="color:var(--accent-teal)">{br_num(len(prontas))}</div>
+          <div class="nota">{moeda(sum(l["preco"] for l in prontas))} · etapas físicas concluídas</div>
+          </div></div>
+        <div class="pm-card">{du_tile("#fbbf24", "clock")}
+          <div class="corpo"><div class="rot">A medir</div>
+          <div class="num" style="color:var(--accent-amber)">{br_num(len(a_medir))}</div>
+          <div class="nota">{moeda(sum(l["preco"] for l in a_medir))} · falta 1 etapa</div>
+          </div></div>
+        <div class="pm-card">{du_tile("#5b8def", "trend")}
+          <div class="corpo"><div class="rot">Avanço físico</div>
+          <div class="num">{br_pct(av_fisico_geral)}</div>
+          <div class="nota">{br_num(feitas_tot)} de {br_num(etapas_tot)} etapas na fila</div>
+          </div></div>
+        <div class="pm-card">{du_tile("#34d399", "archive")}
+          <div class="corpo"><div class="rot">Já medidas</div>
           <div class="num">{br_num(len(medidas))}</div>
-          <div class="cifra">{moeda(sum(l["valor_medido"] for l in medidas))}</div>
-          <div class="nota">fora da fila, no GITEC</div>
-        </div>
+          <div class="nota">{moeda(sum(l["valor_medido"] for l in medidas))} · fora da fila, no GITEC</div>
+          </div></div>
       </div>""")
 
-    # --- os dois painéis ---
-    por_falta = collections.Counter(min(l["falta"], 5) for l in fila)
-    degraus = ""
-    for k in sorted(por_falta):
-        n = por_falta[k]
-        rot = ("Pronta" if k == 0 else
-               "Falta 1 etapa" if k == 1 else
-               f"Faltam {k} etapas" if k < 5 else "Faltam 5 ou mais")
-        cor = "feito" if k == 0 else ("andando" if k == 1 else "parado")
-        val = sum(l["preco"] for l in fila if min(l["falta"], 5) == k)
-        degraus += (
-            f'<div class="pm-lin"><span class="nm">{rot}</span>'
-            f'<span class="qt">{br_num(n)}</span>'
-            f'<span class="tr"><i class="{cor}" style="width:'
-            f'{max(n / total_fila * 100, 0.6):.1f}%"></i></span>'
-            f'<span class="sub">{br_pct(n / total_fila * 100)} da fila · '
-            f'{moeda(val)}</span></div>')
-
+    # =================================================================
+    # Distribuição do progresso físico -- um painel só, por etapa, com a
+    # fração de quantas TAGs da fila ainda têm ela aberta. Etapa que
+    # bloqueia menos de 1/4 do maior gargalo fica no tom neutro: ela
+    # existe, mas não é o motivo de a fila estar parada.
+    # =================================================================
     trava = collections.Counter(e for l in fila for e in l["abertas"])
-    segura = ""
-    for etapa, n in trava.most_common():
-        segura += (
-            f'<div class="pm-lin"><span class="nm">{esc(etapa.capitalize())}</span>'
-            f'<span class="qt">{br_num(n)}</span>'
-            f'<span class="tr"><i class="parado" style="width:'
-            f'{max(n / total_fila * 100, 0.6):.1f}%"></i></span>'
-            f'<span class="sub">segura {br_pct(n / total_fila * 100)} das '
-            f'{br_num(total_fila)} TAGs da fila</span></div>')
-
+    maior_trava = max(trava.values()) if trava else 1
+    linhas_dist = ""
+    for etapa in MEDICAO_ORDEM:
+        n = trava.get(etapa, 0)
+        if not n:
+            continue
+        pct = n / total_fila * 100
+        peso = n / maior_trava
+        cor = "parado" if peso >= 0.6 else ("andando" if peso >= 0.25 else "leve")
+        linhas_dist += (
+            f'<div class="lin"><span class="nm">{esc(etapa.capitalize())}</span>'
+            f'<span class="tr"><i class="{cor}" style="width:'
+            f'{max(pct, 0.6):.1f}%"></i></span>'
+            f'<span class="val"><b>{br_pct(pct)}</b> · {br_num(n)} de '
+            f'{br_num(total_fila)} pendentes</span></div>')
     render_html(
-        '<div class="pm-duas">'
-        '<div class="pm-pn"><h4>Quanto falta para cada TAG</h4>'
-        f'{degraus}</div>'
-        '<div class="pm-pn"><h4>Etapa que mais segura a fila</h4>'
-        f'{segura}</div>'
-        '</div>')
+        '<div class="pm-dist"><h4>Distribuição do progresso físico'
+        f'<span class="gtbl-muted">antes dos relatórios</span></h4>'
+        f'{linhas_dist}</div>')
 
-    # --- um grupo por vez: a lista misturada era o que não deixava ler ---
+    # =================================================================
+    # Recorte + busca + tabela
+    # =================================================================
     GRUPOS = {
-        "Prontas": prontas,
-        "Falta 1 etapa": uma,
-        "Faltam 2": [l for l in fila if l["falta"] == 2],
-        "Faltam 3 ou mais": [l for l in fila if l["falta"] >= 3],
+        "Todas": linhas,
+        "Prontas para medição": prontas,
+        "A medir": a_medir,
+        "Em andamento": em_andamento,
         "Já medidas": medidas,
+    }
+    DESCRICAO = {
+        "Todas": "todas as TAGs com relatório esperado neste recorte",
+        "Prontas para medição": "TAGs com todas as etapas físicas concluídas, "
+                                "aguardando medição",
+        "A medir": "falta uma etapa física para entrar na fila",
+        "Em andamento": "duas etapas físicas ou mais ainda em aberto",
+        "Já medidas": "medidas no GITEC -- fora da fila",
     }
     escolha = st.segmented_control(
         "Recorte", list(GRUPOS),
         format_func=lambda k: f"{k} · {br_num(len(GRUPOS[k]))}",
-        default="Prontas", key="med_grupo") or "Prontas"
+        default="Prontas para medição", key="med_grupo") or "Prontas para medição"
     grupo = GRUPOS[escolha]
+
+    busca = st.text_input("Buscar TAG", key="med_busca",
+                          placeholder="Digite parte do nome da TAG…")
+    if busca.strip():
+        alvo = busca.strip().upper()
+        grupo = [l for l in grupo if alvo in l["tag"].upper()]
 
     TETO = 150
     if escolha == "Já medidas":
@@ -10317,8 +10387,8 @@ def render_previsao_medicao(tags: pd.DataFrame, resumo: pd.DataFrame,
 
     corpo = ""
     for l in mostradas:
-        cor = ("feito" if l["falta"] == 0 else
-               "andando" if l["falta"] == 1 else "parado")
+        cor = cor_pct(l["pct"])
+        cor_doc = cor_pct(l["avanco_doc"])
         selos = ""
         for e in MEDICAO_ORDEM:
             if e not in l["etapas"]:
@@ -10328,34 +10398,47 @@ def render_previsao_medicao(tags: pd.DataFrame, resumo: pd.DataFrame,
             quanto = "" if tot == 1 else f" {ok}/{tot}"
             selos += (f'<span class="gtbl-badge {classe}">'
                       f'{esc(e.capitalize())}{quanto}</span> ')
+        status = (
+            f'<span class="pm-chip {"on" if l["falta"] == 0 else "off"}">'
+            f'Físico</span>'
+            f'<span class="pm-chip {"on" if l["medida"] else "off"}">'
+            f'Medição</span>'
+            f'<span class="pm-chip {"on" if l["relatorio_aprovado"] else "off"}">'
+            f'Documental</span>')
         valor = (moeda(l["valor_medido"]) if escolha == "Já medidas"
                  else moeda(l["preco"]))
         corpo += (
             f'<tr><td>{tag_link(l["tag"])}</td>'
-            f'<td class="med-av"><span class="med-frac">{l["n_feito"]}'
-            f'<span class="med-de">/{l["total"]}</span></span>'
-            f'<span class="med-barra">'
-            f'<i class="{cor}" style="width:{l["pct"]:.0f}%"></i></span>'
-            f'<span class="med-pct">{br_pct(l["pct"], 0)}</span></td>'
+            f'<td><div class="pm-status">{status}</div></td>'
+            f'<td><div class="pm-duplabar">'
+            f'<div class="lin"><span class="lb">FÍS</span>'
+            f'<span class="tr"><i class="{cor}" style="width:{l["pct"]:.0f}%">'
+            f'</i></span><span class="vl">{br_pct(l["pct"], 0)}</span></div>'
+            f'<div class="lin"><span class="lb">DOC</span>'
+            f'<span class="tr"><i class="{cor_doc}" style="width:'
+            f'{l["avanco_doc"]:.0f}%"></i></span>'
+            f'<span class="vl">{br_pct(l["avanco_doc"], 0)}</span></div>'
+            f'</div></td>'
             f'<td class="med-selos">{selos}</td>'
             f'<td class="gtbl-mono">{valor}</td></tr>')
 
     rodape = ""
     if len(ordem) > TETO:
-        rodape = (f' · mostrando as {TETO} primeiras de {br_num(len(ordem))}')
+        rodape = f' · mostrando as {TETO} primeiras de {br_num(len(ordem))}'
     cabecalho_valor = "Valor medido" if escolha == "Já medidas" else "Valor"
     render_html(
         '<div class="gplan-panel ct-painel"><div class="gplan-panel-title">'
-        f'{esc(escolha)}'
+        f'Tags · {esc(escolha)}'
         f'<span class="gtbl-muted" style="font-weight:500">'
-        f'{br_num(len(ordem))} TAGs{rodape} · clique na TAG para abrir a ficha'
+        f'{esc(DESCRICAO.get(escolha, ""))} · {br_num(len(ordem))} TAGs{rodape}'
         '</span></div><div class="ct-rolo">'
-        '<table class="gtbl med-tab"><thead><tr><th>TAG</th><th>Avanço</th>'
-        f'<th>Etapas</th><th>{cabecalho_valor}</th></tr></thead>'
+        '<table class="gtbl med-tab"><thead><tr><th>TAG</th><th>Status</th>'
+        '<th>Avanço físico / documental</th><th>Etapas</th>'
+        f'<th>{cabecalho_valor}</th></tr></thead>'
         f'<tbody>{corpo}</tbody></table></div></div>')
 
-    # As fichas das TAGs da tabela. Só das mostradas: gerar as 4.939 custaria
-    # dezenas de MB de HTML para modais que ninguém vai abrir.
+    # As fichas das TAGs da tabela. Só das mostradas: gerar as milhares
+    # custaria dezenas de MB de HTML para modais que ninguém vai abrir.
     render_html(fichas_completas([l["tag"] for l in mostradas], resumo,
                                  esperados, tags, sigem, cache_key,
                                  origem="medicao"))
@@ -10363,16 +10446,18 @@ def render_previsao_medicao(tags: pd.DataFrame, resumo: pd.DataFrame,
     exportar = pd.DataFrame([{
         "TAG": l["tag"], "DESCRICAO": l["descricao"],
         "ETAPAS_FEITAS": l["n_feito"], "ETAPAS_TOTAL": l["total"],
-        "AVANCO_PCT": round(l["pct"], 1),
+        "AVANCO_FISICO_PCT": round(l["pct"], 1),
+        "AVANCO_DOCUMENTAL_PCT": round(l["avanco_doc"], 1),
         "FECHADAS": " + ".join(sorted(l["fechadas"], key=MEDICAO_ORDEM.index)),
         "ABERTAS": " + ".join(sorted(l["abertas"], key=MEDICAO_ORDEM.index)),
         "MEDIDA_NO_GITEC": "sim" if l["medida"] else "nao",
+        "RELATORIO_APROVADO": "sim" if l["relatorio_aprovado"] else "nao",
         "VALOR_MEDIDO": l["valor_medido"],
         "PRECO_UNITARIO": l["preco"], "SOP": l["sop"], "SKID": l["skid"],
     } for l in sorted(linhas, key=lambda x: (x["medida"], x["falta"],
                                              -x["preco"], x["tag"]))])
     st.download_button(
-        "Baixar planilha completa",
+        "Exportar",
         exportar.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
         file_name="previsao_medicao.csv", mime="text/csv", key="medicao_csv")
 
