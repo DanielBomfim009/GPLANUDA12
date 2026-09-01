@@ -16,6 +16,26 @@ import streamlit as st
 
 import acesso
 
+# Este Python foi instalado sem bundle de CA nenhum -- ssl.get_default_verify_
+# paths() devolve cafile None e o caminho do OpenSSL nem existe --, e por isso
+# TODA chamada ao Supabase morria em CERTIFICATE_VERIFY_FAILED. O que se via
+# na tela era a planilha do disco, silenciosamente, porque o get_supabase_
+# client() cai no arquivo local quando o cliente falha: a base publicada
+# mudava e ninguem via.
+#
+# O truststore faz o Python usar a loja de certificados do sistema, que e a
+# mesma que o navegador usa e ja confia na cadeia. O certifi nao resolve neste
+# caso -- testado, continua reprovando.
+#
+# Fica dentro do try porque no Render (Linux) o Python ja vem com o bundle e o
+# pacote pode nem estar instalado; la a injecao nao e necessaria.
+try:
+    import truststore
+
+    truststore.inject_into_ssl()
+except Exception:                                   # pragma: no cover
+    pass
+
 LOCAL_EXCEL_FALLBACK = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..",
     "Controle de Relatório dos Instrumentos", "01_ARQUIVO_ATUAL",
@@ -1879,6 +1899,7 @@ def inject_css():
           font-size: 12.5px; color: var(--text-2); display:flex; align-items:center; gap: 8px;
           background: var(--dark-card); border: 1px solid var(--border-color); padding: 8px 14px; border-radius: 100px;
         }
+        .gplan-updated .fonte { margin-left:5px; opacity:.62; font-weight:600; }
         .gplan-updated .dot { width:6px; height:6px; border-radius:50%; background: var(--accent-green); box-shadow: 0 0 8px var(--accent-green); }
         .gplan-count-pill {
           font-size: 12.5px; color: var(--text-2); font-weight: 600;
@@ -2822,6 +2843,29 @@ def inject_css():
     )
 
 
+def fonte_dados(cache_key: str) -> str:
+    """De onde veio a planilha desta sessão: o disco ou o Supabase.
+
+    Sai da mesma chave que a data, sem encanamento novo: o disco entrega o
+    mtime (epoch, que converte para float) e o Supabase entrega o updated_at
+    em ISO-8601 (que não converte).
+
+    Está na tela porque as duas fontes divergem exatamente no intervalo entre
+    gerar e publicar: rodar o pipeline muda o arquivo local na hora, e o
+    Supabase só muda quando alguém sobe. Sem dizer qual está sendo lido, não
+    havia como saber se o número na tela é o da rodada que acabou de sair ou
+    o da cópia que a equipe enxerga.
+    """
+    chave = str(cache_key or "").split("|")[0]
+    if not chave or chave == "missing":
+        return ""            # sem chave não se afirma fonte nenhuma
+    try:
+        float(chave)
+        return "arquivo local"
+    except (TypeError, ValueError):
+        return "Supabase"
+
+
 def data_atualizacao(cache_key: str) -> str:
     """Quando a PLANILHA foi atualizada, no horario de Brasilia.
 
@@ -2898,6 +2942,7 @@ def _sob_carga(texto: str, montar):
 
 def render_header(title: str, extra_pill: str | None = None):
     now = st.session_state.get("gplan_atualizado_em", "—")
+    de_onde = st.session_state.get("gplan_fonte", "")
     extra_html = f'<div class="gplan-count-pill">{extra_pill}</div>' if extra_pill else ""
     # O filtro da lateral vale para o app inteiro, entao ele tem que aparecer
     # em toda aba. Sem isso alguem abre Relatorios, ve 464 tags em vez de 5.098
@@ -2910,7 +2955,8 @@ def render_header(title: str, extra_pill: str | None = None):
           <div style="display:flex; gap:12px; align-items:center;">
             {filtro}
             {extra_html}
-            <div class="gplan-updated"><span class="dot"></span>Atualizado {now}</div>
+            <div class="gplan-updated"><span class="dot"></span>Atualizado {now}
+              {f'<span class="fonte">· {esc(de_onde)}</span>' if de_onde else ''}</div>
           </div>
         </div>
         """
@@ -9936,6 +9982,11 @@ MEDICAO_REGRA = [
     # RIMJBI como documento fazia 484 caixas dependerem de papel para uma
     # etapa que o STATUS_MONTAGEM já responde.
     ("RIMJBI", "", "montagem"),
+    # A caixa de junção fieldbus não recebe CCP -- a regra do CCP exclui ela
+    # e o painel de propósito. O relatório de teste funcional dela ocupa esse
+    # lugar, e responde pela mesma coluna: 323 das 329 caixas já estão com o
+    # STATUS_CALIBRACAO aprovado.
+    ("RTFCJI", "", "calibração"),
     ("RILTCI", "", "cabo"),
     ("CTECRI", "", "cabo"),
     ("RIMTU", "", "documento"),
@@ -10048,10 +10099,36 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
                 medidas.add(t)
                 valor_medido[t] = cert_num(r.get("VALOR_GITEC"))
 
+    # Os circuitos que CHEGAM em cada ponta -- o cert_circuitos_por_ponta
+    # indexa só os que saem. A caixa precisa dos dois lados (ver cabo_ok).
+    circ_chegam: dict[str, set] = {}
+    traduz_ponta = _cert_traduz(depara)
+    for i, r in enumerate(lanc.to_dict("records")):
+        dst = texto(r["DESTINO"])
+        if dst in ("", "nan"):
+            continue
+        circ_chegam.setdefault(dst, set()).add(i)
+        for alvo in traduz_ponta.get(dst, ()):
+            circ_chegam.setdefault(alvo, set()).add(i)
+
+    caixas = {texto(r["TAG"]) for r in resumo.to_dict("records")
+              if texto(r.get("GRUPO_REGRA")).upper() == "CAIXA"}
+
     def cabo_ok(tag: str) -> bool:
-        # sem circuito cadastrado não é "pronto": é desconhecido, e
-        # desconhecido não autoriza medição
-        ids = circ_da_ponta.get(tag, set())
+        """A caixa fecha com TUDO lançado, o instrumento com o cabo dele.
+
+        Para um instrumento o cabo que importa é o próprio -- o que sai dele.
+        A caixa é junção: ela só está pronta quando todos os cabos que
+        chegam E todos os que saem estão Concluído. A CFF-12-0001C contava
+        100% olhando só o tronco de saída, e tinha o C-HV-120001 chegando
+        nela sem lançar.
+
+        Sem circuito cadastrado não é "pronto": é desconhecido, e desconhecido
+        não autoriza medição.
+        """
+        ids = set(circ_da_ponta.get(tag, set()))
+        if tag in caixas:
+            ids |= circ_chegam.get(tag, set())
         return bool(ids) and all(status_circ.get(i) == "Concluído" for i in ids)
 
     por_tag: dict[str, list] = {}
@@ -10583,6 +10660,7 @@ def main():
         st.stop()
 
     st.session_state["gplan_atualizado_em"] = data_atualizacao(fonte)
+    st.session_state["gplan_fonte"] = fonte_dados(fonte)
     (tags, cabos, tubing, sigem, resumo, esperados,
      gitec, locacao, aux_areas, lancamento, depara, movimentacoes) = load_data(cache_key)
 
