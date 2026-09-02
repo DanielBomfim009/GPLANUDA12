@@ -1467,6 +1467,14 @@ def inject_css():
         .cs-rotulo-tendencia { fill:var(--accent-amber); }
         .cs-prazo-linha { stroke:var(--accent-red); stroke-width:2; stroke-dasharray:5 4; }
         .cs-prazo-rotulo { font-size:10px; font-weight:700; fill:var(--accent-red); }
+        .cs-hoje-linha { stroke:var(--text-1); stroke-width:1.5; stroke-dasharray:2 3; opacity:.55; }
+        .cs-hoje-rotulo { font-size:10px; font-weight:700; fill:var(--text-2); }
+        .cs-vao { stroke-width:4; stroke-linecap:round; }
+        .cs-vao.cs-vao-ok { stroke:var(--accent-teal); }
+        .cs-vao.cs-vao-alerta { stroke:var(--accent-red); }
+        .cs-vao-rotulo { font-size:10.5px; font-weight:800; }
+        .cs-vao-rotulo.cs-vao-ok { fill:var(--accent-teal); }
+        .cs-vao-rotulo.cs-vao-alerta { fill:var(--accent-red); }
         .cs-ritmo-nota { font-size:11px; color:var(--text-3); margin-top:10px; line-height:1.5; }
         .cs-vazio { padding:38px 20px; text-align:center; color:var(--text-3); font-size:13px; }
 
@@ -10630,6 +10638,84 @@ CURVA_S_PRAZO: dict[str, date | None] = {
     "prioritario": date(2026, 12, 31),
 }
 
+# O ponto de partida do Previsto, travado no dia em que cada prazo foi
+# definido -- nunca pode vir do real lido no momento em que a pagina carrega,
+# senao o previsto "andaria" junto com o real dia a dia e deixaria de ser
+# referencia fixa (regra: PREVISTO NAO MUDA). Os valores sao o realizado de
+# verdade (Status de Montagem) no dia em que a data-limite foi informada.
+CURVA_S_PREVISTO_BASE: dict[str, tuple[date, float]] = {
+    "geral": (date(2026, 9, 2), 611.0),
+    "prioritario": (date(2026, 9, 2), 481.0),
+}
+
+
+def _smootherstep(t: float) -> float:
+    """Perlin's smootherstep: S suave entre 0 e 1, derivada zero nas duas
+    pontas -- arranca devagar, acelera no meio, desacelera perto do alvo. E
+    a forma que faz a curva parecer de fato um "S", em vez da reta crua que
+    uma interpolacao linear desenha entre dois pontos."""
+    t = max(0.0, min(1.0, t))
+    return t * t * t * (t * (t * 6 - 15) + 10)
+
+
+def _pascoa(ano: int) -> date:
+    """Domingo de Pascoa (algoritmo de Gauss, calendario gregoriano) -- base
+    pra Sexta-feira Santa, o unico feriado nacional movel."""
+    a = ano % 19
+    b, c = divmod(ano, 100)
+    d, e = divmod(b, 4)
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = divmod(c, 4)
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    mes, dia = divmod(h + l - 7 * m + 114, 31)
+    return date(ano, mes, dia + 1)
+
+
+def _feriados_nacionais(ano: int) -> set[date]:
+    """Feriados nacionais por lei federal -- fixos + Sexta-feira Santa
+    (movel). Carnaval e Corpus Christi ficam de fora de propósito: são ponto
+    facultativo, não feriado nacional obrigatório."""
+    sexta_santa = _pascoa(ano) - timedelta(days=2)
+    return {
+        date(ano, 1, 1), sexta_santa, date(ano, 4, 21), date(ano, 5, 1),
+        date(ano, 9, 7), date(ano, 10, 12), date(ano, 11, 2),
+        date(ano, 11, 15), date(ano, 11, 20), date(ano, 12, 25),
+    }
+
+
+def _e_dia_util(d: date) -> bool:
+    return d.weekday() < 5 and d not in _feriados_nacionais(d.year)
+
+
+def _somar_dias_uteis(d: date, n: int) -> date:
+    """Anda n dias UTEIS a partir de d (pula fim de semana e feriado
+    nacional) -- pra qualquer projeção de data bater com dias reais de
+    trabalho, não dias corridos."""
+    passo, restante, atual = (1, n, d) if n >= 0 else (-1, -n, d)
+    while restante > 0:
+        atual += timedelta(days=passo)
+        if _e_dia_util(atual):
+            restante -= 1
+    return atual
+
+
+def _dias_uteis_entre(d1: date, d2: date) -> int:
+    """Dias úteis entre d1 (exclusive) e d2 (inclusive), com sinal
+    (negativo se d2 vier antes de d1)."""
+    if d2 == d1:
+        return 0
+    sinal = 1 if d2 > d1 else -1
+    ini, fim = (d1, d2) if d2 > d1 else (d2, d1)
+    n, atual = 0, ini
+    while atual < fim:
+        atual += timedelta(days=1)
+        if _e_dia_util(atual):
+            n += 1
+    return n * sinal
+
 
 def _semana_num(rotulo: object) -> int | None:
     """'Semana 42' -> 42. Sem digito ('Não Programado', vazio, '-') -> None."""
@@ -10745,90 +10831,152 @@ def _curva_s_tendencia(real_pts: list[tuple[int, float]], total: float,
     return pontos, (termino_semana if termino_semana <= teto else None)
 
 
-def _curva_s_com_prazo(tipo: str, tags: pd.DataFrame, prazo: date) -> dict:
-    """Curva replanejada com prazo contratual: o PREVISTO deixa de vir da
-    Semana Programada (sem correspondência de calendário em nenhuma base) e
-    passa a ser a reta mais simples entre onde estamos HOJE -- realizado de
-    verdade, lido agora de STATUS_MONTAGEM, não da reconstrução gravada -- e
-    o total, na data do prazo. "Baseado no realizado e com a data limite",
-    como pedido.
+def _semana_equivalente(base_semana: float, base_data: date, dia: date) -> float:
+    """Mapeia qualquer data de calendário pra um número de semana contínuo
+    no MESMO eixo "Semana NN" do cronograma interno -- 5 dias úteis por
+    semana, feriados nacionais descontados. base_semana é o número que já
+    corresponde a base_data; dali em diante o número só cresce, nunca recua,
+    conforme o calendário avança."""
+    return base_semana + _dias_uteis_entre(base_data, dia) / 5.0
 
-    O ritmo usa a única leitura disponível sem um histórico de leituras
-    semanais reais: total realizado dividido pelo número de semanas do
-    cronograma interno até agora (1 semana do cronograma ~= 7 dias corridos,
-    a mesma convenção de qualquer cronograma semanal de obra). É uma média
-    do início até hoje, não um ritmo recente -- fica marcado assim na tela.
+
+def _data_da_semana(base_semana: float, base_data: date, semana_alvo: float) -> date:
+    """Inversa de _semana_equivalente: que data de calendário corresponde a
+    uma semana (passada ou futura) do cronograma."""
+    return _somar_dias_uteis(base_data, round((semana_alvo - base_semana) * 5))
+
+
+def _curva_s_com_prazo(tipo: str, tags: pd.DataFrame, prazo: date,
+                       real_base: dict[int, tuple[float | None, float | None]]) -> dict:
+    """Curva com prazo contratual, no MESMO eixo "Semana NN" do cronograma
+    interno (a semana só cresce -- S62, S63, S64... -- nunca vira data de
+    calendário) -- só que agora com três partes que nunca se confundem:
+
+    PREVISTO é cravado uma única vez, ancorado na semana em que o prazo foi
+    definido (CURVA_S_PREVISTO_BASE) -- nunca na semana de quem está olhando
+    a tela agora, senão andaria junto com o real (regra: previsto não
+    muda). Distribuído em S suave (smootherstep, não uma reta) do realizado
+    daquele dia até o total, batendo exatamente na semana do prazo.
+
+    REAL traz a curva completa desde a semana em que o acompanhamento
+    começou -- a reconstrução já gravada na 10_BASE_CURVA_S (Status de
+    Montagem + Semana Programada), não só o ponto de hoje.
+
+    TENDÊNCIA é recalculada toda vez a partir do realizado de HOJE: se o
+    ritmo atual já fecha o total antes do prazo, mostra esse término
+    antecipado (reta simples, sem forçar formato de S -- não há prazo
+    apertando essa parte); se não fecha, refaz o caminho em S até o prazo --
+    cada semana sem alcançar o previsto deixa essa subida mais inclinada,
+    porque sobra menos tempo pra cobrir a mesma distância.
+
+    5 dias úteis por semana, feriados nacionais descontados -- não 7 dias
+    corridos (ver _dias_uteis_entre).
     """
     so_prio = tipo == "prioritario"
     previsto_semanal = _curva_s_previsto(tags, so_prio)
     total = float(sum(previsto_semanal.values()))
+    base_data, base_valor = CURVA_S_PREVISTO_BASE[tipo]
+    idx = 1 if so_prio else 0
+
     vazio = {"total": total, "previsto": [], "real": [], "tendencia": [],
             "ritmo": None, "eixo_data": True, "x_atual": None, "real_atual": None,
-            "termino_x": None, "prazo_x": prazo.toordinal(), "prazo": prazo,
-            "ritmo_necessario": None}
+            "termino_x": None, "prazo_x": None, "prazo": prazo,
+            "ritmo_necessario": None, "horizonte_x": None, "tendencia_horizonte": None}
     if not total or "STATUS_MONTAGEM" not in tags.columns:
         return vazio
 
-    base = tags
+    base_tags = tags
     if so_prio:
         if "SSOP_PRIORITARIO" not in tags.columns:
             return vazio
-        base = tags[tags["SSOP_PRIORITARIO"].astype(str).str.strip().str.upper() == "SIM"]
-    programado = base[base["SEMANA_PROGRAMADA"].apply(lambda v: _semana_num(v) is not None)]
+        base_tags = tags[tags["SSOP_PRIORITARIO"].astype(str).str.strip().str.upper() == "SIM"]
+    programado = base_tags[base_tags["SEMANA_PROGRAMADA"].apply(lambda v: _semana_num(v) is not None)]
     real_atual = float((programado["STATUS_MONTAGEM"].astype(str).str.strip() == "Montado").sum())
 
+    # A reconstrução (já gravada na 10_BASE_CURVA_S) fixa qual número de
+    # semana corresponde a "hoje": é a última semana que ela cobre, porque a
+    # leitura de hoje e a da reconstrução vêm do mesmo STATUS_MONTAGEM. Sem
+    # reconstrução nenhuma, cai no último número do cronograma interno.
+    reconstrucao = sorted((s, v[idx]) for s, v in real_base.items() if v[idx] is not None)
+    semana_hoje = (reconstrucao[-1][0] if reconstrucao
+                  else (max(previsto_semanal) if previsto_semanal else 0))
+    base_semana = float(semana_hoje)  # a base foi travada "agora" -- ver CURVA_S_PREVISTO_BASE
+
     hoje = date.today()
-    n_semanas = max(previsto_semanal) - min(previsto_semanal) + 1
-    ritmo = (real_atual / n_semanas) if n_semanas else None  # TAGs/semana
-    ritmo_dia = (ritmo / 7.0) if ritmo and ritmo > 0 else None
+    x_hoje = _semana_equivalente(base_semana, base_data, hoje)
+    x_prazo = _semana_equivalente(base_semana, base_data, prazo)
 
-    dias_totais = (prazo - hoje).days
-    teto = hoje + timedelta(days=730)
+    real_pts = [(float(s), v) for s, v in reconstrucao if s < semana_hoje]
+    real_pts.append((x_hoje, real_atual))
+    real_pts.sort()
 
-    termino, termino_x = None, None
-    if real_atual >= total:
-        termino = hoje
-    elif ritmo_dia:
-        termino = hoje + timedelta(days=math.ceil((total - real_atual) / ritmo_dia))
-    if termino and termino <= teto:
-        termino_x = termino.toordinal()
+    # ritmo: diferença entre a base (dia em que o prazo foi travado) e hoje.
+    # No primeiro dia (x_hoje == base_semana) ainda não há uma segunda
+    # leitura; cai pro ritmo médio do cronograma interno só pra não ficar
+    # sem número nenhum -- some assim que passar o primeiro dia útil.
+    if x_hoje > base_semana:
+        ritmo = (real_atual - base_valor) / (x_hoje - base_semana)
+    else:
+        n_semanas = max(previsto_semanal) - min(previsto_semanal) + 1
+        ritmo = (real_atual / n_semanas) if n_semanas else None
 
-    # Previsto e Tendencia andam no MESMO eixo semanal (um so range de dias,
-    # os dois avaliados nos mesmos pontos) -- senao cada reta pisa em datas
-    # diferentes e a tabela abaixo vira um queijo suico de tracos.
-    fim_eixo = max(prazo, termino or hoje, hoje + timedelta(days=7))
-    fim_eixo = min(fim_eixo, teto)
-    dias_eixo = max((fim_eixo - hoje).days, 1)
-    n_passos = max(1, round(dias_eixo / 7))
+    def _previsto_em(x: float) -> float:
+        vao = x_prazo - base_semana
+        if vao <= 0:
+            return total
+        return base_valor + (total - base_valor) * _smootherstep((x - base_semana) / vao)
+
+    if ritmo and ritmo > 0 and real_atual < total:
+        x_termino_livre = x_hoje + (total - real_atual) / ritmo
+    elif real_atual >= total:
+        x_termino_livre = x_hoje
+    else:
+        x_termino_livre = None
+
+    if x_termino_livre is not None and x_termino_livre <= x_prazo:
+        x_termino = x_termino_livre
+        def _tendencia_em(x: float) -> float:
+            return min(total, real_atual + ritmo * (x - x_hoje)) if ritmo else real_atual
+        x_fim_tendencia = x_termino_livre
+    elif ritmo is not None:
+        x_termino = None
+        vao = max(x_prazo - x_hoje, 0.2)
+        def _tendencia_em(x: float) -> float:
+            return real_atual + (total - real_atual) * _smootherstep((x - x_hoje) / vao)
+        x_fim_tendencia = x_prazo
+    else:
+        x_termino = None
+        def _tendencia_em(x: float) -> float:
+            return real_atual
+        x_fim_tendencia = x_hoje
+
+    teto_semanas = base_semana + 156  # ~3 anos, folga generosa
+    x_fim_eixo = min(max(x_prazo, x_fim_tendencia, x_hoje + 1), teto_semanas)
 
     previsto_pts, tendencia_pts = [], []
-    for i in range(n_passos + 1):
-        d = round(i * dias_eixo / n_passos)
-        x_dia = (hoje + timedelta(days=d)).toordinal()
-        if dias_totais > 0:
-            frac = min(d / dias_totais, 1.0)
-            previsto_pts.append((x_dia, real_atual + (total - real_atual) * frac))
-        else:
-            previsto_pts.append((x_dia, total))
-        if ritmo_dia:
-            tendencia_pts.append((x_dia, min(total, real_atual + ritmo_dia * d)))
-    if not tendencia_pts and real_atual >= total:
-        tendencia_pts = [(hoje.toordinal(), real_atual)]
+    xv = round(base_semana)
+    while xv <= x_fim_eixo + 1e-9:
+        previsto_pts.append((xv, _previsto_em(xv)))
+        if xv >= round(x_hoje):
+            tendencia_pts.append((xv, _tendencia_em(xv)))
+        xv += 1
+    if not tendencia_pts:
+        tendencia_pts = [(round(x_hoje), real_atual)]
 
-    real_pts = [(hoje.toordinal(), real_atual)]
-
-    semanas_restantes = dias_totais / 7 if dias_totais > 0 else 0
+    semanas_restantes = max(x_prazo - x_hoje, 0)
     ritmo_necessario = ((total - real_atual) / semanas_restantes
                         if semanas_restantes > 0 else None)
-    horizonte_x = prazo.toordinal()
-    tendencia_horizonte = dict(tendencia_pts).get(horizonte_x)
+    tendencia_horizonte = _tendencia_em(x_prazo) if ritmo is not None else None
+    termino_data = (_data_da_semana(base_semana, base_data, x_termino)
+                    if x_termino is not None else None)
 
     return {
         "total": total, "previsto": previsto_pts, "real": real_pts,
         "tendencia": tendencia_pts, "ritmo": ritmo, "eixo_data": True,
-        "x_atual": hoje.toordinal(), "real_atual": real_atual,
-        "termino_x": termino_x, "prazo_x": prazo.toordinal(), "prazo": prazo,
-        "ritmo_necessario": ritmo_necessario, "horizonte_x": horizonte_x,
+        "x_atual": round(x_hoje), "real_atual": real_atual,
+        "termino_x": termino_data.toordinal() if termino_data else None,
+        "prazo_x": round(x_prazo), "prazo": prazo,
+        "ritmo_necessario": ritmo_necessario, "horizonte_x": round(x_prazo),
         "tendencia_horizonte": tendencia_horizonte,
     }
 
@@ -10845,7 +10993,7 @@ def curva_s_montar(tipo: str, tags: pd.DataFrame,
     """
     prazo = CURVA_S_PRAZO.get(tipo)
     if prazo:
-        return _curva_s_com_prazo(tipo, tags, prazo)
+        return _curva_s_com_prazo(tipo, tags, prazo, real_base)
 
     so_prio = tipo == "prioritario"
     previsto_semanal = _curva_s_previsto(tags, so_prio)
@@ -10909,13 +11057,16 @@ def curva_s_dados(tags: pd.DataFrame, cache_key: str) -> dict:
 
 def _curva_s_svg(previsto: list[tuple[float, float]], real: list[tuple[float, float]],
                  tendencia: list[tuple[float, float]], total: float,
-                 eixo_data: bool = False, prazo_x: float | None = None) -> str:
+                 eixo_data: bool = False, prazo_x: float | None = None,
+                 prazo_label: str | None = None, x_hoje: float | None = None) -> str:
     """As três linhas num SVG só, sem lib externa (mesmo padrão das outras
-    telas do Gplan). Eixo X = semana do cronograma OU data de calendário
-    (ordinal), conforme eixo_data; eixo Y = quantidade acumulada. PREVISTO
-    contínuo (cinza); REAL contínuo (teal, com área preenchida embaixo);
-    TENDÊNCIA tracejada (âmbar), começando exatamente no último ponto de
-    Real. O prazo contratual, quando existe, vira uma barra vertical."""
+    telas do Gplan). Eixo X = número de semana contínuo (S42, S43... sem
+    prazo ou com); eixo Y = quantidade acumulada. PREVISTO contínuo (cinza);
+    REAL contínuo (teal, com área preenchida embaixo); TENDÊNCIA tracejada
+    (âmbar), começando exatamente no último ponto de Real. O prazo
+    contratual, quando existe, vira uma barra vertical vermelha; "hoje" vira
+    uma barra vertical clara ligando o Real ao Previsto daquela semana --
+    o tamanho do vão entre as duas é a folga ou o atraso, à mostra."""
     todos_x = [s for s, _ in previsto] + [s for s, _ in tendencia] + [s for s, _ in real]
     if prazo_x is not None:
         todos_x.append(prazo_x)
@@ -10941,8 +11092,22 @@ def _curva_s_svg(previsto: list[tuple[float, float]], real: list[tuple[float, fl
         return " ".join(f"{'M' if i == 0 else 'L'}{x(s):.1f},{y(v):.1f}"
                         for i, (s, v) in enumerate(pontos))
 
-    def rotulo_x(s):
-        return date.fromordinal(int(round(s))).strftime("%d/%m") if eixo_data else f"S{round(s)}"
+    def interpolar(pontos, alvo):
+        """Valor de uma serie na semana alvo, interpolando entre os dois
+        pontos vizinhos quando alvo nao cai exatamente numa semana inteira
+        gravada -- so usado pra plotar o marcador de hoje."""
+        if not pontos:
+            return None
+        if alvo <= pontos[0][0]:
+            return pontos[0][1]
+        if alvo >= pontos[-1][0]:
+            return pontos[-1][1]
+        for (s0, v0), (s1, v1) in zip(pontos, pontos[1:]):
+            if s0 <= alvo <= s1:
+                if s1 == s0:
+                    return v0
+                return v0 + (v1 - v0) * (alvo - s0) / (s1 - s0)
+        return pontos[-1][1]
 
     linhas_grade = ""
     for i in range(5):
@@ -10962,7 +11127,7 @@ def _curva_s_svg(previsto: list[tuple[float, float]], real: list[tuple[float, fl
         linhas_grade_v += (f'<line x1="{xx:.1f}" y1="{PAD_CIMA}" x2="{xx:.1f}" '
                            f'y2="{PAD_CIMA+area_alt}" class="cs-grade-v"/>')
         rotulos_x += (f'<text x="{xx:.1f}" y="{ALT-10}" text-anchor="middle" '
-                     f'class="cs-rotulo-x">{esc(rotulo_x(xv))}</text>')
+                     f'class="cs-rotulo-x">S{round(xv)}</text>')
 
     # Area sob o Real -- profundidade, sem exagero (opacidade baixa, sem
     # brilho): so pra dar peso visual ao que ja aconteceu de fato.
@@ -10978,12 +11143,36 @@ def _curva_s_svg(previsto: list[tuple[float, float]], real: list[tuple[float, fl
     marcador_prazo = ""
     if prazo_x is not None and x_min <= prazo_x <= x_max:
         px = x(prazo_x)
-        rot = date.fromordinal(int(prazo_x)).strftime("%d/%m/%Y")
         marcador_prazo = (
             f'<line x1="{px:.1f}" y1="{PAD_CIMA}" x2="{px:.1f}" y2="{PAD_CIMA+area_alt}" '
             f'class="cs-prazo-linha"/>'
             f'<text x="{px:.1f}" y="{PAD_CIMA-10}" text-anchor="middle" '
-            f'class="cs-prazo-rotulo">Prazo {esc(rot)}</text>')
+            f'class="cs-prazo-rotulo">Prazo{f" {esc(prazo_label)}" if prazo_label else ""}</text>')
+
+    # Barra vertical de HOJE, ligando o Real ao Previsto daquela semana --
+    # o vao entre as duas pontas E o atraso ou a folga, a mostra sem contar
+    # numero nenhum: so olhar o tamanho da barra.
+    marcador_hoje = ""
+    if x_hoje is not None and x_min <= x_hoje <= x_max and previsto:
+        hx = x(x_hoje)
+        y_previsto_hoje = interpolar(previsto, x_hoje)
+        y_real_hoje = interpolar(real, x_hoje) if real else None
+        marcador_hoje = (
+            f'<line x1="{hx:.1f}" y1="{PAD_CIMA}" x2="{hx:.1f}" y2="{PAD_CIMA+area_alt}" '
+            f'class="cs-hoje-linha"/>'
+            f'<text x="{hx:.1f}" y="{PAD_CIMA-10}" text-anchor="middle" '
+            f'class="cs-hoje-rotulo">Hoje</text>')
+        if y_previsto_hoje is not None and y_real_hoje is not None:
+            y1, y2 = y(y_previsto_hoje), y(y_real_hoje)
+            gap = y_real_hoje - y_previsto_hoje
+            classe_vao = "cs-vao-ok" if gap >= 0 else "cs-vao-alerta"
+            y_topo, y_base = min(y1, y2), max(y1, y2)
+            marcador_hoje += (
+                f'<line x1="{hx:.1f}" y1="{y_topo:.1f}" x2="{hx:.1f}" y2="{y_base:.1f}" '
+                f'class="cs-vao {classe_vao}"/>'
+                f'<text x="{hx+8:.1f}" y="{(y_topo+y_base)/2:.1f}" text-anchor="start" '
+                f'class="cs-vao-rotulo {classe_vao}">'
+                f'{"+" if gap >= 0 else ""}{br_num(round(gap))}</text>')
 
     # Um pontinho em CADA ponto das tres linhas -- nao so nas pontas -- e o
     # valor escrito ao lado de um subconjunto espacado deles, pra dar pra ler
@@ -11022,7 +11211,7 @@ def _curva_s_svg(previsto: list[tuple[float, float]], real: list[tuple[float, fl
     return (
         f'<svg viewBox="0 0 {LARG} {ALT}" class="cs-svg" role="img" '
         f'aria-label="Curva S: previsto, real e tendência">'
-        f'{linhas_grade_v}{linhas_grade}{marcador_prazo}{rotulos_x}'
+        f'{linhas_grade_v}{linhas_grade}{marcador_prazo}{marcador_hoje}{rotulos_x}'
         + area_real
         + (f'<path d="{caminho(previsto)}" class="cs-linha cs-previsto"/>' if previsto else "")
         + (f'<path d="{caminho(real)}" class="cs-linha cs-real"/>' if real else "")
@@ -11031,10 +11220,10 @@ def _curva_s_svg(previsto: list[tuple[float, float]], real: list[tuple[float, fl
 
 
 def _curva_s_rotulo_x(eixo_data: bool, x: float | None) -> str:
-    if x is None:
-        return "—"
-    return (date.fromordinal(int(round(x))).strftime("%d/%m/%Y") if eixo_data
-           else f"Semana {round(x)}")
+    """Sempre "Semana N" -- com ou sem prazo contratual as duas curvas
+    vivem no mesmo eixo de semana contínua (ver _semana_equivalente).
+    eixo_data fica no parâmetro só pra não mexer em todos os call sites."""
+    return "—" if x is None else f"Semana {round(x)}"
 
 
 def _curva_s_kpis6(c: dict, escolha: str) -> str:
@@ -11163,7 +11352,9 @@ def _curva_s_bloco(c: dict, escolha: str, chave: str) -> None:
     col_graf, col_resumo = st.columns([2, 1], gap="medium")
     with col_graf:
         svg = _curva_s_svg(c["previsto"], c["real"], c["tendencia"], total,
-                           eixo_data=c["eixo_data"], prazo_x=c["prazo_x"])
+                           eixo_data=c["eixo_data"], prazo_x=c["prazo_x"],
+                           prazo_label=c["prazo"].strftime("%d/%m/%Y") if c["prazo"] else None,
+                           x_hoje=c["x_atual"])
         legenda_prazo = ('<span class="prazo"><span class="marca"></span>Prazo</span>'
                          if c["prazo_x"] is not None else "")
         if c["ritmo"] and not c["eixo_data"]:
