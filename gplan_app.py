@@ -2685,6 +2685,7 @@ def inject_css():
         .ct-pernas .ct-perna { display:flex; align-items:center; gap:5px; }
         .ct-pernas .ct-perna i { font-style:normal; font-size:10px; color:var(--text-3);
           min-width:52px; text-align:right; }
+        .ct-telas { margin:2px 0 12px; }
         /* O segmented control nasce com a paleta do config.toml, que e escura, e
            o texto dentro dele herda a cor do tema -- no claro dava escuro sobre
            escuro, 1,11:1. Mesma armadilha do campo de busca: o widget precisa
@@ -8462,6 +8463,13 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         if outra and outra != alvo and outra not in paineis:
             ordem_caixas.append(outra)
     sobrando_cx, ordem_caixas = ordem_caixas[4:], ordem_caixas[:4]
+    # Contagem visível de quantas caixas o desenho abriu -- sem isso, achar
+    # que uma TAG com dois circuitos (sinal indo a uma caixa, potência a
+    # outra) só tinha um exigia rolar a tela toda pra notar o segundo
+    # desenho. Com o número em cima, dá pra ver de cara antes de rolar.
+    n_telas = len(ordem_caixas)
+    render_html(f'<div class="ct-telas"><span class="gtbl-badge ok">'
+                f'{n_telas} Tela{"" if n_telas == 1 else "s"}</span></div>')
     ramais_vistos = []
     for alvo_c in ordem_caixas:
         ramais_vistos += desenha_caixa(alvo_c)
