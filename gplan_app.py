@@ -10635,8 +10635,26 @@ def curva_s_montar(tipo: str, tags: pd.DataFrame,
 
     eixo_min, eixo_max_previsto = semanas_eixo[0], max(previsto_semanal)
     previsto_pts = _curva_s_acumular(previsto_semanal, eixo_min, eixo_max_previsto)
-    ritmo = _curva_s_ritmo(real_pts)
-    tendencia_pts, termino = _curva_s_tendencia(real_pts, total, ritmo, eixo_max_previsto)
+
+    # As semanas dentro do horizonte previsto (<= eixo_max_previsto) podem vir
+    # de uma RECONSTRUÇÃO inicial (Status de Montagem + Semana Programada da
+    # 01_BASE_TAGS, lida numa foto só de hoje) em vez de relatos semana a
+    # semana -- não há data de conclusão em nenhuma base, só o status final,
+    # então esses pontos usam a semana programada da própria TAG como
+    # aproximação de quando ela fechou. Usar esse bloco pra medir ritmo
+    # inventaria uma velocidade que não existe: o "salto" de uma semana pra
+    # outra ali é só onde a Semana Programada calhou de cair, não quanto foi
+    # executado NAQUELA semana. Ritmo e tendência só entram a partir da
+    # primeira semana informada DEPOIS do fim do previsto -- essas sim são
+    # leituras de verdade, separadas no tempo.
+    pos_previsto = [p for p in real_pts if p[0] > eixo_max_previsto]
+    if pos_previsto:
+        ancora = [p for p in real_pts if p[0] <= eixo_max_previsto]
+        pontos_ritmo = ([ancora[-1]] if ancora else []) + pos_previsto
+    else:
+        pontos_ritmo = []
+    ritmo = _curva_s_ritmo(pontos_ritmo)
+    tendencia_pts, termino = _curva_s_tendencia(pontos_ritmo, total, ritmo, eixo_max_previsto)
 
     horizonte_final = tendencia_pts[-1][0] if tendencia_pts else eixo_max_previsto
     if horizonte_final > eixo_max_previsto:
@@ -10775,6 +10793,13 @@ def render_curva_s(tags: pd.DataFrame, cache_key: str = ""):
     diferenca = real_atual - previsto_agora
     pct_real = real_atual / c["total"] * 100 if c["total"] else 0.0
     ritmo_txt = f'{c["ritmo"]:.1f}'.replace(".", ",") if c["ritmo"] else "—"
+    # ritmo=None aqui e quase sempre "so tem a reconstrucao inicial ainda" --
+    # nao um erro, so falta uma semana informada de verdade depois do fim do
+    # previsto pra ter duas leituras no tempo pra medir.
+    nota_ritmo = ("TAGs/semana · média ponderada recente" if c["ritmo"]
+                 else "aguardando a próxima semana informada")
+    nota_termino = ("mantendo o ritmo atual" if c["termino_semana"]
+                    else "informe a semana atual na 10_BASE_CURVA_S para calcular")
 
     cards = [
         (tile0, "Total a montar", br_num(round(c["total"])),
@@ -10784,10 +10809,8 @@ def render_curva_s(tags: pd.DataFrame, cache_key: str = ""):
         (du_tile("#5b8def", "trend"), "Real × Previsto",
          (f'+{br_num(round(diferenca))}' if diferenca >= 0 else br_num(round(diferenca))),
          "adiantado em relação ao previsto" if diferenca >= 0 else "atrasado em relação ao previsto"),
-        (du_tile("#fbbf24", "clock"), "Ritmo real", ritmo_txt,
-         "TAGs/semana · média ponderada recente"),
-        (du_tile("#34d399", "calendario"), "Projeção de término", _rotulo_termino(c),
-         "mantendo o ritmo atual" if c["termino_semana"] else "ritmo insuficiente para projetar"),
+        (du_tile("#fbbf24", "clock"), "Ritmo real", ritmo_txt, nota_ritmo),
+        (du_tile("#34d399", "calendario"), "Projeção de término", _rotulo_termino(c), nota_termino),
     ]
     linhas_cards = "".join(
         f'<div class="pm-card">{tile}<div class="corpo"><div class="rot">{esc(rot)}</div>'
@@ -10806,9 +10829,16 @@ def render_curva_s(tags: pd.DataFrame, cache_key: str = ""):
           <span class="tendencia"><span class="marca"></span>Tendência</span>
         </div>
         {svg}
-        <div class="cs-ritmo-nota">Tendência: média ponderada do ritmo semanal real, peso
-          maior para as semanas mais recentes -- projetada a partir do último ponto de
-          Real informado (semana {c["semana_atual"]}).</div>
+        <div class="cs-ritmo-nota">{
+          "Tendência: média ponderada do ritmo semanal real, peso maior para as "
+          "semanas mais recentes -- projetada a partir do último ponto de Real "
+          f'informado (semana {c["semana_atual"]}).' if c["ritmo"] else
+          "Real até aqui: reconstruído a partir de Status de Montagem + Semana "
+          "Programada da 01_BASE_TAGS (quem já foi montado, contado na semana em "
+          "que foi programado -- não há data de conclusão em nenhuma base). "
+          "Tendência liga quando você informar a semana atual na 10_BASE_CURVA_S: "
+          "a partir daí o ritmo passa a vir de leituras reais, espaçadas no tempo."
+        }</div>
       </div>""")
 
     real_map, tend_map = dict(c["real"]), dict(c["tendencia"])
