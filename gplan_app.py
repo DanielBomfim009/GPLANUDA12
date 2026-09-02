@@ -1332,14 +1332,20 @@ def inject_css():
            duas caixas. */
         .pm-dist { background:var(--dark-card); border:1px solid var(--border-color);
                    border-radius:14px; padding:16px 18px 18px; margin-bottom:16px; }
-        .pm-dist > h4 { margin:0 0 15px; font-size:12.5px; font-weight:700;
+        /* .titulo, nao <h4>: o markdown do Streamlit intercepta qualquer
+           h1-h6 dentro do HTML bruto pra aplicar link-ancora, e no processo
+           arranca a tag de dentro da div-pai -- .pm-dist > h4 nunca casava
+           porque na hora de estilizar o h4 ja nao era mais filho de nada
+           com essa classe. Confirmado ao vivo: computed display:block (nao
+           o flex da regra) e o titulo colado no subtitulo, sem gap nenhum. */
+        .pm-dist > .titulo { margin:0 0 15px; font-size:12.5px; font-weight:700;
                         color:var(--text-1); letter-spacing:.2px;
                         display:flex; align-items:baseline; gap:8px; }
         /* o texto do titulo e um no de texto solto, nao um <span> proprio --
            gap do flex nao separa confiavelmente um no de texto do span
            seguinte em todo navegador. empurrar o span pra direita resolve
            sem depender disso, e casa com o mesmo padrao do .ct-painel */
-        .pm-dist > h4 span { margin-left:auto; font-size:11px; font-weight:500; }
+        .pm-dist > .titulo span { margin-left:auto; font-size:11px; font-weight:500; }
         .pm-dist .lin { display:grid; grid-template-columns:112px 1fr auto;
                         align-items:center; gap:12px; margin-bottom:10px; }
         .pm-dist .lin:last-child { margin-bottom:0; }
@@ -1389,6 +1395,34 @@ def inject_css():
         .pm-contexto b { color:var(--text-1); font-variant-numeric:tabular-nums; }
 
         .pm-busca { margin-bottom:12px; max-width:320px; }
+
+        /* Curva S -- previsto fixo, real informado a mao, tendencia
+           projetada. O grafico e SVG puro na propria pagina (nao um
+           iframe), entao herda os tokens de tema direto via var(). */
+        .cs-comparacao { font-size:12.5px; color:var(--text-2); margin:2px 0 16px;
+                         padding:10px 14px; background:rgba(var(--rgb-tinta),.04);
+                         border-radius:10px; }
+        .cs-comparacao b { color:var(--text-1); font-variant-numeric:tabular-nums; }
+        .cs-painel { margin-top:16px; }
+        .cs-legenda { display:flex; gap:18px; flex-wrap:wrap; margin:2px 0 14px;
+                      font-size:11.5px; color:var(--text-2); }
+        .cs-legenda span.marca { display:inline-block; width:16px; height:0;
+                                 margin-right:6px; vertical-align:middle;
+                                 border-top:2.5px solid; border-radius:2px; }
+        .cs-legenda .previsto .marca { border-color:var(--text-3); }
+        .cs-legenda .real .marca { border-color:var(--accent-teal); }
+        .cs-legenda .tendencia .marca { border-top-style:dashed; border-color:var(--accent-amber); }
+        .cs-svg { width:100%; height:auto; display:block; }
+        .cs-grade { stroke:rgba(var(--rgb-tinta),.09); stroke-width:1; }
+        .cs-rotulo-y, .cs-rotulo-x { font-size:9.5px; fill:var(--text-3); }
+        .cs-linha { fill:none; stroke-width:2.5px; stroke-linecap:round; stroke-linejoin:round; }
+        .cs-previsto { stroke:var(--text-3); }
+        .cs-real { stroke:var(--accent-teal); }
+        .cs-tendencia { stroke:var(--accent-amber); stroke-dasharray:7 5; }
+        .cs-ponto-real { fill:var(--accent-teal); stroke:var(--dark-card); stroke-width:2; }
+        .cs-ritmo-nota { font-size:11px; color:var(--text-3); margin-top:10px; line-height:1.5; }
+        .cs-vazio { padding:38px 20px; text-align:center; color:var(--text-3); font-size:13px; }
+
         .du-br .fr { font-size:10px; color:var(--text-3); text-align:right; }
         .du-br .pc { font-size:10.5px; font-weight:700; color:var(--text-1); text-align:right; }
 
@@ -10343,8 +10377,8 @@ def render_previsao_medicao(tags: pd.DataFrame, resumo: pd.DataFrame,
             f'<span class="val"><b>{br_pct(pct)}</b> · {br_num(n)} de '
             f'{br_num(total_fila)} pendentes</span></div>')
     render_html(
-        '<div class="pm-dist"><h4>Distribuição do progresso físico'
-        f'<span class="gtbl-muted">antes dos relatórios</span></h4>'
+        '<div class="pm-dist"><div class="titulo">Distribuição do progresso físico'
+        f'<span class="gtbl-muted">antes dos relatórios</span></div>'
         f'{linhas_dist}</div>')
 
     # =================================================================
@@ -10460,6 +10494,359 @@ def render_previsao_medicao(tags: pd.DataFrame, resumo: pd.DataFrame,
         "Exportar",
         exportar.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
         file_name="previsao_medicao.csv", mime="text/csv", key="medicao_csv")
+
+
+# =====================================================================
+# Curva S -- previsto (fixo, da SEMANA_PROGRAMADA), real (informado a mao
+# toda semana na 10_BASE_CURVA_S) e tendencia (projecao pelo ritmo real,
+# media ponderada). Ver render_curva_s() para a tela.
+# =====================================================================
+
+def _semana_num(rotulo: object) -> int | None:
+    """'Semana 42' -> 42. Sem digito ('Não Programado', vazio, '-') -> None."""
+    m = re.search(r"\d+", str(rotulo or ""))
+    return int(m.group()) if m else None
+
+
+def curva_s_real(cache_key: str) -> dict[int, tuple[float | None, float | None]]:
+    """Semana (número) -> (real acumulado geral, real acumulado
+    prioritário), da aba 10_BASE_CURVA_S -- preenchida a mão pelo usuário
+    toda semana. Nenhuma base do pipeline guarda a DATA em que uma TAG foi
+    montada, só o status final (Montado/Não Montado); sem isso o real por
+    semana só pode vir de quem acompanha a obra, não dá pra calcular
+    sozinho a partir da 01_BASE_TAGS.
+    """
+    client = get_supabase_client()
+    if client is not None:
+        fonte = io.BytesIO(client.storage.from_(SUPABASE_BUCKET)
+                           .download(SUPABASE_FILE_PATH))
+    elif os.path.exists(LOCAL_EXCEL_FALLBACK):
+        fonte = LOCAL_EXCEL_FALLBACK
+    else:
+        return {}
+    try:
+        base = pd.read_excel(fonte, sheet_name="10_BASE_CURVA_S")
+    except Exception:
+        return {}
+    if base.empty or "SEMANA" not in base.columns:
+        return {}
+    saida: dict[int, tuple[float | None, float | None]] = {}
+    for r in base.to_dict("records"):
+        semana = _semana_num(r.get("SEMANA"))
+        if semana is None:
+            continue
+        real = r.get("REAL_ACUMULADO")
+        prio = r.get("REAL_PRIORITARIO_ACUMULADO")
+        saida[semana] = (
+            None if pd.isna(real) else cert_num(real),
+            None if pd.isna(prio) else cert_num(prio),
+        )
+    return saida
+
+
+def _curva_s_previsto(tags: pd.DataFrame, so_prioritarias: bool) -> dict[int, int]:
+    """Semana -> quantidade de TAGs programadas NAQUELA semana (não
+    acumulado). so_prioritarias filtra por SSOP_PRIORITARIO=SIM."""
+    if "SEMANA_PROGRAMADA" not in tags.columns:
+        return {}
+    base = tags
+    if so_prioritarias:
+        if "SSOP_PRIORITARIO" not in tags.columns:
+            return {}
+        base = tags[tags["SSOP_PRIORITARIO"].astype(str).str.strip().str.upper() == "SIM"]
+    contagem: dict[int, int] = {}
+    for v in base["SEMANA_PROGRAMADA"]:
+        s = _semana_num(v)
+        if s is None:
+            continue
+        contagem[s] = contagem.get(s, 0) + 1
+    return contagem
+
+
+def _curva_s_acumular(por_semana: dict[int, int], inicio: int, fim: int) -> list[tuple[int, float]]:
+    corrente = 0
+    pontos = []
+    for s in range(inicio, fim + 1):
+        corrente += por_semana.get(s, 0)
+        pontos.append((s, float(corrente)))
+    return pontos
+
+
+def _curva_s_ritmo(pontos: list[tuple[int, float]]) -> float | None:
+    """Média ponderada do ritmo semanal entre pontos consecutivos de Real --
+    peso maior para as diferenças mais recentes (peso linear 1..N), em vez
+    de total/semanas puro, para responder ao ritmo atual da obra em vez de
+    diluir uma aceleração ou desaceleração recente na média histórica toda.
+    Precisa de pelo menos dois pontos -- com um só não há ritmo pra medir."""
+    if len(pontos) < 2:
+        return None
+    diffs = []
+    for (s0, v0), (s1, v1) in zip(pontos, pontos[1:]):
+        if s1 <= s0:
+            continue
+        diffs.append((v1 - v0) / (s1 - s0))
+    if not diffs:
+        return None
+    pesos = range(1, len(diffs) + 1)
+    return sum(p * d for p, d in zip(pesos, diffs)) / sum(pesos)
+
+
+def _curva_s_tendencia(real_pts: list[tuple[int, float]], total: float,
+                       ritmo: float | None,
+                       horizonte_min: int) -> tuple[list[tuple[int, float]], int | None]:
+    """Linha a partir do último ponto Real, no ritmo médio ponderado, até
+    bater no total previsto -- ou até um teto de 2 anos de projeto pra
+    frente, se o ritmo for baixo demais pra terminar em prazo visível.
+    Devolve os pontos e a semana de término (None se o ritmo não permite
+    concluir: zero, negativo, sem Real, ou terminaria além do teto)."""
+    if not real_pts or ritmo is None or ritmo <= 0:
+        return [], None
+    ultima_semana, ultimo_valor = real_pts[-1]
+    if ultimo_valor >= total:
+        return [(ultima_semana, ultimo_valor)], ultima_semana
+    termino_semana = math.ceil(ultima_semana + (total - ultimo_valor) / ritmo)
+    teto = ultima_semana + 104
+    horizonte = min(max(termino_semana, horizonte_min), teto)
+    pontos = [(ultima_semana, ultimo_valor)]
+    for s in range(ultima_semana + 1, horizonte + 1):
+        valor = min(total, ultimo_valor + ritmo * (s - ultima_semana))
+        pontos.append((s, valor))
+        if valor >= total:
+            break
+    return pontos, (termino_semana if termino_semana <= teto else None)
+
+
+def curva_s_montar(tipo: str, tags: pd.DataFrame,
+                   real_base: dict[int, tuple[float | None, float | None]]) -> dict:
+    """Monta uma das duas curvas ('geral' ou 'prioritario'): previsto fixo,
+    pontos reais informados e tendência projetada do último real. O previsto
+    é estendido em linha reta no valor do total além da última semana
+    programada, para o gráfico e a tabela não "sumirem" antes da tendência."""
+    so_prio = tipo == "prioritario"
+    previsto_semanal = _curva_s_previsto(tags, so_prio)
+    total = float(sum(previsto_semanal.values()))
+    idx = 1 if so_prio else 0
+    real_pts = sorted((s, v[idx]) for s, v in real_base.items() if v[idx] is not None)
+
+    semanas_eixo = sorted(set(previsto_semanal) | {s for s, _ in real_pts})
+    if not semanas_eixo or not total:
+        return {"total": total, "previsto": [], "real": real_pts, "tendencia": [],
+               "ritmo": None, "termino_semana": None, "semana_atual": None}
+
+    eixo_min, eixo_max_previsto = semanas_eixo[0], max(previsto_semanal)
+    previsto_pts = _curva_s_acumular(previsto_semanal, eixo_min, eixo_max_previsto)
+    ritmo = _curva_s_ritmo(real_pts)
+    tendencia_pts, termino = _curva_s_tendencia(real_pts, total, ritmo, eixo_max_previsto)
+
+    horizonte_final = tendencia_pts[-1][0] if tendencia_pts else eixo_max_previsto
+    if horizonte_final > eixo_max_previsto:
+        previsto_pts = previsto_pts + [(s, total)
+                                       for s in range(eixo_max_previsto + 1, horizonte_final + 1)]
+
+    return {
+        "total": total, "previsto": previsto_pts, "real": real_pts,
+        "tendencia": tendencia_pts, "ritmo": ritmo, "termino_semana": termino,
+        "semana_atual": real_pts[-1][0] if real_pts else None,
+    }
+
+
+@st.cache_data(show_spinner=False, max_entries=3)
+def curva_s_dados(tags: pd.DataFrame, cache_key: str) -> dict:
+    real_base = curva_s_real(cache_key)
+    return {"geral": curva_s_montar("geral", tags, real_base),
+           "prioritario": curva_s_montar("prioritario", tags, real_base)}
+
+
+def _curva_s_svg(previsto: list[tuple[int, float]], real: list[tuple[int, float]],
+                 tendencia: list[tuple[int, float]], total: float) -> str:
+    """As três linhas num SVG só, sem lib externa (mesmo padrão das outras
+    telas do Gplan). Eixo X = semana (número real do cronograma do projeto,
+    não um índice), eixo Y = quantidade acumulada. PREVISTO e REAL contínuos;
+    TENDÊNCIA tracejada, começando exatamente no último ponto de Real."""
+    todas_semanas = [s for s, _ in previsto] + [s for s, _ in tendencia]
+    if not todas_semanas:
+        return '<div class="cs-vazio">Sem semana programada para desenhar a curva.</div>'
+    semana_min, semana_max = min(todas_semanas), max(todas_semanas)
+    y_max = max([total] + [v for _, v in previsto] + [v for _, v in real]
+               + [v for _, v in tendencia]) * 1.08 or 1.0
+
+    LARG, ALT = 900, 300
+    PAD_ESQ, PAD_DIR, PAD_CIMA, PAD_BAIXO = 44, 14, 14, 28
+    area_larg, area_alt = LARG - PAD_ESQ - PAD_DIR, ALT - PAD_CIMA - PAD_BAIXO
+
+    def x(s):
+        if semana_max == semana_min:
+            return float(PAD_ESQ)
+        return PAD_ESQ + (s - semana_min) / (semana_max - semana_min) * area_larg
+
+    def y(v):
+        return PAD_CIMA + area_alt - (v / y_max) * area_alt
+
+    def caminho(pontos):
+        return " ".join(f"{'M' if i == 0 else 'L'}{x(s):.1f},{y(v):.1f}"
+                        for i, (s, v) in enumerate(pontos))
+
+    linhas_grade = ""
+    for i in range(5):
+        frac = i / 4
+        yy = PAD_CIMA + area_alt - frac * area_alt
+        linhas_grade += (
+            f'<line x1="{PAD_ESQ}" y1="{yy:.1f}" x2="{LARG-PAD_DIR}" y2="{yy:.1f}" class="cs-grade"/>'
+            f'<text x="{PAD_ESQ-8}" y="{yy+4:.1f}" text-anchor="end" class="cs-rotulo-y">'
+            f'{br_num(round(frac * y_max))}</text>')
+
+    passo = max(1, round((semana_max - semana_min) / 8))
+    rotulos_x = "".join(
+        f'<text x="{x(s):.1f}" y="{ALT-8}" text-anchor="middle" class="cs-rotulo-x">S{s}</text>'
+        for s in range(semana_min, semana_max + 1, passo))
+
+    marcador = (f'<circle cx="{x(real[-1][0]):.1f}" cy="{y(real[-1][1]):.1f}" r="4.5" '
+               f'class="cs-ponto-real"/>') if real else ""
+
+    return (
+        f'<svg viewBox="0 0 {LARG} {ALT}" class="cs-svg" role="img" '
+        f'aria-label="Curva S: previsto, real e tendência por semana">'
+        f'{linhas_grade}{rotulos_x}'
+        + (f'<path d="{caminho(previsto)}" class="cs-linha cs-previsto"/>' if previsto else "")
+        + (f'<path d="{caminho(real)}" class="cs-linha cs-real"/>' if real else "")
+        + (f'<path d="{caminho(tendencia)}" class="cs-linha cs-tendencia"/>' if len(tendencia) > 1 else "")
+        + marcador + '</svg>')
+
+
+def render_curva_s(tags: pd.DataFrame, cache_key: str = ""):
+    """Curva S: previsto (fixo, da semana programada), real (informado a mão
+    toda semana) e tendência (projeção pelo ritmo real ponderado) -- geral e
+    só dos prioritários, na mesma tela.
+
+    Sem prazo contratual configurado em nenhuma base, a projeção de término
+    aparece em "Semana NN" (a numeração própria do cronograma do projeto),
+    não em data de calendário -- inventar essa correspondência violaria a
+    regra de não inventar dado que motivou esta aba inteira.
+    """
+    render_header("Curva S")
+    dados = curva_s_dados(tags, cache_key)
+    geral, prio = dados["geral"], dados["prioritario"]
+
+    if not geral["total"]:
+        render_html(
+            '<div class="gplan-panel"><div class="cs-vazio">Nenhuma TAG com semana '
+            'programada na 01_BASE_TAGS -- sem isso não há previsto para desenhar a '
+            'Curva S.</div></div>')
+        return
+
+    def _rotulo_termino(c):
+        return f"Semana {c['termino_semana']}" if c["termino_semana"] else "—"
+
+    if geral["termino_semana"] and prio["termino_semana"]:
+        diff = geral["termino_semana"] - prio["termino_semana"]
+        if diff > 0:
+            insight = f"prioritários projetam terminar {br_num(diff)} semana(s) antes da produção geral."
+        elif diff < 0:
+            insight = f"prioritários projetam terminar {br_num(-diff)} semana(s) depois da produção geral."
+        else:
+            insight = "prioritários e produção geral projetam terminar na mesma semana."
+        render_html(
+            f'<div class="cs-comparacao">Projeção geral: <b>{_rotulo_termino(geral)}</b> · '
+            f'Projeção prioritários: <b>{_rotulo_termino(prio)}</b> — {esc(insight)}</div>')
+
+    escolha = st.segmented_control(
+        "Curva", ["Geral", "Prioritários"],
+        format_func=lambda k: f"{k} · {br_num(round((geral if k == 'Geral' else prio)['total']))}",
+        default="Geral", key="cs_recorte") or "Geral"
+    c = geral if escolha == "Geral" else prio
+
+    real_atual = c["real"][-1][1] if c["real"] else None
+    previsto_por_semana = dict(c["previsto"])
+
+    tile0 = du_tile("#7c8aa8", "archive")
+    if real_atual is None:
+        render_html(f"""<div class="pm-topo"><div class="pm-card">{tile0}<div class="corpo">
+          <div class="rot">Total a montar</div><div class="num">{br_num(round(c["total"]))}</div>
+          <div class="nota">{"TAGs prioritárias" if escolha == "Prioritários" else "TAGs com semana programada"}</div>
+          </div></div></div>""")
+        campo_extra = ", REAL_PRIORITARIO_ACUMULADO" if escolha == "Prioritários" else ""
+        render_html(
+            '<div class="gplan-panel"><div class="cs-vazio">Nenhuma semana de Real '
+            f'informada ainda. Preencha a 10_BASE_CURVA_S (REAL_ACUMULADO{campo_extra}) '
+            'para ver Real, Tendência e Projeção de término.</div></div>')
+        return
+
+    previsto_agora = previsto_por_semana.get(c["semana_atual"], 0.0)
+    diferenca = real_atual - previsto_agora
+    pct_real = real_atual / c["total"] * 100 if c["total"] else 0.0
+    ritmo_txt = f'{c["ritmo"]:.1f}'.replace(".", ",") if c["ritmo"] else "—"
+
+    cards = [
+        (tile0, "Total a montar", br_num(round(c["total"])),
+         "TAGs prioritárias" if escolha == "Prioritários" else "TAGs com semana programada"),
+        (du_tile("#2dd4bf", "check"), "Montado (Real)", br_num(round(real_atual)),
+         f'{br_pct(pct_real)} do total · semana {c["semana_atual"]}'),
+        (du_tile("#5b8def", "trend"), "Real × Previsto",
+         (f'+{br_num(round(diferenca))}' if diferenca >= 0 else br_num(round(diferenca))),
+         "adiantado em relação ao previsto" if diferenca >= 0 else "atrasado em relação ao previsto"),
+        (du_tile("#fbbf24", "clock"), "Ritmo real", ritmo_txt,
+         "TAGs/semana · média ponderada recente"),
+        (du_tile("#34d399", "calendario"), "Projeção de término", _rotulo_termino(c),
+         "mantendo o ritmo atual" if c["termino_semana"] else "ritmo insuficiente para projetar"),
+    ]
+    linhas_cards = "".join(
+        f'<div class="pm-card">{tile}<div class="corpo"><div class="rot">{esc(rot)}</div>'
+        f'<div class="num">{num}</div><div class="nota">{esc(nota)}</div></div></div>'
+        for tile, rot, num, nota in cards)
+    render_html(f'<div class="pm-topo">{linhas_cards}</div>')
+
+    svg = _curva_s_svg(c["previsto"], c["real"], c["tendencia"], c["total"])
+    render_html(f"""
+      <div class="gplan-panel cs-painel">
+        <div class="gplan-panel-title">Curva S — {esc(escolha)}
+          <span class="gtbl-muted" style="font-weight:500">acumulado por semana</span></div>
+        <div class="cs-legenda">
+          <span class="previsto"><span class="marca"></span>Previsto</span>
+          <span class="real"><span class="marca"></span>Real</span>
+          <span class="tendencia"><span class="marca"></span>Tendência</span>
+        </div>
+        {svg}
+        <div class="cs-ritmo-nota">Tendência: média ponderada do ritmo semanal real, peso
+          maior para as semanas mais recentes -- projetada a partir do último ponto de
+          Real informado (semana {c["semana_atual"]}).</div>
+      </div>""")
+
+    real_map, tend_map = dict(c["real"]), dict(c["tendencia"])
+    semanas = sorted(set(previsto_por_semana) | set(real_map) | set(tend_map))
+    corpo = ""
+    for s in semanas:
+        prev_ac, real_ac, tend_ac = (previsto_por_semana.get(s), real_map.get(s),
+                                     tend_map.get(s))
+        dif = (real_ac - prev_ac) if (real_ac is not None and prev_ac is not None) else None
+        pct = (real_ac / c["total"] * 100) if (real_ac is not None and c["total"]) else None
+        corpo += (
+            f'<tr><td>Semana {s}</td>'
+            f'<td class="gtbl-mono">{br_num(round(prev_ac)) if prev_ac is not None else "—"}</td>'
+            f'<td class="gtbl-mono">{br_num(round(real_ac)) if real_ac is not None else "—"}</td>'
+            f'<td class="gtbl-mono">{br_num(round(tend_ac)) if tend_ac is not None else "—"}</td>'
+            f'<td class="gtbl-mono">{(("+" if dif >= 0 else "") + br_num(round(dif))) if dif is not None else "—"}</td>'
+            f'<td class="gtbl-mono">{br_pct(pct) if pct is not None else "—"}</td></tr>')
+    render_html(
+        '<div class="gplan-panel"><div class="gplan-panel-title">Evolução semanal'
+        f'<span class="gtbl-muted" style="font-weight:500">{br_num(len(semanas))} semanas'
+        '</span></div><div class="ct-rolo">'
+        '<table class="gtbl"><thead><tr><th>Semana</th><th>Previsto acum.</th>'
+        '<th>Real acum.</th><th>Tendência</th><th>Diferença</th><th>% realizado</th>'
+        f'</tr></thead><tbody>{corpo}</tbody></table></div></div>')
+
+    exportar = pd.DataFrame([{
+        "SEMANA": s,
+        "PREVISTO_ACUMULADO": previsto_por_semana.get(s),
+        "REAL_ACUMULADO": real_map.get(s),
+        "TENDENCIA_ACUMULADA": tend_map.get(s),
+        "DIFERENCA_REAL_PREVISTO": (real_map.get(s) - previsto_por_semana.get(s))
+            if (real_map.get(s) is not None and previsto_por_semana.get(s) is not None) else None,
+    } for s in semanas])
+    st.download_button(
+        f"Exportar Curva S — {escolha}",
+        exportar.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+        file_name=f'curva_s_{"prioritarios" if escolha == "Prioritários" else "geral"}.csv',
+        mime="text/csv", key=f"curva_s_csv_{escolha}")
 
 
 def render_perfil_lateral():
@@ -10792,6 +11179,10 @@ def main():
                                sigem, cache_key)),
         title="Previsão Medição", icon=":material/paid:",
         url_path="previsao-medicao")
+    curva_s_page = st.Page(
+        lambda: _sob_carga("Calculando avanço de montagem por semana",
+                           lambda: render_curva_s(tags, cache_key)),
+        title="Curva S", icon=":material/show_chart:", url_path="curva-s")
 
     # A aba que a permissão não cobre não entra no menu, em vez de entrar e
     # avisar que é proibida: a Gitec sem valores viraria uma tela de traços, e
@@ -10821,7 +11212,7 @@ def main():
     if avanco:
         secoes["Avanço"] = avanco
     if pode("administrar"):
-        secoes["Administração"] = [medicao_page, admin_page]
+        secoes["Administração"] = [medicao_page, curva_s_page, admin_page]
 
     nav = st.navigation(secoes, position="sidebar")
     nav.run()
