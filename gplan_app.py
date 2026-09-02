@@ -2678,6 +2678,13 @@ def inject_css():
         .ct-rolo table { margin:0; }
         .ct-rolo thead th { position:sticky; top:0; z-index:2;
           background:var(--dark-card-2); }
+        /* Instrumento com cabo de sinal E de potência, cada um num estágio --
+           dois badges empilhados, um por perna, em vez de somar os dois num
+           percentual só que não diz qual dos dois falta. */
+        .ct-pernas { display:flex; flex-direction:column; gap:3px; align-items:flex-start; }
+        .ct-pernas .ct-perna { display:flex; align-items:center; gap:5px; }
+        .ct-pernas .ct-perna i { font-style:normal; font-size:10px; color:var(--text-3);
+          min-width:52px; text-align:right; }
         /* O segmented control nasce com a paleta do config.toml, que e escura, e
            o texto dentro dele herda a cor do tema -- no claro dava escuro sobre
            escuro, 1,11:1. Mesma armadilha do campo de busca: o widget precisa
@@ -5473,6 +5480,7 @@ def cert_indice(lanc: pd.DataFrame, cache_key: str) -> dict:
         return None
 
     saida: dict[str, str] = {}
+    veio_de_potencia: dict[str, bool] = {}
     for _, r in lanc.iterrows():
         org, dst = str(r["ORIGEM"]).strip(), str(r["DESTINO"]).strip()
         # ponta em branco vira um instrumento fantasma na busca; ela ja aparece
@@ -5480,8 +5488,20 @@ def cert_indice(lanc: pd.DataFrame, cache_key: str) -> dict:
         if org in ("", "nan") or cert_nivel(org) != 0:
             continue
         alvo = alcanca(dst)
-        if alvo:
-            saida[org] = re.sub(r"[A-Z]$", "", alvo) if alvo.startswith("CFF") else alvo
+        if not alvo:
+            continue
+        alvo = re.sub(r"[A-Z]$", "", alvo) if alvo.startswith("CFF") else alvo
+        # quase todo instrumento tem dois cabos -- o de sinal e o de potência
+        # (-P) -- e cada um pode levar a uma caixa diferente. Sem essa regra,
+        # quem decidia qual caixa a busca abre era a ordem das linhas na
+        # planilha: a TAG podia abrir ora a caixa de sinal, ora a de
+        # potência, sem relação com o que o cert_panorama (que decide a
+        # certificação) usa -- mesmo critério do cert_so_potencia lá.
+        pot = bool(re.search(r"-P\d*$", str(r["CIRCUITO"]).strip(), re.I))
+        if org in saida and not veio_de_potencia.get(org, True) and pot:
+            continue
+        saida[org] = alvo
+        veio_de_potencia[org] = pot
 
     # Ponta que só aparece como DESTINO nunca acha caixa/painel andando pela
     # própria origem -- ela não tem uma (fim de loop instrumento-a-instrumento,
@@ -7275,12 +7295,34 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
                                if not cert_remendo(c)]
         if not proprios:
             return {"cabo_tag": False, "pct_tag": 0.0, "status_tag": "sem circuito",
-                    "m_tag": 0.0, "m_real_tag": 0.0}
+                    "m_tag": 0.0, "m_real_tag": 0.0, "pernas_tag": []}
         m = sum(cert_num(c["METROS"]) for c in proprios)
         # medido sem teto: o metro a mais que o previsto e fato para ler
         m_real = sum(cert_metro_medido(c) for c in proprios)
         pct = round(m_real / m * 100, 1) if m else 0.0
         pronto = all(cert_num(c["PCT"]) >= 99.5 for c in proprios)
+        # Quase todo instrumento tem DOIS cabos próprios -- sinal e potência
+        # (-P) --, cada um podendo estar num estágio diferente. Resumir os
+        # dois num m/pct só escondia justamente qual dos dois falta: 41m de
+        # sinal concluído + 41m de potência a 41,5% viravam "82m a 70,7%",
+        # sem dizer que o de sinal já tinha acabado. pernas_tag guarda cada
+        # um separado (sinal primeiro, depois potência) pra tela mostrar os
+        # dois quando divergem, em vez de um número só.
+        pernas = []
+        if len(proprios) > 1:
+            for pot_flag in (False, True):
+                do_tipo = [c for c in proprios if bool(
+                    re.search(r"-P\d*$", str(c["CIRCUITO"]).strip(), re.I)) == pot_flag]
+                if not do_tipo:
+                    continue
+                mt = sum(cert_num(c["METROS"]) for c in do_tipo)
+                mr = sum(cert_metro_medido(c) for c in do_tipo)
+                pernas.append({
+                    "pot": pot_flag,
+                    "status": cert_status_conjunto(do_tipo),
+                    "pct": round(mr / mt * 100, 1) if mt else 0.0,
+                    "pronto": all(cert_num(c["PCT"]) >= 99.5 for c in do_tipo),
+                })
         return {"cabo_tag": pronto, "pct_tag": pct,
                 # O status é o que a base informa, nunca deduzido da
                 # metragem: um cabo Concluído com menos metro que o previsto
@@ -7289,9 +7331,19 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
                 # o status do percentual apagava esses dois casos, que são
                 # justamente os que interessam de olhar.
                 "status_tag": cert_status_conjunto(proprios),
-                "m_tag": m, "m_real_tag": m_real}
+                "m_tag": m, "m_real_tag": m_real, "pernas_tag": pernas}
 
     por_tag: dict[str, dict] = {}
+    # Guarda TODAS as cadeias vistas por TAG -- sinal e potência --, não só a
+    # que "ganha" o veredito. Quase todo instrumento anda pelo loop acima duas
+    # vezes (um cabo de sinal, um de potência, quase sempre pra caixas
+    # diferentes) e antes só a de pior status sobrevivia em por_tag; a outra
+    # era jogada fora inteira, mesmo tendo pendência própria (um cabo de
+    # potência 41,5% lançado nunca aparecia se o de sinal também estivesse
+    # "Em Andamento" em outro trecho -- os dois empatavam e só o primeiro
+    # processado ficava). cadeia_uniao, montada depois do loop, é a soma sem
+    # repetir circuito -- é o que a exportação de pendências usa.
+    cadeias_tag: dict[str, list] = {}
     for r in linhas:
         org, dst = str(r["ORIGEM"]).strip(), str(r["DESTINO"]).strip()
         if org in ("", "nan") or cert_nivel(org) != 0:
@@ -7367,6 +7419,7 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
             onde = f"alimentação do painel {painel_da_cadeia}"
         else:
             onde = f"nenhum circuito sai de {painel_da_cadeia}: o painel é desconhecido"
+        cadeias_tag.setdefault(org, []).append(cadeia)
         antes = por_tag.get(org)
         if antes is None or PIOR[tom] > PIOR[antes["tom"]]:
             montada = mont.get(org, {}).get("mont", "") == "Montado"
@@ -7416,6 +7469,7 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
             cabo = tom == "ok"
         else:
             continue
+        cadeias_tag.setdefault(dst, []).append(cadeia)
         antes = por_tag.get(dst)
         if antes is None or PIOR[tom] > PIOR[antes["tom"]]:
             montada = mont.get(dst, {}).get("mont", "") == "Montado"
@@ -7423,6 +7477,26 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
                             "montada": montada,
                             "cabo": cabo, "apta": tom == "ok" and montada,
                             "cadeia": cadeia, **cabo_da_tag(dst)}
+
+    # cadeia_uniao entra depois das duas passadas acima, com todo mundo já em
+    # por_tag: junta os circuitos de TODAS as cadeias que a TAG alcançou
+    # (sinal e potência, quando divergem pra caixas diferentes), sem repetir
+    # circuito -- é o que garante que a pendência de um cabo de potência não
+    # suma só porque o de sinal, noutra caixa, também estava travado.
+    for tag_id, cadeias_vistas in cadeias_tag.items():
+        alvo_tag = por_tag.get(tag_id)
+        if alvo_tag is None:
+            continue
+        vistos_cid: set[str] = set()
+        uniao: list = []
+        for cad in cadeias_vistas:
+            for c in cad:
+                cid = str(c["CIRCUITO"]).strip()
+                if cid in vistos_cid:
+                    continue
+                vistos_cid.add(cid)
+                uniao.append(c)
+        alvo_tag["cadeia_uniao"] = uniao
 
     # ------------------------------------------------------------------
     # Conclusão só aparece quando a lógica CONSEGUE concluir.
@@ -7715,7 +7789,11 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         alvo_export = sorted(t for t in universo if prefixos and t.upper().startswith(prefixos))
         circuitos_export: dict[str, dict] = {}
         for tag in alvo_export:
-            for c in por_tag[tag].get("cadeia", []):
+            # cadeia_uniao, nao cadeia: uma TAG pode ter cabo de sinal E de
+            # potência indo pra caixas diferentes, cada um com sua própria
+            # pendência -- usar só a cadeia "vencedora" do veredito escondia
+            # a pendência do outro cabo inteira.
+            for c in por_tag[tag].get("cadeia_uniao") or por_tag[tag].get("cadeia", []):
                 # so o que ainda falta lancar -- montagem do instrumento e
                 # outra pendencia, essa exportacao e so sobre o cabo
                 if cert_num(c["PCT"]) >= 99.5:
@@ -8048,15 +8126,32 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
             # é a cadeia inteira até a alimentação do painel. Numa coluna só,
             # instrumento com o cabo Concluído aparecia como "Bloqueado" --
             # verdade sobre a cadeia, mentira sobre o cabo dele.
-            ct = "ok" if v.get("cabo_tag") else (
-                "warn" if v.get("pct_tag", 0) > 0 else "crit")
-            rot_cabo = v.get("status_tag", "sem circuito")
-            if v.get("pct_tag", 0) > 0 and not v.get("cabo_tag"):
-                rot_cabo += f' · {br_pct(v["pct_tag"])}'
+            # Duas pernas (sinal + potência) em estágios diferentes viram dois
+            # badges, um por perna -- uma TAG com sinal Concluído e potência
+            # Em Andamento a 41,5% mostrava só "82m, 70,7%" antes, sem dizer
+            # qual dos dois cabos é o pendente.
+            pernas = v.get("pernas_tag") or []
+            if len(pernas) > 1 and (pernas[0]["status"] != pernas[1]["status"]
+                                     or pernas[0]["pct"] != pernas[1]["pct"]):
+                def _badge_perna(p):
+                    c = "ok" if p["pronto"] else ("warn" if p["pct"] > 0 else "crit")
+                    rot = p["status"]
+                    if p["pct"] > 0 and not p["pronto"]:
+                        rot += f' · {br_pct(p["pct"])}'
+                    return (f'<div class="ct-perna"><i>{"potência" if p["pot"] else "sinal"}'
+                            f'</i><span class="gtbl-badge {c}">{rot}</span></div>')
+                cabo_html = f'<div class="ct-pernas">{"".join(_badge_perna(p) for p in pernas)}</div>'
+            else:
+                ct = "ok" if v.get("cabo_tag") else (
+                    "warn" if v.get("pct_tag", 0) > 0 else "crit")
+                rot_cabo = v.get("status_tag", "sem circuito")
+                if v.get("pct_tag", 0) > 0 and not v.get("cabo_tag"):
+                    rot_cabo += f' · {br_pct(v["pct_tag"])}'
+                cabo_html = f'<span class="gtbl-badge {ct}">{rot_cabo}</span>'
             linhas.append(
                 f'<tr class="ct-lin{atual}"><td class="gtbl-mono">{tag}</td>'
                 f'<td class="gtbl-mono gtbl-muted">{v["caixa"]}</td>'
-                f'<td><span class="gtbl-badge {ct}">{rot_cabo}</span></td>'
+                f'<td>{cabo_html}</td>'
                 f'<td><span class="gtbl-badge {"ok" if v["cabo"] else marca}">'
                 f'{"apto" if v["cabo"] else CERT_ROTULO[v["tom"]]}</span></td>'
                 f'<td><span class="gtbl-badge {mt}">'
