@@ -10626,7 +10626,7 @@ def render_previsao_medicao(tags: pd.DataFrame, resumo: pd.DataFrame,
 # (previsto fixo da Semana Programada). Quando um prazo chega, so essa linha
 # muda -- curva_s_montar() troca de modelo sozinha.
 CURVA_S_PRAZO: dict[str, date | None] = {
-    "geral": None,
+    "geral": date(2027, 4, 14),
     "prioritario": date(2026, 12, 31),
 }
 
@@ -11109,29 +11109,35 @@ def _curva_s_resumo_lateral(c: dict, escolha: str) -> str:
             dias_dif = (c["prazo"] - date.fromordinal(int(c["termino_x"]))).days
             badge = ('<span class="badge ok">Adiantado</span>' if dias_dif >= 0
                     else '<span class="badge alerta">Atrasado</span>')
-            linhas += [
-                ("Ritmo necessário",
-                 f'{c["ritmo_necessario"]:.1f} TAGs/semana'.replace(".", ",")
-                 if c["ritmo_necessario"] else "—"),
-                ("Situação atual", badge),
-                ("Dias de folga/atraso", f'{"+" if dias_dif >= 0 else ""}{br_num(dias_dif)} dias'),
-            ]
+            dias_txt = f'{"+" if dias_dif >= 0 else ""}{br_num(dias_dif)} dias'
         else:
-            linhas += [("Situação atual", '<span class="badge neutro">Sem projeção</span>')]
-        linhas.append(("Prazo contratual", c["prazo"].strftime("%d/%m/%Y")))
+            badge, dias_txt = '<span class="badge neutro">Sem projeção</span>', "—"
+        linhas += [
+            ("Ritmo necessário",
+             f'{c["ritmo_necessario"]:.1f} TAGs/semana'.replace(".", ",")
+             if c["ritmo_necessario"] else "—"),
+            ("Situação atual", badge),
+            ("Dias de folga/atraso", dias_txt),
+            ("Prazo contratual", c["prazo"].strftime("%d/%m/%Y") if c["prazo"] else "—"),
+        ]
     else:
-        previsto_agora = dict(c["previsto"]).get(c["x_atual"], 0.0) if c["x_atual"] else 0.0
-        diferenca = real_atual - previsto_agora
-        pct_dif = (diferenca / previsto_agora * 100) if previsto_agora else 0.0
-        badge = ('<span class="badge ok">Adiantado</span>' if diferenca >= 0
-                else '<span class="badge alerta">Atrasado</span>')
+        previsto_agora = dict(c["previsto"]).get(c["x_atual"], 0.0) if c["x_atual"] else None
+        if previsto_agora is not None:
+            diferenca = real_atual - previsto_agora
+            pct_dif = (diferenca / previsto_agora * 100) if previsto_agora else 0.0
+            badge = ('<span class="badge ok">Adiantado</span>' if diferenca >= 0
+                    else '<span class="badge alerta">Atrasado</span>')
+            pct_txt = f'{"+" if pct_dif >= 0 else ""}{pct_dif:.1f}'.replace(".", ",") + "%"
+            dif_txt = f'{"+" if diferenca >= 0 else ""}{br_num(round(diferenca))}'
+        else:
+            badge, pct_txt, dif_txt = '<span class="badge neutro">Sem projeção</span>', "—", "—"
         linhas += [
             ("Situação atual", badge),
-            ("% vs. previsto", f'{"+" if pct_dif >= 0 else ""}{pct_dif:.1f}'.replace(".", ",") + "%"),
-            ("Diferença em TAGs", f'{"+" if diferenca >= 0 else ""}{br_num(round(diferenca))}'),
+            ("% vs. previsto", pct_txt),
+            ("Diferença em TAGs", dif_txt),
+            ("Projeção de término",
+             _curva_s_rotulo_x(False, c["termino_x"]) if c["termino_x"] else "—"),
         ]
-        if c["termino_x"]:
-            linhas.append(("Projeção de término", _curva_s_rotulo_x(False, c["termino_x"])))
 
     corpo = "".join(
         f'<div class="linha"><span class="lb">{esc(lb)}</span><span class="vl">{vl}</span></div>'
