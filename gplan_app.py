@@ -1478,6 +1478,16 @@ def inject_css():
         .cs-ritmo-nota { font-size:11px; color:var(--text-3); margin-top:10px; line-height:1.5; }
         .cs-vazio { padding:38px 20px; text-align:center; color:var(--text-3); font-size:13px; }
 
+        /* Cabecalho de cada curva dentro de "Visao geral" -- divisor visivel
+           acima, pra separar claramente onde a Geral acaba e a Prioritarios
+           comeca (as duas ficam empilhadas na mesma aba). */
+        .cs-secao { display:flex; align-items:center; gap:12px;
+                   margin:34px 0 6px; padding-top:26px; border-top:1px solid var(--border-color); }
+        .cs-secao .tile { width:34px; height:34px; }
+        .cs-secao .txt strong { display:block; font-size:18px; font-weight:800;
+                                color:var(--text-1); letter-spacing:-.2px; }
+        .cs-secao .txt span { font-size:11.5px; color:var(--text-3); }
+
         /* Tabela "Evolucao" -- identidade propria, nao a .gtbl generica das
            outras abas: cabecalho fixo, zebra sutil, diferenca com seta e cor,
            % com mini-barra embutida na propria celula. */
@@ -1495,6 +1505,7 @@ def inject_css():
         .cs-tabela .dif { display:inline-flex; align-items:center; gap:3px; font-weight:700; }
         .cs-tabela .dif.pos { color:var(--accent-teal); }
         .cs-tabela .dif.neg { color:var(--accent-red); }
+        .cs-tabela .dif.neu { color:var(--text-3); }
         .cs-tabela .pctwrap { display:flex; align-items:center; gap:8px; }
         .cs-tabela .pctbar { flex:1; height:6px; border-radius:99px; background:rgba(var(--rgb-tinta),.08);
                              min-width:50px; overflow:hidden; }
@@ -11368,7 +11379,13 @@ def _curva_s_bloco(c: dict, escolha: str, chave: str) -> None:
     """Um bloco completo: 6 cartoes, grafico + resumo lado a lado, tabela e
     exportacao. Reutilizado pelas duas curvas na aba Visão Geral."""
     total = c["total"]
-    render_html(f'<h4 style="margin:22px 0 4px;font-size:15px;">Curva S — {esc(escolha)}</h4>')
+    subtitulo = ("Produção total de montagem" if escolha == "Geral"
+                else "Recorte das TAGs com SSOP Prioritário = SIM")
+    render_html(f"""
+      <div class="cs-secao">
+        {du_tile("#5b8def" if escolha == "Geral" else "#9d6bff", "trend")}
+        <div class="txt"><strong>Curva S — {esc(escolha)}</strong><span>{esc(subtitulo)}</span></div>
+      </div>""")
     render_html(_curva_s_kpis6(c, escolha))
 
     if c["real_atual"] is None:
@@ -11479,13 +11496,15 @@ def _curva_s_comparativo(geral: dict, prio: dict) -> None:
     def situacao(c):
         if c["eixo_data"] and c["termino_x"] and c["prazo"]:
             dias = (c["prazo"] - date.fromordinal(int(c["termino_x"]))).days
-            return (("ok", f"Adiantado · {br_num(dias)}d de folga") if dias >= 0
+            if dias == 0:
+                return ("neu", "No prazo")
+            return (("ok", f"Adiantado · {br_num(dias)}d de folga") if dias > 0
                    else ("alerta", f"Atrasado · {br_num(-dias)}d"))
         if not c["eixo_data"] and c["x_atual"]:
             dif = (c["real_atual"] or 0) - dict(c["previsto"]).get(c["x_atual"], 0.0)
             return (("ok", f"Adiantado · semana {c['x_atual']}") if dif >= 0
                    else ("alerta", f"Atrasado · semana {c['x_atual']}"))
-        return ("neutro", "Sem dado suficiente")
+        return ("neu", "Sem dado suficiente")
 
     def pct(c):
         return br_pct((c["real_atual"] or 0) / c["total"] * 100, 1) if c["total"] else "—"
@@ -11494,7 +11513,11 @@ def _curva_s_comparativo(geral: dict, prio: dict) -> None:
         return f'{c["ritmo"]:.1f}'.replace(".", ",") + " /sem" if c["ritmo"] else "—"
 
     def termino(c):
-        return _curva_s_rotulo_x(c["eixo_data"], c["termino_x"]) if c["termino_x"] else "—"
+        if not c["termino_x"]:
+            return "—"
+        if c["eixo_data"]:
+            return date.fromordinal(int(c["termino_x"])).strftime("%d/%m/%Y")
+        return _curva_s_rotulo_x(False, c["termino_x"])
 
     linhas_html = ""
     for rot, vg, vp in [
@@ -11508,12 +11531,13 @@ def _curva_s_comparativo(geral: dict, prio: dict) -> None:
         linhas_html += (f'<tr><td class="rotulo">{esc(rot)}</td>'
                        f'<td>{vg}</td><td>{vp}</td></tr>')
 
+    mapa_classe = {"ok": "pos", "alerta": "neg", "neu": "neu"}
     sg_classe, sg_texto = situacao(geral)
     sp_classe, sp_texto = situacao(prio)
     linhas_html += (
         '<tr><td class="rotulo">Situação</td>'
-        f'<td><span class="dif {"pos" if sg_classe == "ok" else "neg"}">{esc(sg_texto)}</span></td>'
-        f'<td><span class="dif {"pos" if sp_classe == "ok" else "neg"}">{esc(sp_texto)}</span></td></tr>')
+        f'<td><span class="dif {mapa_classe[sg_classe]}">{esc(sg_texto)}</span></td>'
+        f'<td><span class="dif {mapa_classe[sp_classe]}">{esc(sp_texto)}</span></td></tr>')
 
     render_html(
         '<div class="gplan-panel ct-painel"><div class="gplan-panel-title">Comparativo Geral × Prioritários'
