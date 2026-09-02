@@ -7679,9 +7679,17 @@ def cert_altura(cad: dict, largura_px: int = 1320) -> int:
     else:
         larg = max(400 + 120 + 38 + 96 + (cols - 1) * passo_x + 76, 1100)
     # 1.320 px é a largura medida do painel numa janela de 1.600 com a lateral
-    # aberta. Em tela menor a cena encolhe e sobra folga; em tela muito maior
-    # ela passa do quadro e a moldura rola, que é o defeito mais barato dos dois.
-    return int(min(860, max(360, largura_px * alt / larg + 46)))
+    # aberta. Em tela menor a cena encolhe e sobra folga.
+    #
+    # O teto era 860 -- baixo demais: a CFF-12-090 (22 ramais na maior caixa,
+    # fieldbus força so 3 colunas, 8 fileiras) precisa de 1203px de verdade.
+    # Com scrolling=False no iframe e o desenho sendo pan/zoom manual (nao
+    # auto-encolhe), o que passava do teto simplesmente sumia da tela sem
+    # aviso nem barra de rolagem -- 3 caixas (TJT-12-041/042/043) e metade
+    # dos instrumentos ficavam invisiveis, achados numa auditoria em
+    # 2026-09-02. 1600 cobre o pior caso real da base (1203px) com folga
+    # para a base crescer sem cortar de novo.
+    return int(min(1600, max(360, largura_px * alt / larg + 46)))
 
 
 def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataFrame,
@@ -8380,12 +8388,21 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                         'todas as TAGs</span></div>')
         # o nome da caixa entra na tabela porque a caixa é TAG (tem montagem e
         # documento próprios); o nome do laço não, porque laço não é TAG
-        render_tabela([t["org"] for bl in blocos_vistos for t in bl["tags"]]
+        #
+        # t["base"], nao t["org"]: mesmo bug do desenha_caixa (auditoria de
+        # 2026-09-02) -- desenha_painel ja traduz pra t["base"] duas telas
+        # acima, mas a tabela e as fichas continuavam lendo o nome cru da
+        # planilha de cabos, que raramente bate com o nome canonico da
+        # 01_BASE_TAGS (376 das 1.871 tags em blocos de painel precisam
+        # dessa traducao -- zero a mais, ZSH/L dividido em duas tags, etc.).
+        # Essas TAGs apareciam certinho no desenho e sumiam da tabela logo
+        # abaixo.
+        render_tabela([t["base"] for bl in blocos_vistos for t in bl["tags"]]
                       + [bl["nome"] for bl in blocos_vistos
                          if not bl.get("ordem_fixa")],
                       f"painel {' + '.join(ordem_paineis)}")
-        render_fichas([t["org"] for bl in blocos_vistos for t in bl["tags"]
-                       if t["org"] in com_ficha])
+        render_fichas([t["base"] for bl in blocos_vistos for t in bl["tags"]
+                       if t["base"] in com_ficha])
         return
 
     def desenha_caixa(alvo):
@@ -8499,9 +8516,15 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         <span><b style="background:var(--accent-purple)"></b>sem par na base de TAGs</span>
       </div>""")
 
-    render_tabela([r["org"] for r in ramais_vistos],
+    # r["base"], nao r["org"]: org e o nome cru da planilha de cabos
+    # (TJT-12-041), base e o nome que a 01_BASE_TAGS usa depois do de-para
+    # (TJT-12-0041, "zero" -- ver nome_de_base). A tabela e as fichas so
+    # reconhecem o nome canonico; passando o cru, a TAG aparecia certinho no
+    # desenho e sumia da tabela logo abaixo -- achado numa auditoria em
+    # 2026-09-02 (TJT-12-0041/0042/0043, reveladas junto com o teto de altura).
+    render_tabela([r["base"] for r in ramais_vistos],
                   f"caixa {' + '.join(ordem_caixas)}")
-    render_fichas([r["org"] for r in ramais_vistos if r["org"] in com_ficha])
+    render_fichas([r["base"] for r in ramais_vistos if r["base"] in com_ficha])
 
 
 # ===================================================================== #
