@@ -10901,13 +10901,21 @@ def _curva_s_com_prazo(tipo: str, tags: pd.DataFrame, prazo: date,
     começou -- a reconstrução já gravada na 10_BASE_CURVA_S (Status de
     Montagem + Semana Programada), não só o ponto de hoje.
 
-    TENDÊNCIA começa EXATAMENTE igual ao Previsto (mesmo prazo) e só se
-    desloca no tempo conforme o real diverge dele: acha a semana em que o
-    Previsto teria o mesmo valor do Real de hoje (invertendo o S por busca
-    binária -- o Previsto é monótono, sempre dá pra achar) e desloca a curva
-    inteira por essa diferença. Fazer mais que o previsto empurra esse
-    deslocamento pra trás (antecipa o término); fazer menos empurra pra
-    frente (atrasa) -- sempre na MESMA forma de S do Previsto, só deslocada.
+    TENDÊNCIA é uma curva em S própria, do ponto de HOJE até o total, na
+    semana que o ritmo médio real (Real de hoje menos o valor-base, dividido
+    pelas semanas decorridas) indicar como término. No primeiro dia, sem
+    nenhuma semana decorrida ainda, o ritmo cai no valor que faria terminar
+    exatamente no prazo -- e aí a Tendência é matematicamente a MESMA fórmula
+    do Previsto (mesma âncora, mesmo total, mesmo prazo). Dali em diante,
+    fazer mais que essa média puxa o término pra antes do prazo; fazer menos
+    empurra pra depois.
+
+    Isso troca de propósito um modelo anterior que invertia a curva do
+    Previsto pra achar "em que semana ele bateria o Real de hoje" -- perto do
+    início do S (onde a curva sobe bem devagar de propósito), uma diferença
+    pequena de Real invertia pra uma semana muito distante, e o deslocamento
+    resultante distorcia TODAS as semanas futuras de uma vez. O ritmo médio
+    não tem essa sensibilidade: é só uma divisão, sem inverter nada.
 
     5 dias úteis por semana, feriados nacionais descontados -- não 7 dias
     corridos (ver _dias_uteis_entre).
@@ -10947,17 +10955,6 @@ def _curva_s_com_prazo(tipo: str, tags: pd.DataFrame, prazo: date,
     real_pts.append((x_hoje, real_atual))
     real_pts.sort()
 
-    # ritmo: só informativo (mostrado na tela), não decide mais a forma da
-    # tendência -- é a diferença entre a base (dia em que o prazo foi
-    # travado) e hoje. No primeiro dia (x_hoje == base_semana) ainda não há
-    # uma segunda leitura; cai pro ritmo médio do cronograma interno só pra
-    # não ficar sem número nenhum -- some assim que passar o primeiro dia.
-    if x_hoje > base_semana:
-        ritmo = (real_atual - base_valor) / (x_hoje - base_semana)
-    else:
-        n_semanas = max(previsto_semanal) - min(previsto_semanal) + 1 if previsto_semanal else 0
-        ritmo = (real_atual / n_semanas) if n_semanas else None
-
     vao_previsto = x_prazo - base_semana
 
     def _previsto_em(x: float) -> float:
@@ -10965,32 +10962,36 @@ def _curva_s_com_prazo(tipo: str, tags: pd.DataFrame, prazo: date,
             return total
         return base_valor + (total - base_valor) * _smootherstep((x - base_semana) / vao_previsto)
 
-    # inverte o Previsto por busca binaria (e monotono, sempre converge):
-    # em que semana o Previsto valeria o que o Real vale hoje?
-    x_estrela = base_semana
-    if vao_previsto > 0:
-        lo, hi = base_semana, x_prazo
-        if _previsto_em(hi) <= real_atual:
-            x_estrela = hi
-        elif _previsto_em(lo) >= real_atual:
-            x_estrela = lo
-        else:
-            for _ in range(60):
-                meio = (lo + hi) / 2
-                if _previsto_em(meio) < real_atual:
-                    lo = meio
-                else:
-                    hi = meio
-            x_estrela = (lo + hi) / 2
-    deslocamento = x_hoje - x_estrela  # >0 atrasado, <0 adiantado, 0 em cima do previsto
+    # ritmo: TAGs/semana, sem inverter curva nenhuma -- so uma divisao, por
+    # isso nao tem a sensibilidade que uma inversao perto do inicio do S
+    # teria. No primeiro dia (x_hoje == base_semana), ainda sem nenhuma
+    # semana decorrida pra medir ritmo de verdade, cai no ritmo MEDIO
+    # NECESSARIO pra fechar o previsto no prazo -- e e exatamente esse valor
+    # que faz a tendencia coincidir matematicamente com o previsto (mesma
+    # reta implicita: mesma origem, mesmo total, mesmo prazo).
+    if x_hoje > base_semana:
+        ritmo = (real_atual - base_valor) / (x_hoje - base_semana)
+    elif vao_previsto > 0:
+        ritmo = (total - base_valor) / vao_previsto
+    else:
+        ritmo = None
 
-    def _tendencia_em(x: float) -> float:
-        return _previsto_em(x - deslocamento)
-
-    x_termino = x_prazo + deslocamento
+    if ritmo and ritmo > 0 and real_atual < total:
+        x_termino = x_hoje + (total - real_atual) / ritmo
+    elif real_atual >= total:
+        x_termino = x_hoje
+    else:
+        x_termino = None
 
     teto_semanas = base_semana + 156  # ~3 anos, folga generosa
-    x_fim_eixo = min(max(x_prazo, x_termino, x_hoje + 1), teto_semanas)
+    x_termino_eixo = min(x_termino, teto_semanas) if x_termino is not None else x_hoje
+    x_fim_eixo = min(max(x_prazo, x_termino_eixo, x_hoje + 1), teto_semanas)
+
+    def _tendencia_em(x: float) -> float:
+        if x_termino is None or x_termino <= x_hoje:
+            return real_atual
+        vao = x_termino - x_hoje
+        return real_atual + (total - real_atual) * _smootherstep((x - x_hoje) / vao)
 
     previsto_pts, tendencia_pts = [], []
     xv = round(base_semana)
@@ -11005,14 +11006,16 @@ def _curva_s_com_prazo(tipo: str, tags: pd.DataFrame, prazo: date,
     semanas_restantes = max(x_prazo - x_hoje, 0)
     ritmo_necessario = ((total - real_atual) / semanas_restantes
                         if semanas_restantes > 0 else None)
-    tendencia_horizonte = _tendencia_em(x_prazo)
-    termino_data = _data_da_semana(base_semana, base_data, min(x_termino, teto_semanas))
+    tendencia_horizonte = _tendencia_em(x_prazo) if x_termino is not None else None
+    termino_data = (_data_da_semana(base_semana, base_data, x_termino_eixo)
+                    if x_termino is not None else None)
 
     return {
         "total": total, "previsto": previsto_pts, "real": real_pts,
         "tendencia": tendencia_pts, "ritmo": ritmo, "eixo_data": True,
         "x_atual": round(x_hoje), "real_atual": real_atual,
-        "termino_x": termino_data.toordinal() if x_termino <= teto_semanas else None,
+        "termino_x": (termino_data.toordinal()
+                      if (termino_data is not None and x_termino <= teto_semanas) else None),
         "prazo_x": round(x_prazo), "prazo": prazo,
         "ritmo_necessario": ritmo_necessario, "horizonte_x": round(x_prazo),
         "tendencia_horizonte": tendencia_horizonte,
@@ -11407,16 +11410,17 @@ def _curva_s_bloco(c: dict, escolha: str, chave: str) -> None:
             if c["termino_x"]:
                 dias_dif = (c["prazo"] - date.fromordinal(int(c["termino_x"]))).days
                 if dias_dif > 0:
-                    desvio_txt = f'{br_num(dias_dif)} dias à frente do previsto'
+                    desvio_txt = f'{br_num(dias_dif)} dia{"" if dias_dif == 1 else "s"} à frente do previsto'
                 elif dias_dif < 0:
-                    desvio_txt = f'{br_num(-dias_dif)} dias atrás do previsto'
+                    desvio_txt = f'{br_num(-dias_dif)} dia{"" if dias_dif == -1 else "s"} atrás do previsto'
                 else:
                     desvio_txt = "exatamente em cima do previsto"
             else:
                 desvio_txt = "em cima do previsto"
-            nota = ("Tendência: a mesma curva do Previsto, deslocada no tempo conforme o "
-                   f"realizado diverge dele -- hoje está {desvio_txt}. Fazer mais que o "
-                   "previsto antecipa o término; fazer menos atrasa.")
+            nota = ("Tendência: curva em S do ponto de hoje até o total, na semana que o "
+                   "ritmo médio real indicar como término -- sem leituras suficientes ainda, "
+                   f"esse ritmo é o necessário pra fechar o previsto no prazo. Hoje está "
+                   f"{desvio_txt}; fazer mais que a média antecipa o término, fazer menos atrasa.")
         elif c["ritmo"]:
             nota = ("Tendência: média ponderada do ritmo semanal real, peso maior para as "
                    "semanas mais recentes -- projetada a partir do último ponto de Real "
