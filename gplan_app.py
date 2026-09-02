@@ -1481,8 +1481,7 @@ def inject_css():
         /* Cabecalho de cada curva dentro de "Visao geral" -- divisor visivel
            acima, pra separar claramente onde a Geral acaba e a Prioritarios
            comeca (as duas ficam empilhadas na mesma aba). */
-        .cs-secao { display:flex; align-items:center; gap:12px;
-                   margin:34px 0 6px; padding-top:26px; border-top:1px solid var(--border-color); }
+        .cs-secao { display:flex; align-items:center; gap:12px; margin:6px 0 18px; }
         .cs-secao .tile { width:34px; height:34px; }
         .cs-secao .txt strong { display:block; font-size:18px; font-weight:800;
                                 color:var(--text-1); letter-spacing:-.2px; }
@@ -11570,9 +11569,10 @@ def render_curva_s(tags: pd.DataFrame, cache_key: str = ""):
             'Curva S.</div></div>')
         return
 
-    aba_geral, aba_comparativo = st.tabs(["Visão geral", "Comparativo"])
+    aba_geral, aba_prio, aba_comparativo = st.tabs(["Visão geral", "Prioritários", "Comparativo"])
     with aba_geral:
         _curva_s_bloco(geral, "Geral", "geral")
+    with aba_prio:
         _curva_s_bloco(prio, "Prioritários", "prioritarios")
     with aba_comparativo:
         _curva_s_comparativo(geral, prio)
