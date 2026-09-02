@@ -5456,9 +5456,16 @@ def cert_indice(lanc: pd.DataFrame, cache_key: str) -> dict:
     loop) tinha o ramo errado vencendo só por vir primeiro na planilha, e
     toda a cadeia dali pra trás (5 TAGs do LOOP9, neste caso) nunca achava
     caixa nem painel -- sumindo da busca por TAG mesmo com cabo lançado.
+
+    Devolve dois dicionários: o principal (sinal, quando existe) e um
+    segundo só com quem tem uma OUTRA caixa/painel além da principal -- o
+    cabo de potência de um instrumento, quando vai a uma caixa diferente da
+    de sinal. O principal decide a identidade (mesmo critério do
+    cert_panorama); o segundo existe pra quem desenha poder abrir as duas,
+    já que a potência continua tendo pendência própria.
     """
     if lanc.empty:
-        return {}
+        return {}, {}
     adj: dict[str, list] = {}
     for _, r in lanc.iterrows():
         org = str(r["ORIGEM"]).strip()
@@ -5480,6 +5487,7 @@ def cert_indice(lanc: pd.DataFrame, cache_key: str) -> dict:
         return None
 
     saida: dict[str, str] = {}
+    outras: dict[str, str] = {}
     veio_de_potencia: dict[str, bool] = {}
     for _, r in lanc.iterrows():
         org, dst = str(r["ORIGEM"]).strip(), str(r["DESTINO"]).strip()
@@ -5498,10 +5506,21 @@ def cert_indice(lanc: pd.DataFrame, cache_key: str) -> dict:
         # potência, sem relação com o que o cert_panorama (que decide a
         # certificação) usa -- mesmo critério do cert_so_potencia lá.
         pot = bool(re.search(r"-P\d*$", str(r["CIRCUITO"]).strip(), re.I))
-        if org in saida and not veio_de_potencia.get(org, True) and pot:
+        if org not in saida:
+            saida[org] = alvo
+            veio_de_potencia[org] = pot
             continue
-        saida[org] = alvo
-        veio_de_potencia[org] = pot
+        if saida[org] == alvo:
+            continue
+        # duas pontas DIFERENTES para o mesmo instrumento: sinal continua
+        # decidindo quem é o principal, mas a outra não desaparece -- fica
+        # em "outras" pra quem desenha abrir as duas caixas, não só uma.
+        if not veio_de_potencia.get(org, True) and pot:
+            outras[org] = alvo
+        else:
+            outras[org] = saida[org]
+            saida[org] = alvo
+            veio_de_potencia[org] = pot
 
     # Ponta que só aparece como DESTINO nunca acha caixa/painel andando pela
     # própria origem -- ela não tem uma (fim de loop instrumento-a-instrumento,
@@ -5529,7 +5548,8 @@ def cert_indice(lanc: pd.DataFrame, cache_key: str) -> dict:
     for nome_loop, (painel_loop, tags_loop) in CERT_LOOPS_YST.items():
         for t in tags_loop:
             saida[t] = painel_loop
-    return saida
+            outras.pop(t, None)
+    return saida, outras
 
 
 @st.cache_data(show_spinner=False, max_entries=3)
@@ -7685,7 +7705,7 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     mont = cert_montagem(tags, depara, cache_key)
     pan = cert_panorama(lanc, mont, cache_key)
     alvos = cert_alvos(lanc, cache_key)
-    indice = cert_indice(lanc, cache_key)
+    indice, indice_outras = cert_indice(lanc, cache_key)
     if not alvos:
         render_html('<div class="gplan-panel"><div class="gtbl-empty">'
                     "Nenhuma caixa de junção nesta base de circuitos.</div></div>")
@@ -8432,6 +8452,15 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         ordem_caixas = [c for c, _ in quantas_cx.most_common()] or [alvo]
     else:
         ordem_caixas = [alvo]
+        # A TAG buscada pode ter um SEGUNDO cabo (potência, quando alvo é a
+        # caixa de sinal, ou vice-versa) indo pra uma caixa diferente --
+        # sem isso o desenho mostrava só uma das duas, e a pendência do
+        # cabo que ficou de fora ficava invisível mesmo tendo cadeia
+        # própria (ver cert_indice). A caixa não entra se for painel (cai
+        # no ramo de cima) nem se já estiver na lista.
+        outra = indice_outras.get(tag_sel)
+        if outra and outra != alvo and outra not in paineis:
+            ordem_caixas.append(outra)
     sobrando_cx, ordem_caixas = ordem_caixas[4:], ordem_caixas[:4]
     ramais_vistos = []
     for alvo_c in ordem_caixas:
