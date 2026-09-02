@@ -10846,6 +10846,33 @@ def _data_da_semana(base_semana: float, base_data: date, semana_alvo: float) -> 
     return _somar_dias_uteis(base_data, round((semana_alvo - base_semana) * 5))
 
 
+def _curva_s_universo(tags: pd.DataFrame, so_prioritarias: bool) -> pd.DataFrame | None:
+    """As TAGs que contam pro universo da curva -- NÃO é só quem já tem
+    Semana Programada (isso é só o que já foi agendado; a maioria das TAGs
+    prioritárias, por exemplo, ainda não tem semana nenhuma, mas segue
+    fazendo parte do que precisa ser montado).
+
+    Prioritários: toda TAG com SSOP_PRIORITARIO = SIM, sem mais filtro --
+    é a contagem bruta da coluna.
+
+    Geral: toda TAG cujo STATUS_FINAL não seja CANCELADO -- essas (72 hoje)
+    não vão ser montadas; o resto sim, agendado ou não. Bate com o "% do
+    total" que o Dashboard já mostra pra TAGs montadas.
+    """
+    if so_prioritarias:
+        if "SSOP_PRIORITARIO" not in tags.columns:
+            return None
+        return tags[tags["SSOP_PRIORITARIO"].astype(str).str.strip().str.upper() == "SIM"]
+    if "STATUS_FINAL" not in tags.columns:
+        return tags
+    return tags[~tags["STATUS_FINAL"].astype(str).str.upper().str.contains("CANCEL", na=False)]
+
+
+def _curva_s_total(tags: pd.DataFrame, so_prioritarias: bool) -> float:
+    universo = _curva_s_universo(tags, so_prioritarias)
+    return float(len(universo)) if universo is not None else 0.0
+
+
 def _curva_s_com_prazo(tipo: str, tags: pd.DataFrame, prazo: date,
                        real_base: dict[int, tuple[float | None, float | None]]) -> dict:
     """Curva com prazo contratual, no MESMO eixo "Semana NN" do cronograma
@@ -10856,25 +10883,28 @@ def _curva_s_com_prazo(tipo: str, tags: pd.DataFrame, prazo: date,
     definido (CURVA_S_PREVISTO_BASE) -- nunca na semana de quem está olhando
     a tela agora, senão andaria junto com o real (regra: previsto não
     muda). Distribuído em S suave (smootherstep, não uma reta) do realizado
-    daquele dia até o total, batendo exatamente na semana do prazo.
+    daquele dia até o TOTAL DO UNIVERSO COMPLETO (ver _curva_s_total -- não
+    só quem já tem Semana Programada, que é apenas o já agendado), batendo
+    exatamente na semana do prazo.
 
     REAL traz a curva completa desde a semana em que o acompanhamento
     começou -- a reconstrução já gravada na 10_BASE_CURVA_S (Status de
     Montagem + Semana Programada), não só o ponto de hoje.
 
-    TENDÊNCIA é recalculada toda vez a partir do realizado de HOJE: se o
-    ritmo atual já fecha o total antes do prazo, mostra esse término
-    antecipado (reta simples, sem forçar formato de S -- não há prazo
-    apertando essa parte); se não fecha, refaz o caminho em S até o prazo --
-    cada semana sem alcançar o previsto deixa essa subida mais inclinada,
-    porque sobra menos tempo pra cobrir a mesma distância.
+    TENDÊNCIA começa EXATAMENTE igual ao Previsto (mesmo prazo) e só se
+    desloca no tempo conforme o real diverge dele: acha a semana em que o
+    Previsto teria o mesmo valor do Real de hoje (invertendo o S por busca
+    binária -- o Previsto é monótono, sempre dá pra achar) e desloca a curva
+    inteira por essa diferença. Fazer mais que o previsto empurra esse
+    deslocamento pra trás (antecipa o término); fazer menos empurra pra
+    frente (atrasa) -- sempre na MESMA forma de S do Previsto, só deslocada.
 
     5 dias úteis por semana, feriados nacionais descontados -- não 7 dias
     corridos (ver _dias_uteis_entre).
     """
     so_prio = tipo == "prioritario"
     previsto_semanal = _curva_s_previsto(tags, so_prio)
-    total = float(sum(previsto_semanal.values()))
+    total = _curva_s_total(tags, so_prio)
     base_data, base_valor = CURVA_S_PREVISTO_BASE[tipo]
     idx = 1 if so_prio else 0
 
@@ -10885,13 +10915,10 @@ def _curva_s_com_prazo(tipo: str, tags: pd.DataFrame, prazo: date,
     if not total or "STATUS_MONTAGEM" not in tags.columns:
         return vazio
 
-    base_tags = tags
-    if so_prio:
-        if "SSOP_PRIORITARIO" not in tags.columns:
-            return vazio
-        base_tags = tags[tags["SSOP_PRIORITARIO"].astype(str).str.strip().str.upper() == "SIM"]
-    programado = base_tags[base_tags["SEMANA_PROGRAMADA"].apply(lambda v: _semana_num(v) is not None)]
-    real_atual = float((programado["STATUS_MONTAGEM"].astype(str).str.strip() == "Montado").sum())
+    base_tags = _curva_s_universo(tags, so_prio)
+    if base_tags is None:
+        return vazio
+    real_atual = float((base_tags["STATUS_MONTAGEM"].astype(str).str.strip() == "Montado").sum())
 
     # A reconstrução (já gravada na 10_BASE_CURVA_S) fixa qual número de
     # semana corresponde a "hoje": é a última semana que ela cobre, porque a
@@ -10910,48 +10937,50 @@ def _curva_s_com_prazo(tipo: str, tags: pd.DataFrame, prazo: date,
     real_pts.append((x_hoje, real_atual))
     real_pts.sort()
 
-    # ritmo: diferença entre a base (dia em que o prazo foi travado) e hoje.
-    # No primeiro dia (x_hoje == base_semana) ainda não há uma segunda
-    # leitura; cai pro ritmo médio do cronograma interno só pra não ficar
-    # sem número nenhum -- some assim que passar o primeiro dia útil.
+    # ritmo: só informativo (mostrado na tela), não decide mais a forma da
+    # tendência -- é a diferença entre a base (dia em que o prazo foi
+    # travado) e hoje. No primeiro dia (x_hoje == base_semana) ainda não há
+    # uma segunda leitura; cai pro ritmo médio do cronograma interno só pra
+    # não ficar sem número nenhum -- some assim que passar o primeiro dia.
     if x_hoje > base_semana:
         ritmo = (real_atual - base_valor) / (x_hoje - base_semana)
     else:
-        n_semanas = max(previsto_semanal) - min(previsto_semanal) + 1
+        n_semanas = max(previsto_semanal) - min(previsto_semanal) + 1 if previsto_semanal else 0
         ritmo = (real_atual / n_semanas) if n_semanas else None
 
+    vao_previsto = x_prazo - base_semana
+
     def _previsto_em(x: float) -> float:
-        vao = x_prazo - base_semana
-        if vao <= 0:
+        if vao_previsto <= 0:
             return total
-        return base_valor + (total - base_valor) * _smootherstep((x - base_semana) / vao)
+        return base_valor + (total - base_valor) * _smootherstep((x - base_semana) / vao_previsto)
 
-    if ritmo and ritmo > 0 and real_atual < total:
-        x_termino_livre = x_hoje + (total - real_atual) / ritmo
-    elif real_atual >= total:
-        x_termino_livre = x_hoje
-    else:
-        x_termino_livre = None
+    # inverte o Previsto por busca binaria (e monotono, sempre converge):
+    # em que semana o Previsto valeria o que o Real vale hoje?
+    x_estrela = base_semana
+    if vao_previsto > 0:
+        lo, hi = base_semana, x_prazo
+        if _previsto_em(hi) <= real_atual:
+            x_estrela = hi
+        elif _previsto_em(lo) >= real_atual:
+            x_estrela = lo
+        else:
+            for _ in range(60):
+                meio = (lo + hi) / 2
+                if _previsto_em(meio) < real_atual:
+                    lo = meio
+                else:
+                    hi = meio
+            x_estrela = (lo + hi) / 2
+    deslocamento = x_hoje - x_estrela  # >0 atrasado, <0 adiantado, 0 em cima do previsto
 
-    if x_termino_livre is not None and x_termino_livre <= x_prazo:
-        x_termino = x_termino_livre
-        def _tendencia_em(x: float) -> float:
-            return min(total, real_atual + ritmo * (x - x_hoje)) if ritmo else real_atual
-        x_fim_tendencia = x_termino_livre
-    elif ritmo is not None:
-        x_termino = None
-        vao = max(x_prazo - x_hoje, 0.2)
-        def _tendencia_em(x: float) -> float:
-            return real_atual + (total - real_atual) * _smootherstep((x - x_hoje) / vao)
-        x_fim_tendencia = x_prazo
-    else:
-        x_termino = None
-        def _tendencia_em(x: float) -> float:
-            return real_atual
-        x_fim_tendencia = x_hoje
+    def _tendencia_em(x: float) -> float:
+        return _previsto_em(x - deslocamento)
+
+    x_termino = x_prazo + deslocamento
 
     teto_semanas = base_semana + 156  # ~3 anos, folga generosa
-    x_fim_eixo = min(max(x_prazo, x_fim_tendencia, x_hoje + 1), teto_semanas)
+    x_fim_eixo = min(max(x_prazo, x_termino, x_hoje + 1), teto_semanas)
 
     previsto_pts, tendencia_pts = [], []
     xv = round(base_semana)
@@ -10966,15 +10995,14 @@ def _curva_s_com_prazo(tipo: str, tags: pd.DataFrame, prazo: date,
     semanas_restantes = max(x_prazo - x_hoje, 0)
     ritmo_necessario = ((total - real_atual) / semanas_restantes
                         if semanas_restantes > 0 else None)
-    tendencia_horizonte = _tendencia_em(x_prazo) if ritmo is not None else None
-    termino_data = (_data_da_semana(base_semana, base_data, x_termino)
-                    if x_termino is not None else None)
+    tendencia_horizonte = _tendencia_em(x_prazo)
+    termino_data = _data_da_semana(base_semana, base_data, min(x_termino, teto_semanas))
 
     return {
         "total": total, "previsto": previsto_pts, "real": real_pts,
         "tendencia": tendencia_pts, "ritmo": ritmo, "eixo_data": True,
         "x_atual": round(x_hoje), "real_atual": real_atual,
-        "termino_x": termino_data.toordinal() if termino_data else None,
+        "termino_x": termino_data.toordinal() if x_termino <= teto_semanas else None,
         "prazo_x": round(x_prazo), "prazo": prazo,
         "ritmo_necessario": ritmo_necessario, "horizonte_x": round(x_prazo),
         "tendencia_horizonte": tendencia_horizonte,
@@ -11252,7 +11280,8 @@ def _curva_s_kpis6(c: dict, escolha: str) -> str:
             dias_dif = (c["prazo"] - date.fromordinal(int(c["termino_x"]))).days
             col5 = ("Folga / atraso",
                    (f'+{br_num(dias_dif)}' if dias_dif >= 0 else br_num(dias_dif)),
-                   "dias vs. prazo", "verde" if dias_dif >= 0 else "vermelho")
+                   "no prazo" if dias_dif == 0 else "dias vs. prazo",
+                   "cinza" if dias_dif == 0 else "verde" if dias_dif > 0 else "vermelho")
         else:
             col5 = ("Folga / atraso", "—", "ritmo insuficiente", "cinza")
         col6_val = c["prazo"].strftime("%d/%m/%Y") if c.get("termino_x") is None else \
@@ -11296,7 +11325,8 @@ def _curva_s_resumo_lateral(c: dict, escolha: str) -> str:
     if c["eixo_data"]:
         if c["termino_x"] and c["prazo"]:
             dias_dif = (c["prazo"] - date.fromordinal(int(c["termino_x"]))).days
-            badge = ('<span class="badge ok">Adiantado</span>' if dias_dif >= 0
+            badge = ('<span class="badge neutro">No prazo</span>' if dias_dif == 0
+                    else '<span class="badge ok">Adiantado</span>' if dias_dif > 0
                     else '<span class="badge alerta">Atrasado</span>')
             dias_txt = f'{"+" if dias_dif >= 0 else ""}{br_num(dias_dif)} dias'
         else:
@@ -11357,15 +11387,24 @@ def _curva_s_bloco(c: dict, escolha: str, chave: str) -> None:
                            x_hoje=c["x_atual"])
         legenda_prazo = ('<span class="prazo"><span class="marca"></span>Prazo</span>'
                          if c["prazo_x"] is not None else "")
-        if c["ritmo"] and not c["eixo_data"]:
+        if c["eixo_data"]:
+            if c["termino_x"]:
+                dias_dif = (c["prazo"] - date.fromordinal(int(c["termino_x"]))).days
+                if dias_dif > 0:
+                    desvio_txt = f'{br_num(dias_dif)} dias à frente do previsto'
+                elif dias_dif < 0:
+                    desvio_txt = f'{br_num(-dias_dif)} dias atrás do previsto'
+                else:
+                    desvio_txt = "exatamente em cima do previsto"
+            else:
+                desvio_txt = "em cima do previsto"
+            nota = ("Tendência: a mesma curva do Previsto, deslocada no tempo conforme o "
+                   f"realizado diverge dele -- hoje está {desvio_txt}. Fazer mais que o "
+                   "previsto antecipa o término; fazer menos atrasa.")
+        elif c["ritmo"]:
             nota = ("Tendência: média ponderada do ritmo semanal real, peso maior para as "
                    "semanas mais recentes -- projetada a partir do último ponto de Real "
                    f'informado (semana {c["x_atual"]}).')
-        elif c["ritmo"] and c["eixo_data"]:
-            nota = ("Tendência: ritmo médio do cronograma desde o início (total realizado "
-                   "÷ semanas do cronograma interno), projetado a partir de hoje -- método "
-                   "simples enquanto não há leituras semanais reais; pode ficar otimista "
-                   "para tarefas concluídas fora do prazo original.")
         else:
             nota = ("Real até aqui: reconstruído a partir de Status de Montagem + Semana "
                    "Programada da 01_BASE_TAGS (quem já foi montado, contado na semana em "
