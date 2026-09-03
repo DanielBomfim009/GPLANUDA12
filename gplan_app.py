@@ -1762,6 +1762,22 @@ def inject_css():
           transition:border-color 120ms; }
         section[data-testid="stSidebar"] [data-testid="stSelectbox"] [role="group"]:hover {
           border-color:rgba(var(--rgb-azul),.5) !important; }
+        /* Campos da lateral viraram multiselect (varios valores marcados de
+           uma vez, ex.: Teste de Malha com 2+ semanas). Os dois seletores
+           cobrem os dois motores possiveis -- [role="group"] se este widget
+           tambem migrou pra react-aria como o selectbox, [data-baseweb]
+           senao (achado da auditoria anterior: so selectbox/menu/dialog
+           migraram, o multiselect continuava BaseWeb). */
+        section[data-testid="stSidebar"] [data-testid="stMultiSelect"] [role="group"],
+        section[data-testid="stSidebar"] [data-testid="stMultiSelect"] [data-baseweb="select"] > div {
+          background:var(--dark-card) !important; border-color:var(--border-color) !important;
+          border-radius:8px !important; font-size:11px !important; min-height:30px !important;
+          transition:border-color 120ms; }
+        section[data-testid="stSidebar"] [data-testid="stMultiSelect"] [role="group"]:hover,
+        section[data-testid="stSidebar"] [data-testid="stMultiSelect"] [data-baseweb="select"] > div:hover {
+          border-color:rgba(var(--rgb-azul),.5) !important; }
+        section[data-testid="stSidebar"] [data-baseweb="tag"] {
+          font-size:10px !important; height:20px !important; }
         /* A cor da barra unica de cada campo -- key do st.container, nao
            mais do selectbox (o ::before mora no wrapper, nao no campo). */
         .st-key-gfw_sop::before { background:var(--accent-blue); }
@@ -3263,10 +3279,14 @@ def com_filtros(href: str) -> str:
     # para a mesma chave -- o Streamlit fica com um deles e o outro some sem
     # aviso, o que daria um filtro diferente do que foi clicado.
     ja_tem = href.split("?", 1)[1] if "?" in href else ""
-    partes = [f"{nome}={quote(valor)}"
+    # Varios valores marcados no mesmo campo vao juntos, separados por
+    # virgula, num unico par chave=valor (consumir_filtros_url faz o split
+    # na volta) -- repetir a chave (chave=a&chave=b) faria o Streamlit ficar
+    # só com o ultimo valor na leitura de st.query_params.
+    partes = [f"{nome}={quote(','.join(valores))}"
               for chave, _rot, padrao, _f, _c in FILTROS
               if (nome := URL_DO_FILTRO.get(chave, chave)) and f"{nome}=" not in ja_tem
-              and (valor := st.session_state.get(f"gf_{chave}", padrao)) and valor != padrao]
+              and (valores := st.session_state.get(f"gf_{chave}", []))]
     if not partes:
         return href
     return href + ("&" if "?" in href else "?") + "&".join(partes)
@@ -10105,42 +10125,44 @@ def _valores(serie: pd.Series) -> list:
                    if v and v.lower() not in ("nan", "-", "none", "0")})
 
 
-def _tags_do_filtro(chave: str, valor: str, tags, resumo, esperados) -> set:
-    """TAGs que atendem a UM filtro. O status e por tag, nao por relatorio:
-    'Recusado' devolve as tags que tem ao menos um relatorio recusado. Filtrar
-    a lista de relatorios em si mudaria o denominador do avanco e as contas da
-    tela passariam a se contradizer."""
+def _tags_do_filtro(chave: str, valores: list, tags, resumo, esperados) -> set:
+    """TAGs que atendem a UM filtro, ja aceitando varios valores marcados ao
+    mesmo tempo (OR entre eles -- ex.: Teste de Malha = SEM63 OU SEM64). O
+    status e por tag, nao por relatorio: 'Recusado' devolve as tags que tem
+    ao menos um relatorio recusado. Filtrar a lista de relatorios em si
+    mudaria o denominador do avanco e as contas da tela passariam a se
+    contradizer."""
     if chave == "fase":
-        return set(tags.loc[tags["FASE"].astype(str).str.strip() == valor, "TAG"])
+        return set(tags.loc[tags["FASE"].astype(str).str.strip().isin(valores), "TAG"])
     if chave == "sop":
-        return set(tags.loc[tags["SOP"].astype(str).str.strip() == valor, "TAG"])
+        return set(tags.loc[tags["SOP"].astype(str).str.strip().isin(valores), "TAG"])
     if chave == "ssop_prioritario":
-        return set(tags.loc[tags["SSOP_PRIORITARIO"].astype(str).str.strip() == valor, "TAG"])
+        return set(tags.loc[tags["SSOP_PRIORITARIO"].astype(str).str.strip().isin(valores), "TAG"])
     if chave == "subgrupo_prioridade":
-        return set(tags.loc[tags["SUBGRUPO_PRIORIDADE"].astype(str).str.strip() == valor, "TAG"])
+        return set(tags.loc[tags["SUBGRUPO_PRIORIDADE"].astype(str).str.strip().isin(valores), "TAG"])
     if chave == "skid":
-        return set(tags.loc[tags["SKID"].astype(str).str.strip() == valor, "TAG"])
+        return set(tags.loc[tags["SKID"].astype(str).str.strip().isin(valores), "TAG"])
     if chave == "cff":
-        return set(tags.loc[tags["CFF"].astype(str).str.strip() == valor, "TAG"])
+        return set(tags.loc[tags["CFF"].astype(str).str.strip().isin(valores), "TAG"])
     if chave == "teste_malha":
         # coluna nova -- pode ainda nao existir na base carregada (Supabase
         # desatualizado); nesse caso o campo nem aparece no formulario, mas
         # um ?teste_malha= vindo de URL cairia aqui direto.
         if "PREVISAO_TESTE_MALHA" not in tags.columns:
             return set()
-        return set(tags.loc[tags["PREVISAO_TESTE_MALHA"].astype(str).str.strip() == valor, "TAG"])
+        return set(tags.loc[tags["PREVISAO_TESTE_MALHA"].astype(str).str.strip().isin(valores), "TAG"])
     if chave == "grupo":
-        return set(resumo.loc[resumo["GRUPO_REGRA"].map(sentence_case) == valor, "TAG"])
+        return set(resumo.loc[resumo["GRUPO_REGRA"].map(sentence_case).isin(valores), "TAG"])
     if chave == "status":
-        return set(esperados.loc[esperados["STATUS_SIGEM"].map(sentence_case) == valor, "TAG"])
+        return set(esperados.loc[esperados["STATUS_SIGEM"].map(sentence_case).isin(valores), "TAG"])
     return set()
 
 
 def _universo(escolhas: dict, tags, resumo, esperados, pular: str = "") -> set:
     ids = set(tags["TAG"])
-    for chave, valor in escolhas.items():
-        if valor and chave != pular:
-            ids &= _tags_do_filtro(chave, valor, tags, resumo, esperados)
+    for chave, valores in escolhas.items():
+        if valores and chave != pular:
+            ids &= _tags_do_filtro(chave, valores, tags, resumo, esperados)
     return ids
 
 
@@ -10163,8 +10185,13 @@ def consumir_filtros_url(tags: pd.DataFrame, resumo: pd.DataFrame,
             continue
         serie = base[fonte][coluna]
         validos = _valores(serie.map(sentence_case) if chave in NORMALIZA else serie)
-        if vindo[chave] in validos:
-            st.session_state[f"gf_{chave}"] = vindo[chave]
+        # Varios valores no mesmo parametro vem separados por virgula (ver
+        # com_filtros) -- um link com um valor so continua funcionando igual,
+        # so vira uma lista de um item.
+        pedidos = [v for v in vindo[chave].split(",") if v]
+        aceitos = [v for v in pedidos if v in validos]
+        if aceitos:
+            st.session_state[f"gf_{chave}"] = aceitos
 
 
 def _limpar_filtros_certificacao():
@@ -10188,8 +10215,8 @@ def _limpar_filtros():
     """Callback do botão. Precisa ser callback: mexer na chave de um widget
     depois que ele já foi criado no mesmo run levanta exceção no Streamlit --
     os callbacks rodam antes do rerun, quando ainda é permitido."""
-    for chave, _, padrao, _, _ in FILTROS:
-        st.session_state[f"gf_{chave}"] = padrao
+    for chave, _, _, _, _ in FILTROS:
+        st.session_state[f"gf_{chave}"] = []
 
 
 def sidebar_filtros(tags: pd.DataFrame, resumo: pd.DataFrame,
@@ -10213,14 +10240,13 @@ def sidebar_filtros(tags: pd.DataFrame, resumo: pd.DataFrame,
     """
     consumir_filtros_url(tags, resumo, esperados)
 
-    def escolhido(chave: str, padrao: str) -> str:
-        v = st.session_state.get(f"gf_{chave}", padrao)
-        return "" if v == padrao else v
+    def escolhidos(chave: str) -> list:
+        return list(st.session_state.get(f"gf_{chave}", []))
 
     # O rotulo do expansor precisa do recorte ANTES de desenhar os seletores
     # -- ele usa o valor que cada widget ja tem guardado do run anterior, o
     # mesmo que os proprios seletores vao ler duas linhas abaixo.
-    escolhas_agora = {c: escolhido(c, p) for c, _, p, _, _ in FILTROS}
+    escolhas_agora = {c: escolhidos(c) for c, _, _, _, _ in FILTROS}
     ativos_agora = {c: v for c, v in escolhas_agora.items() if v}
     alvo_agora = _universo(escolhas_agora, tags, resumo, esperados)
     rotulo_expansor = f"Filtro rápido · {br_num(len(alvo_agora))} de {br_num(len(tags))}"
@@ -10264,13 +10290,14 @@ def sidebar_filtros(tags: pd.DataFrame, resumo: pd.DataFrame,
                         # alguem subir a base atualizada. Sumir o campo aqui e
                         # melhor que estourar erro pra tela inteira.
                         continue
-                    escolhas = {c: escolhido(c, p) for c, _, p, _, _ in FILTROS}
+                    escolhas = {c: escolhidos(c) for c, _, _, _, _ in FILTROS}
                     sub = base[base["TAG"].isin(
                         _universo(escolhas, tags, resumo, esperados, pular=chave))]
                     serie = sub[coluna].map(sentence_case) if chave in NORMALIZA else sub[coluna]
-                    opcoes = [padrao] + _valores(serie)
-                    if st.session_state.get(f"gf_{chave}", padrao) not in opcoes:
-                        st.session_state[f"gf_{chave}"] = padrao
+                    opcoes = _valores(serie)
+                    valido = [v for v in st.session_state.get(f"gf_{chave}", []) if v in opcoes]
+                    if valido != st.session_state.get(f"gf_{chave}", []):
+                        st.session_state[f"gf_{chave}"] = valido
                     cor = FILTRO_VISUAL.get(chave, "azul")
                     # Rotulo e campo entram no MESMO st.container pra virar
                     # uma barra de cor unica e continua (::before absoluto,
@@ -10283,7 +10310,14 @@ def sidebar_filtros(tags: pd.DataFrame, resumo: pd.DataFrame,
                         render_html(
                             f'<div class="gf-campo-rot fxc-{cor}">'
                             f'<span>{esc(rotulo)}</span></div>')
-                        st.selectbox(rotulo, opcoes, key=f"gf_{chave}", label_visibility="collapsed")
+                        # multiselect (nao selectbox): o usuario pediu pra
+                        # dar pra marcar mais de um valor de uma vez (ex.:
+                        # Teste de Malha = SEM63 E SEM64 juntos). Selecao
+                        # vazia = sem filtro nesse campo, por isso "padrao"
+                        # ("Todos") nao entra mais na lista de opcoes -- ele
+                        # so aparece como texto de espaco vazio.
+                        st.multiselect(rotulo, opcoes, key=f"gf_{chave}",
+                                       label_visibility="collapsed", placeholder=padrao)
 
                 col_limpar, col_aplicar = st.columns(2, gap="small")
                 col_limpar.form_submit_button("Limpar", key="gf_limpar",
@@ -10291,7 +10325,7 @@ def sidebar_filtros(tags: pd.DataFrame, resumo: pd.DataFrame,
                 col_aplicar.form_submit_button("Aplicar", key="gf_aplicar",
                                                type="primary", use_container_width=True)
 
-            escolhas = {c: escolhido(c, p) for c, _, p, _, _ in FILTROS}
+            escolhas = {c: escolhidos(c) for c, _, _, _, _ in FILTROS}
             ativos = {c: v for c, v in escolhas.items() if v}
         else:
             escolhas = escolhas_agora
@@ -10301,7 +10335,7 @@ def sidebar_filtros(tags: pd.DataFrame, resumo: pd.DataFrame,
     rotulos = {c: r for c, r, *_ in FILTROS}
     st.session_state["_flt_selo"] = (
         '<div class="du-selo filtro"><i></i>'
-        + " · ".join(f"{rotulos[c]}: {esc(v)}" for c, v in ativos.items())
+        + " · ".join(f"{rotulos[c]}: {esc(', '.join(v))}" for c, v in ativos.items())
         + f" — {br_num(len(alvo))} de {br_num(len(tags))} tags</div>"
     ) if ativos else ""
     return escolhas
