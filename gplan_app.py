@@ -1704,34 +1704,60 @@ def inject_css():
            perfil" logo abaixo, se comporta certo. */
         section[data-testid="stSidebar"] [data-testid="stSidebarNav"] {
           border-top: 1px solid var(--border-color); padding-top: 8px; margin-top: 10px; }
+        /* Cartao do cabecalho "Filtros aplicados" -- um st.button so, com a
+           label em duas linhas (Streamlit quebra \n\n em dois <p>). A 1a
+           linha vira o titulo, a 2a a contagem + seta, cada uma com seu
+           proprio estilo via :nth-of-type. */
         section[data-testid="stSidebar"] .st-key-flt_toggle button {
-          background:var(--dark-card-2) !important; border-color:var(--border-color) !important;
-          color:var(--text-2) !important; font-weight:600 !important;
-          justify-content:flex-start !important; }
+          background:var(--dark-card-2) !important; border:1px solid var(--border-color) !important;
+          border-radius:12px !important; padding:12px 14px 12px 44px !important;
+          height:auto !important; min-height:52px; position:relative;
+          flex-direction:column !important; align-items:flex-start !important;
+          justify-content:center !important; gap:2px !important; }
+        section[data-testid="stSidebar"] .st-key-flt_toggle button::before {
+          content:""; position:absolute; left:12px; top:50%; transform:translateY(-50%);
+          width:22px; height:22px; border-radius:7px; background:rgba(var(--rgb-azul),.16);
+          background-image:url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235b8def' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4h18l-7 8v7l-4 2v-9z'/%3E%3C/svg%3E");
+          background-repeat:no-repeat; background-position:center; background-size:13px; }
         section[data-testid="stSidebar"] .st-key-flt_toggle button p {
-          font-size:12px !important; white-space:nowrap !important; overflow:hidden !important;
-          text-overflow:ellipsis !important; }
-        section[data-testid="stSidebar"] .stSelectbox label { font-size:10px !important;
-          color:var(--text-3) !important; margin-bottom:0 !important;
-          min-height:0 !important; line-height:1.25 !important; }
-        section[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.stSelectbox) {
-          margin-bottom:-9px; }
+          text-align:left !important; white-space:nowrap !important; overflow:hidden !important;
+          text-overflow:ellipsis !important; width:100%; }
+        section[data-testid="stSidebar"] .st-key-flt_toggle button p:first-of-type {
+          font-size:13px !important; font-weight:700 !important; color:var(--text-1) !important; }
+        section[data-testid="stSidebar"] .st-key-flt_toggle button p:nth-of-type(2) {
+          font-size:11.5px !important; font-weight:600 !important; color:var(--accent-blue) !important; }
+        /* Cada campo: badge de icone colorido + rotulo, igual du_tile das
+           outras telas -- reaproveita .tile/.fxc-* que ja existem. */
+        .gf-campo-rot { display:flex; align-items:center; gap:8px; margin:10px 0 5px; }
+        .gf-campo-rot svg { width:15px; height:15px; padding:5px; border-radius:7px;
+          box-sizing:content-box; flex:none; }
+        .gf-campo-rot.fxc-azul svg  { color:var(--accent-blue);   background:rgba(var(--rgb-azul),.14); }
+        .gf-campo-rot.fxc-roxo svg  { color:var(--accent-purple); background:rgba(var(--rgb-roxo),.14); }
+        .gf-campo-rot.fxc-verde svg { color:var(--accent-green);  background:rgba(var(--rgb-verde),.14); }
+        .gf-campo-rot.fxc-ambar svg { color:var(--accent-amber);  background:rgba(var(--rgb-ambar),.14); }
+        .gf-campo-rot.fxc-teal svg  { color:var(--accent-teal);   background:rgba(var(--rgb-teal),.14); }
+        .gf-campo-rot span { font-size:11px; font-weight:700; letter-spacing:.3px;
+          text-transform:uppercase; color:var(--text-2); }
         section[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] > div {
           background:var(--dark-card) !important; border-color:var(--border-color) !important;
-          font-size:11.5px !important; min-height:30px !important;
+          border-radius:10px !important; font-size:11.5px !important; min-height:34px !important;
           transition:border-color 120ms; }
         section[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"]:hover > div {
           border-color:rgba(var(--rgb-azul),.5) !important; }
-        /* O botao de limpar e uma acao leve, nao um segundo botao do tamanho
-           do menu -- fundo transparente e cor de aviso so aparecem no hover. */
-        section[data-testid="stSidebar"] .stButton button { width:100%; font-size:11px !important;
-          padding:4px 10px !important; border-radius:8px !important; }
+        /* Limpar/Aplicar lado a lado, mesmo tamanho -- limpar e acao leve
+           (contorno), aplicar e a acao primaria (preenchida, cor do tema). */
+        section[data-testid="stSidebar"] .stButton button,
+        section[data-testid="stSidebar"] [data-testid="stFormSubmitButton"] button {
+          width:100%; font-size:11.5px !important; font-weight:700 !important;
+          padding:8px 10px !important; border-radius:9px !important; margin-top:6px; }
         section[data-testid="stSidebar"] .st-key-gf_limpar button {
           background:transparent !important; border:1px dashed var(--border-color) !important;
           color:var(--text-3) !important; box-shadow:none !important; }
         section[data-testid="stSidebar"] .st-key-gf_limpar button:hover {
           color:var(--txt-vermelho) !important; border-color:rgba(var(--rgb-vermelho),.4) !important;
           background:rgba(var(--rgb-vermelho),.08) !important; }
+        section[data-testid="stSidebar"] .st-key-gf_aplicar button {
+          border-radius:9px !important; }
         /* ------- botao de tema: so o icone, preso no alto a direita -------
            Fora do fluxo, ao lado do menu do proprio Streamlit. O rotulo existe
            para leitor de tela, mas nao ocupa espaco. */
@@ -3175,6 +3201,14 @@ KPI_ICONS = {
     "calendario": ('<rect x="3" y="5" width="18" height="16" rx="2"/>'
                    '<path d="M3 10h18M8 3v4M16 3v4"/>'
                    '<rect x="7" y="13" width="3" height="3" rx="0.5" fill="currentColor"/>'),
+    # Ícones do painel de filtro rápido (sidebar_filtros) -- mesmo traço dos
+    # de cima, so recorte novo pra cada campo ter o icone e a cor dele.
+    "filtro": '<path d="M3 4h18l-7 8v7l-4 2v-9z"/>',
+    "documento": '<path d="M7 2h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M14 2v5h5"/><path d="M9 13h6M9 17h6"/>',
+    "estrela": '<path d="M12 2.5l2.9 6.2 6.6.6-5 4.5 1.5 6.5-6-3.6-6 3.6 1.5-6.5-5-4.5 6.6-.6z"/>',
+    "etiqueta": '<path d="M20.6 13.4L11 3.8A2 2 0 0 0 9.6 3H4a1 1 0 0 0-1 1v5.6c0 .5.2 1 .6 1.4l9.6 9.6a2 2 0 0 0 2.8 0l4.4-4.4a2 2 0 0 0 0-2.8z"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/>',
+    "pasta": '<path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+    "check_circulo": '<circle cx="12" cy="12" r="9"/><path d="M8.3 12.3l2.4 2.4 5-5"/>',
 }
 
 
@@ -10017,7 +10051,21 @@ FILTROS = [
     ("ssop_prioritario", "SSOP Prioritário", "Todos", "tags", "SSOP_PRIORITARIO"),
     ("skid", "SKID", "Todos", "tags", "SKID"),
     ("cff", "CFF", "Todos", "tags", "CFF"),
+    # Semana prevista do teste de malha (PREVISAO_TESTE_MALHA na base) -- "0"
+    # pras TAGs sem previsao, mesma convencao do SKID; _valores() ja descarta.
+    ("teste_malha", "Teste de Malha", "Todos", "tags", "PREVISAO_TESTE_MALHA"),
 ]
+
+# Cor e ícone de cada campo no painel da lateral (sidebar_filtros) -- à parte
+# de FILTROS pra não mexer nos vários lugares que já desempacotam a
+# 5-tupla dele. Cores e ícones batem com o mockup que o Daniel mandou.
+FILTRO_VISUAL = {
+    "sop": ("azul", "documento"),
+    "ssop_prioritario": ("roxo", "estrela"),
+    "skid": ("verde", "etiqueta"),
+    "cff": ("ambar", "pasta"),
+    "teste_malha": ("teal", "check_circulo"),
+}
 
 
 def _valores(serie: pd.Series) -> list:
@@ -10047,6 +10095,8 @@ def _tags_do_filtro(chave: str, valor: str, tags, resumo, esperados) -> set:
         return set(tags.loc[tags["SKID"].astype(str).str.strip() == valor, "TAG"])
     if chave == "cff":
         return set(tags.loc[tags["CFF"].astype(str).str.strip() == valor, "TAG"])
+    if chave == "teste_malha":
+        return set(tags.loc[tags["PREVISAO_TESTE_MALHA"].astype(str).str.strip() == valor, "TAG"])
     if chave == "grupo":
         return set(resumo.loc[resumo["GRUPO_REGRA"].map(sentence_case) == valor, "TAG"])
     if chave == "status":
@@ -10167,25 +10217,37 @@ def sidebar_filtros(tags: pd.DataFrame, resumo: pd.DataFrame,
 
     with st.sidebar:
         seta = "▾" if st.session_state["_flt_aberto"] else "▸"
-        st.button(f"{seta}  {rotulo_expansor}", key="flt_toggle",
-                 on_click=_alternar_filtro, use_container_width=True)
+        st.button(f"Filtros aplicados\n\n{br_num(len(alvo_agora))} de "
+                 f"{br_num(len(tags))} registros   {seta}",
+                 key="flt_toggle", on_click=_alternar_filtro, use_container_width=True)
 
         if st.session_state["_flt_aberto"]:
-            for chave, rotulo, padrao, fonte, coluna in FILTROS:
-                escolhas = {c: escolhido(c, p) for c, _, p, _, _ in FILTROS}
-                base = {"tags": tags, "resumo": resumo, "esperados": esperados}[fonte]
-                sub = base[base["TAG"].isin(
-                    _universo(escolhas, tags, resumo, esperados, pular=chave))]
-                serie = sub[coluna].map(sentence_case) if chave in NORMALIZA else sub[coluna]
-                opcoes = [padrao] + _valores(serie)
-                if st.session_state.get(f"gf_{chave}", padrao) not in opcoes:
-                    st.session_state[f"gf_{chave}"] = padrao
-                st.selectbox(rotulo, opcoes, key=f"gf_{chave}")
+            with st.form("gf_form", border=False):
+                for chave, rotulo, padrao, fonte, coluna in FILTROS:
+                    escolhas = {c: escolhido(c, p) for c, _, p, _, _ in FILTROS}
+                    base = {"tags": tags, "resumo": resumo, "esperados": esperados}[fonte]
+                    sub = base[base["TAG"].isin(
+                        _universo(escolhas, tags, resumo, esperados, pular=chave))]
+                    serie = sub[coluna].map(sentence_case) if chave in NORMALIZA else sub[coluna]
+                    opcoes = [padrao] + _valores(serie)
+                    if st.session_state.get(f"gf_{chave}", padrao) not in opcoes:
+                        st.session_state[f"gf_{chave}"] = padrao
+                    cor, icone = FILTRO_VISUAL.get(chave, ("azul", "documento"))
+                    render_html(
+                        f'<div class="gf-campo-rot fxc-{cor}">'
+                        f'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+                        f'stroke-linecap="round" stroke-linejoin="round">{KPI_ICONS.get(icone, "")}'
+                        f'</svg><span>{esc(rotulo)}</span></div>')
+                    st.selectbox(rotulo, opcoes, key=f"gf_{chave}", label_visibility="collapsed")
+
+                col_limpar, col_aplicar = st.columns(2)
+                col_limpar.form_submit_button("Limpar filtros", key="gf_limpar",
+                                              on_click=_limpar_filtros, use_container_width=True)
+                col_aplicar.form_submit_button("Aplicar filtros", key="gf_aplicar",
+                                               type="primary", use_container_width=True)
 
             escolhas = {c: escolhido(c, p) for c, _, p, _, _ in FILTROS}
             ativos = {c: v for c, v in escolhas.items() if v}
-            if ativos:
-                st.button("Limpar filtros", key="gf_limpar", on_click=_limpar_filtros)
         else:
             escolhas = escolhas_agora
             ativos = ativos_agora
@@ -10807,9 +10869,21 @@ CURVA_S_PRAZO: dict[str, date | None] = {
 # senao o previsto "andaria" junto com o real dia a dia e deixaria de ser
 # referencia fixa (regra: PREVISTO NAO MUDA). Os valores sao o realizado de
 # verdade (Status de Montagem) no dia em que a data-limite foi informada.
-CURVA_S_PREVISTO_BASE: dict[str, tuple[date, float]] = {
-    "geral": (date(2026, 9, 2), 611.0),
-    "prioritario": (date(2026, 9, 2), 481.0),
+#
+# A semana tambem trava aqui (nao se deriva mais de semana_hoje a cada
+# renderizacao): semana_hoje muda toda vez que uma semana nova de real e
+# reportada, e usar semana_hoje como se fosse a base fazia a comparacao
+# "semana_hoje > base_semana" nunca disparar (as duas eram sempre a mesma
+# variavel), e o ritmo caia pro calculo por data de calendario -- um unico
+# dia sem nenhum real novo bastava pra tendencia se afastar do previsto
+# (achado em auditoria, 2026-09-03: o usuario relatou a curva "toda errada"
+# de um dia pro outro sem nenhum dado novo). Regra do usuario: "a tendencia
+# antes dos executados e o mesmo prazo do previsto, ela so vai mudando de
+# acordo com os real" -- so uma SEMANA NOVA REPORTADA pode mover o ritmo,
+# nao o calendario passando sozinho.
+CURVA_S_PREVISTO_BASE: dict[str, tuple[float, date, float]] = {
+    "geral": (62.0, date(2026, 9, 2), 611.0),
+    "prioritario": (62.0, date(2026, 9, 2), 481.0),
 }
 
 
@@ -11077,7 +11151,7 @@ def _curva_s_com_prazo(tipo: str, tags: pd.DataFrame, prazo: date,
     so_prio = tipo == "prioritario"
     previsto_semanal = _curva_s_previsto(tags, so_prio)
     total = _curva_s_total(tags, so_prio)
-    base_data, base_valor = CURVA_S_PREVISTO_BASE[tipo]
+    base_semana, base_data, base_valor = CURVA_S_PREVISTO_BASE[tipo]
     idx = 1 if so_prio else 0
 
     vazio = {"total": total, "previsto": [], "real": [], "tendencia": [],
@@ -11099,7 +11173,6 @@ def _curva_s_com_prazo(tipo: str, tags: pd.DataFrame, prazo: date,
     reconstrucao = sorted((s, v[idx]) for s, v in real_base.items() if v[idx] is not None)
     semana_hoje = (reconstrucao[-1][0] if reconstrucao
                   else (max(previsto_semanal) if previsto_semanal else 0))
-    base_semana = float(semana_hoje)  # a base foi travada "agora" -- ver CURVA_S_PREVISTO_BASE
 
     hoje = date.today()
     x_hoje = _semana_equivalente(base_semana, base_data, hoje)
@@ -11118,13 +11191,22 @@ def _curva_s_com_prazo(tipo: str, tags: pd.DataFrame, prazo: date,
 
     # ritmo: TAGs/semana, sem inverter curva nenhuma -- so uma divisao, por
     # isso nao tem a sensibilidade que uma inversao perto do inicio do S
-    # teria. No primeiro dia (x_hoje == base_semana), ainda sem nenhuma
-    # semana decorrida pra medir ritmo de verdade, cai no ritmo MEDIO
-    # NECESSARIO pra fechar o previsto no prazo -- e e exatamente esse valor
-    # que faz a tendencia coincidir matematicamente com o previsto (mesma
-    # reta implicita: mesma origem, mesmo total, mesmo prazo).
-    if x_hoje > base_semana:
-        ritmo = (real_atual - base_valor) / (x_hoje - base_semana)
+    # teria. O gatilho e SEMANA_HOJE (a ultima semana com real reportado na
+    # 10_BASE_CURVA_S), nao x_hoje (a data de calendario) -- regra do
+    # usuario: "a tendencia antes dos executados e o mesmo prazo do
+    # previsto, ela so vai mudando de acordo com os real". Usar x_hoje aqui
+    # fazia o ritmo mudar so por um dia ter passado no calendario, mesmo sem
+    # nenhuma semana nova reportada -- um unico dia de silencio (real_atual
+    # sem mexer) bastava pra tendencia se afastar do previsto e a tela virar
+    # "atrasado" do nada. Enquanto SEMANA_HOJE nao avanca (nenhum real novo
+    # reportado desde a base), o ritmo fica no MEDIO NECESSARIO pra fechar o
+    # previsto no prazo -- e e exatamente esse valor que faz a tendencia
+    # coincidir matematicamente com o previsto (mesma reta implicita: mesma
+    # origem, mesmo total, mesmo prazo). x_hoje continua valendo pra POSICAO
+    # da tendencia no grafico (ela comeca hoje, de calendario mesmo) -- só
+    # não decide mais SE o ritmo muda.
+    if semana_hoje > base_semana:
+        ritmo = (real_atual - base_valor) / (semana_hoje - base_semana)
     elif vao_previsto > 0:
         ritmo = (total - base_valor) / vao_previsto
     else:
