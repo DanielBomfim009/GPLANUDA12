@@ -1724,24 +1724,24 @@ def inject_css():
           font-size:11.5px !important; font-weight:700 !important; color:var(--text-1) !important; }
         section[data-testid="stSidebar"] .st-key-flt_toggle button p:nth-of-type(2) {
           font-size:10px !important; font-weight:600 !important; color:var(--accent-blue) !important; }
-        /* Cada campo: so uma barra de cor a esquerda do rotulo (rotulo na
-           mesma cor) -- sem badge de icone, a opcao mais enxuta dos 4
-           mockups. A mesma cor volta na borda esquerda do proprio campo
-           (dois blocos abaixo, por .st-key-gf_<chave>), pra ligar rotulo e
-           campo visualmente sem precisar de um cartao unico envolvendo os
-           dois (Streamlit renderiza cada um no seu proprio container). */
-        .gf-campo-rot { border-left:2.5px solid; padding-left:7px; margin:9px 0 4px; }
+        /* Cada campo (rotulo + select) mora no MESMO st.container
+           (key=gfw_<chave>), so pra virar uma barra de cor UNICA e continua
+           -- posicionada absoluta, cobrindo a altura toda do wrapper, em
+           vez de duas bordas curtas (uma no rotulo, outra no campo) com o
+           vao de ~16px do proprio Streamlit entre elas aparecendo como
+           quebra. Achado comparando com o print do usuario: a dele tinha
+           uma barra so, a minha tinha duas. */
+        section[data-testid="stSidebar"] [data-testid="stVerticalBlock"]:has(> .stElementContainer .gf-campo-rot) {
+          position:relative; padding-left:9px; margin:7px 0; }
+        section[data-testid="stSidebar"] [data-testid="stVerticalBlock"]:has(> .stElementContainer .gf-campo-rot)::before {
+          content:""; position:absolute; left:0; top:1px; bottom:1px; width:2.5px; border-radius:2px; }
+        .gf-campo-rot { margin:0 0 3px; }
         .gf-campo-rot span { font-size:9.5px; font-weight:700; letter-spacing:.2px;
           text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        .gf-campo-rot.fxc-azul  { border-left-color:var(--accent-blue); }
         .gf-campo-rot.fxc-azul  span { color:var(--accent-blue); }
-        .gf-campo-rot.fxc-roxo  { border-left-color:var(--accent-purple); }
         .gf-campo-rot.fxc-roxo  span { color:var(--accent-purple); }
-        .gf-campo-rot.fxc-verde { border-left-color:var(--accent-green); }
         .gf-campo-rot.fxc-verde span { color:var(--accent-green); }
-        .gf-campo-rot.fxc-ambar { border-left-color:var(--accent-amber); }
         .gf-campo-rot.fxc-ambar span { color:var(--accent-amber); }
-        .gf-campo-rot.fxc-teal  { border-left-color:var(--accent-teal); }
         .gf-campo-rot.fxc-teal  span { color:var(--accent-teal); }
         /* [role="group"] dentro de stSelectbox, nao [data-baseweb="select"]:
            o Streamlit deste ambiente monta o combobox com react-aria-
@@ -1755,22 +1755,13 @@ def inject_css():
           transition:border-color 120ms; }
         section[data-testid="stSidebar"] [data-testid="stSelectbox"] [role="group"]:hover {
           border-color:rgba(var(--rgb-azul),.5) !important; }
-        /* A mesma barra de cor do rotulo, agora na borda esquerda do campo
-           -- liga visualmente rotulo + campo sem precisar de um cartao so.
-           Prefixo section[data-testid="stSidebar"] repetido de proposito:
-           sem ele essa regra tem MENOS seletores de atributo que a geral
-           acima (border-color, que tambem mexe no lado esquerdo) e perdia
-           o empate de especificidade mesmo com !important dos dois lados. */
-        section[data-testid="stSidebar"] .st-key-gf_sop [role="group"] {
-          border-left:2.5px solid var(--accent-blue) !important; }
-        section[data-testid="stSidebar"] .st-key-gf_ssop_prioritario [role="group"] {
-          border-left:2.5px solid var(--accent-purple) !important; }
-        section[data-testid="stSidebar"] .st-key-gf_skid [role="group"] {
-          border-left:2.5px solid var(--accent-green) !important; }
-        section[data-testid="stSidebar"] .st-key-gf_cff [role="group"] {
-          border-left:2.5px solid var(--accent-amber) !important; }
-        section[data-testid="stSidebar"] .st-key-gf_teste_malha [role="group"] {
-          border-left:2.5px solid var(--accent-teal) !important; }
+        /* A cor da barra unica de cada campo -- key do st.container, nao
+           mais do selectbox (o ::before mora no wrapper, nao no campo). */
+        .st-key-gfw_sop::before { background:var(--accent-blue); }
+        .st-key-gfw_ssop_prioritario::before { background:var(--accent-purple); }
+        .st-key-gfw_skid::before { background:var(--accent-green); }
+        .st-key-gfw_cff::before { background:var(--accent-amber); }
+        .st-key-gfw_teste_malha::before { background:var(--accent-teal); }
         /* Limpar/Aplicar lado a lado, mesmo tamanho -- limpar e acao leve
            (contorno), aplicar e a acao primaria (preenchida, cor do tema).
            Rotulo curto de proposito ("Limpar"/"Aplicar"): a coluna tem uns
@@ -10274,10 +10265,18 @@ def sidebar_filtros(tags: pd.DataFrame, resumo: pd.DataFrame,
                     if st.session_state.get(f"gf_{chave}", padrao) not in opcoes:
                         st.session_state[f"gf_{chave}"] = padrao
                     cor = FILTRO_VISUAL.get(chave, "azul")
-                    render_html(
-                        f'<div class="gf-campo-rot fxc-{cor}">'
-                        f'<span>{esc(rotulo)}</span></div>')
-                    st.selectbox(rotulo, opcoes, key=f"gf_{chave}", label_visibility="collapsed")
+                    # Rotulo e campo entram no MESMO st.container pra virar
+                    # uma barra de cor unica e continua (::before absoluto,
+                    # ver CSS) -- sem o container os dois nascem em
+                    # stElementContainer separados, com ~16px de vao do
+                    # proprio Streamlit entre eles, e a barra saia partida
+                    # em duas (achado: usuario comparou com o mockup e a
+                    # dele tinha UMA barra so, a minha tinha duas).
+                    with st.container(key=f"gfw_{chave}"):
+                        render_html(
+                            f'<div class="gf-campo-rot fxc-{cor}">'
+                            f'<span>{esc(rotulo)}</span></div>')
+                        st.selectbox(rotulo, opcoes, key=f"gf_{chave}", label_visibility="collapsed")
 
                 col_limpar, col_aplicar = st.columns(2, gap="small")
                 col_limpar.form_submit_button("Limpar", key="gf_limpar",
