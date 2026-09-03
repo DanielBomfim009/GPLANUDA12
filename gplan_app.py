@@ -3692,7 +3692,7 @@ def fichas_completas(ids, resumo: pd.DataFrame, esperados: pd.DataFrame,
     """
     alvo = set(ids)
     meus = esperados[esperados["TAG"].isin(alvo)]
-    docs = meus[meus["STATUS_SIGEM"].map(POSTADO)]["DOCUMENTO_ESPERADO"].tolist()
+    docs = meus[meus["STATUS_SIGEM"].map(POSTADO).astype(bool)]["DOCUMENTO_ESPERADO"].tolist()
     historico = _revisoes_por_doc(cache_key, sigem)
     espera = espera_por_documento(historico)
     base_niveis = progresso_base(resumo, tags)
@@ -4140,7 +4140,16 @@ def coluna_comentario(sigem: pd.DataFrame) -> str | None:
 
 
 def POSTADO(status: object) -> bool:
-    """Tem historico no SIGEM, logo tem ficha para abrir."""
+    """Tem historico no SIGEM, logo tem ficha para abrir.
+
+    Todo `df[col.map(POSTADO)]` por aí tem `.astype(bool)` colado: com o df
+    de entrada vazio (0 linhas), `.map` devolve Series `dtype=object` em vez
+    de bool, e o pandas trata esse array vazio como lista de COLUNAS, não
+    máscara de linhas -- o resultado fica sem nenhuma coluna, e a próxima
+    leitura por nome (ex. `["DOCUMENTO_ESPERADO"]`) quebra com KeyError. Foi
+    o que acontecia em fichas_completas([], ...) sempre que uma busca ou
+    recorte não batia com nenhuma TAG.
+    """
     return str(status).strip().upper() not in ("NAO POSTADO", "NÃO POSTADO", "", "NAN")
 
 
@@ -4675,7 +4684,7 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
 
     # o que esta segurando o avanco: o documento parado ha mais tempo leva
     # direto para a ficha dele, com o parecer da inspecao
-    postados = meus[meus["STATUS_SIGEM"].map(POSTADO)]
+    postados = meus[meus["STATUS_SIGEM"].map(POSTADO).astype(bool)]
     mov = ""
     if not postados.empty:
         dts = pd.to_datetime(postados["DATA_SIGEM"], dayfirst=True, errors="coerce")
@@ -4889,7 +4898,7 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
                 st.rerun()
 
         meus = esperados[esperados["TAG"] == tag_id]
-        postados = meus[meus["STATUS_SIGEM"].map(POSTADO)]["DOCUMENTO_ESPERADO"].tolist()
+        postados = meus[meus["STATUS_SIGEM"].map(POSTADO).astype(bool)]["DOCUMENTO_ESPERADO"].tolist()
         render_html(f'<div class="gplan-panel" id="{ficha_anchor(tag_id)}">'
                     + tag_ficha_html(tag_id, resumo, esperados, tags,
                                      espera_por_doc=espera_por_documento(
@@ -9872,7 +9881,7 @@ def fichas_relatorios_pagina(cache_key: str, filtro: str, f_seg: str, f_malha: s
     sao os unicos com revisao, data e motivo de recusa para exibir.
     """
     meus = _esperados[_esperados["TAG"].isin(set(_tags_ids))]
-    postados = meus[meus["STATUS_SIGEM"].map(POSTADO)]
+    postados = meus[meus["STATUS_SIGEM"].map(POSTADO).astype(bool)]
     return fichas_relatorios_html(postados["DOCUMENTO_ESPERADO"].tolist(), _esperados,
                                   _revisoes_por_doc(cache_key, _sigem))
 
