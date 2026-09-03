@@ -1074,6 +1074,20 @@ def inject_css():
         }
         [data-testid="stHeader"] { background: transparent !important;
           height: 44px !important; min-height: 44px !important; }
+        /* st.file_uploader nasce com 96px de altura (o Streamlit mede o
+           conteudo e trava a altura via style inline, entao so !important
+           vence) -- botao "Upload" e o texto de limite empilhados em coluna,
+           bem mais alto do que o conteudo precisa. Vira uma linha so,
+           botao + texto lado a lado, 46px (usuario, 2026-09-03). !important
+           tambem no proprio atributo style: especificidade normal nunca
+           vence inline, só !important consegue. */
+        [data-testid="stFileUploader"] { height: 46px !important; }
+        [data-testid="stFileUploaderDropzone"] {
+          height: 46px !important; min-height: 0 !important;
+          flex-direction: row !important; align-items: center !important;
+          padding: 6px 12px !important; gap: 10px; }
+        [data-testid="stFileUploaderDropzoneInstructions"] { margin: 0 !important; }
+        [data-testid="stFileUploaderDropzoneInstructions"] > div { padding: 0 !important; }
         /* O indicador de execucao do Streamlit -- "Running", "Stop", "Rerun" --
            nasce com a cor do config e some no tema claro. Fica sobre o
            conteudo, entao leva superficie propria para nao se perder nele. */
