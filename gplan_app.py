@@ -1855,6 +1855,29 @@ def inject_css():
           margin: 0 !important; font-size: 20px !important; color: var(--text-1) !important; }
         @media (max-width: 700px) { .st-key-gplan_btn_tema { right: 50px; top: 8px; } }
 
+        /* Menu "..." de exportar (menu_exportar) -- um botao circular so
+           com o icone, alinhado a direita, logo abaixo do render_header.
+           Selector por substring (nao um .st-key- exato) porque cada
+           pagina/bloco usa uma key propria (ex.: expmenu_af, expmenu_cs_
+           geral) pra nao colidir quando mais de um bloco roda no mesmo
+           run, mas todas compartilham o mesmo visual. */
+        div[class*="st-key-expmenu_"] { display:flex !important; justify-content:flex-end;
+          width:100% !important; margin:-6px 0 10px; }
+        div[class*="st-key-expmenu_"] [data-testid="stPopover"] button {
+          width:34px !important; height:34px !important; min-height:0 !important;
+          padding:0 !important; border-radius:8px !important;
+          display:inline-flex !important; align-items:center; justify-content:center;
+          background:var(--dark-card) !important; border:1px solid var(--border-color) !important;
+          box-shadow:none !important; }
+        div[class*="st-key-expmenu_"] [data-testid="stPopover"] button:hover {
+          border-color:rgba(var(--rgb-azul),.5) !important;
+          background:rgba(var(--rgb-azul),0.12) !important; }
+        div[class*="st-key-expmenu_"] [data-testid="stPopover"] button [data-testid="stIconMaterial"] {
+          margin:0 !important; font-size:19px !important; color:var(--text-1) !important; }
+        /* Corpo do popover: botoes de download empilhados, largura toda. */
+        div[data-testid="stPopoverBody"] .stDownloadButton button {
+          width:100% !important; justify-content:flex-start !important; }
+
         /* ---------------------------------------------------------------
            Chrome do proprio Streamlit. O config.toml fixa base="dark", entao
            no tema claro os widgets nasceriam com texto claro sobre fundo
@@ -2770,6 +2793,12 @@ def inject_css():
         .ct-painel .gplan-panel-title span { margin-left:auto; font-size:11.5px; }
         .ct-rolo { max-height:440px; overflow-y:auto; border:1px solid var(--border-color);
           border-radius:12px; background:var(--dark-card-2); }
+        /* Avanço Físico nao tem os cartoes de indicador nem a distribuicao
+           por etapa que a Previsao Medicao tem acima da tabela -- sobra
+           bem mais altura de tela, e o max-height de 440px (pensado pra
+           quando a tabela divide espaco com aqueles paineis) deixava a
+           tabela pequena demais perto do resto vazio embaixo dela. */
+        .ct-rolo.af-tabela { max-height:760px; }
         .ct-rolo table { width:100%; }
         .ct-rolo td, .ct-rolo th { padding:9px 14px; }
         .ct-rolo table { margin:0; }
@@ -3262,6 +3291,22 @@ def render_header(title: str, extra_pill: str | None = None):
         </div>
         """
     )
+
+
+def menu_exportar(key: str):
+    """Botão "⋮" no topo da página, que abre um menu com as opções de
+    exportar -- pedido do usuário pra reunir tudo num lugar só, perto do
+    título, em vez de um botão solto no fim de cada tela (2026-09-03).
+
+    Devolve o container do popover já criado; quem chama escreve dentro
+    dele (com st.download_button) mais adiante na mesma execução, depois
+    que os dados da exportação estiverem prontos -- popover aceita reabrir
+    o "with" mais tarde no mesmo run, igual st.sidebar. A chave precisa ser
+    só do chamador quando a mesma função de render roda mais de uma vez no
+    mesmo run (ex.: um bloco por aba da Curva S).
+    """
+    return st.popover("", icon=":material/more_vert:", key=key,
+                      help="Exportar")
 
 
 KPI_ICONS = {
@@ -10818,6 +10863,7 @@ def render_previsao_medicao(tags: pd.DataFrame, resumo: pd.DataFrame,
     o documento ainda pendentes -- e é essa TAG que a tela existe para achar.
     """
     render_header("Previsão Medição")
+    menu_pm = menu_exportar("expmenu_pm")
     linhas = medicao_prontidao(tags, resumo, esperados, lanc, depara, cache_key)
     if not linhas:
         render_html('<div class="gplan-panel"><div class="gtbl-empty">'
@@ -11021,10 +11067,12 @@ def render_previsao_medicao(tags: pd.DataFrame, resumo: pd.DataFrame,
         "PRECO_UNITARIO": l["preco"], "SOP": l["sop"], "SKID": l["skid"],
     } for l in sorted(linhas, key=lambda x: (x["medida"], x["falta"],
                                              -x["preco"], x["tag"]))])
-    st.download_button(
-        "Exportar",
-        exportar.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
-        file_name="previsao_medicao.csv", mime="text/csv", key="medicao_csv")
+    with menu_pm:
+        st.download_button(
+            "Exportar",
+            exportar.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+            file_name="previsao_medicao.csv", mime="text/csv", key="medicao_csv",
+            use_container_width=True)
 
 
 def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
@@ -11032,17 +11080,25 @@ def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
                          depara: pd.DataFrame, sigem: pd.DataFrame,
                          cache_key: str = ""):
     """Recorte da Previsão Medição: só a tabela de prontidão física --
-    busca e exportação -- sem os cartões de indicador, a distribuição por
-    etapa, valores em R$ ou o segmento Prontas/A medir/Já medidas.
+    busca, upload de lista de TAGs e exportação -- sem os cartões de
+    indicador, a distribuição por etapa, valores em R$ ou o segmento
+    Prontas/A medir/Já medidas.
 
     Sempre TODAS as TAGs, sem recorte por etapa de medição de propósito: a
     tela existe pra olhar o avanço físico como um todo, não uma fila de
-    quem está perto de medir -- quem filtra é a busca abaixo e os filtros
-    da lateral (pedido do usuário, 2026-09-03). Mesma fonte --
+    quem está perto de medir -- quem filtra é a busca/upload abaixo e os
+    filtros da lateral (pedido do usuário, 2026-09-03). Mesma fonte --
     medicao_prontidao -- e mesmo cache que a Previsão Medição, então as
     duas telas nunca divergem uma da outra.
+
+    Duas exportações: a de sempre (uma linha por TAG) e a de pendências
+    (uma linha por pendência, física ou documental -- pedido do usuário,
+    2026-09-03, no mesmo formato CSV que "Exportar pendências de cabo" já
+    usa em Certificação), pra filtrar e priorizar tratamento no Excel sem
+    reorganizar nada na mão.
     """
     render_header("Avanço Físico")
+    menu_af = menu_exportar("expmenu_af")
     linhas = medicao_prontidao(tags, resumo, esperados, lanc, depara, cache_key)
     if not linhas:
         render_html('<div class="gplan-panel"><div class="gtbl-empty">'
@@ -11055,9 +11111,36 @@ def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
 
     # Sem recorte de proposito -- a intencao desta aba e nao ter nada
     # exclusivo de medicao (Prontas/A medir/Ja medidas), e sim mostrar
-    # SEMPRE todas as TAGs; quem filtra e a busca abaixo e os filtros da
-    # lateral (pedido do usuario, 2026-09-03).
+    # SEMPRE todas as TAGs; quem filtra e a busca/upload abaixo e os
+    # filtros da lateral (pedido do usuario, 2026-09-03).
     grupo = linhas
+
+    tags_upload = None
+    arquivo = st.file_uploader(
+        "Filtrar por lista de TAGs (upload)", type=["xlsx", "xls", "csv"],
+        key="af_upload",
+        help='Sobe uma planilha com uma coluna "TAG" (ou usa a primeira '
+             "coluna) e a tela passa a mostrar só essas TAGs -- pra "
+             "conferir um lote específico sem digitar uma por uma.")
+    if arquivo is not None:
+        try:
+            if arquivo.name.lower().endswith(".csv"):
+                df_up = pd.read_csv(arquivo, dtype=str, sep=None, engine="python")
+            else:
+                df_up = pd.read_excel(arquivo, dtype=str)
+            col = next((c for c in df_up.columns
+                       if str(c).strip().upper() == "TAG"),
+                      df_up.columns[0] if len(df_up.columns) else None)
+            tags_upload = ({str(v).strip().upper() for v in df_up[col].dropna()
+                            if str(v).strip()} if col is not None else set())
+        except Exception:
+            st.warning("Não consegui ler essa planilha -- confira o arquivo "
+                      "e tente de novo.")
+        if tags_upload is not None:
+            achadas = sum(1 for l in grupo if l["tag"].upper() in tags_upload)
+            st.caption(f"{achadas} de {len(tags_upload)} TAGs da planilha "
+                      "encontradas neste recorte.")
+            grupo = [l for l in grupo if l["tag"].upper() in tags_upload]
 
     busca = st.text_input("Buscar TAG", key="af_busca",
                           placeholder="Digite parte do nome da TAG…")
@@ -11112,7 +11195,7 @@ def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
         f'<span class="gtbl-muted" style="font-weight:500">'
         f'todas as TAGs com relatório esperado · '
         f'{br_num(len(ordem))} TAGs{rodape}'
-        '</span></div><div class="ct-rolo">'
+        '</span></div><div class="ct-rolo af-tabela">'
         '<table class="gtbl med-tab"><thead><tr><th>TAG</th><th>Status</th>'
         '<th>Avanço físico / documental</th><th>Etapas</th></tr></thead>'
         f'<tbody>{corpo}</tbody></table></div></div>')
@@ -11133,11 +11216,63 @@ def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
         "MEDIDA_NO_GITEC": "sim" if l["medida"] else "nao",
         "RELATORIO_APROVADO": "sim" if l["relatorio_aprovado"] else "nao",
         "SOP": l["sop"], "SKID": l["skid"],
-    } for l in sorted(linhas, key=lambda x: (x["medida"], x["falta"], x["tag"]))])
-    st.download_button(
-        "Exportar",
-        exportar.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
-        file_name="avanco_fisico.csv", mime="text/csv", key="af_csv")
+    } for l in sorted(grupo, key=lambda x: (x["medida"], x["falta"], x["tag"]))])
+
+    # Pendencias em formato "uma linha por pendencia", igual ao padrao ja
+    # usado em Certificacao ("Exportar pendencias de cabo") -- csv simples,
+    # pra abrir no Excel e filtrar/priorizar direto, sem precisar tabular a
+    # mao. Fisica (etapa de campo ainda aberta) e documental (documento
+    # ainda nao aprovado no SIGEM) sao perguntas diferentes, por isso dois
+    # botoes -- juntar os dois numa tabela so obrigaria repetir cada TAG por
+    # etapa E por documento, misturando duas contagens que nao tem a ver uma
+    # com a outra. Respeita o mesmo recorte da tela (busca/upload acima).
+    linhas_fisica = [{
+        "TAG": l["tag"], "DESCRICAO": l["descricao"],
+        "ETAPA_PENDENTE": etapa.capitalize(),
+        "FEITO": l["etapas"][etapa][0], "TOTAL": l["etapas"][etapa][1],
+        "FALTAM": l["etapas"][etapa][1] - l["etapas"][etapa][0],
+        "AVANCO_FISICO_PCT": round(l["pct"], 1),
+        "SOP": l["sop"], "SKID": l["skid"],
+    } for l in grupo for etapa in l["abertas"]]
+    linhas_fisica.sort(key=lambda r: (-r["FALTAM"], r["TAG"]))
+
+    tags_alvo = {l["tag"] for l in grupo}
+    doc_pend = esperados[esperados["TAG"].isin(tags_alvo)
+                         & ~aprovado(esperados["STATUS_SIGEM"])]
+    if not doc_pend.empty:
+        doc_pend = (doc_pend[["TAG", "DESCRICAO", "RELATORIO",
+                              "DOCUMENTO_ESPERADO", "STATUS_SIGEM",
+                              "REVISAO_SIGEM", "DATA_SIGEM"]]
+                   .sort_values(["STATUS_SIGEM", "TAG"]))
+
+    with menu_af:
+        st.download_button(
+            "Exportar tudo (CSV)",
+            exportar.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+            file_name="avanco_fisico.csv", mime="text/csv", key="af_csv",
+            use_container_width=True)
+        st.caption("Pendências -- uma linha por pendência, não por TAG:")
+        if linhas_fisica:
+            df_fis = pd.DataFrame(linhas_fisica)
+            st.download_button(
+                "Pendência física (CSV)",
+                df_fis.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+                file_name="pendencias_fisica.csv", mime="text/csv",
+                key="af_pend_fisica", use_container_width=True)
+            st.caption(f"{br_num(len(linhas_fisica))} pendências em "
+                      f"{br_num(len({r['TAG'] for r in linhas_fisica}))} TAGs")
+        else:
+            st.caption("Nenhuma pendência física neste recorte.")
+        if not doc_pend.empty:
+            st.download_button(
+                "Pendência documental (CSV)",
+                doc_pend.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+                file_name="pendencias_documental.csv", mime="text/csv",
+                key="af_pend_doc", use_container_width=True)
+            st.caption(f"{br_num(len(doc_pend))} documentos pendentes em "
+                      f"{br_num(doc_pend['TAG'].nunique())} TAGs")
+        else:
+            st.caption("Nenhuma pendência documental neste recorte.")
 
 
 # =====================================================================
@@ -11935,6 +12070,8 @@ def _curva_s_bloco(c: dict, escolha: str, chave: str) -> None:
             'para ver Real, Tendência e Projeção de término.</div></div>')
         return
 
+    menu_cs = menu_exportar(f"expmenu_cs_{chave}")
+
     col_graf, col_resumo = st.columns([2, 1], gap="medium")
     with col_graf:
         svg = _curva_s_svg(c["previsto"], c["real"], c["tendencia"], total,
@@ -11999,10 +12136,12 @@ def _curva_s_bloco(c: dict, escolha: str, chave: str) -> None:
         "DIFERENCA_REAL_PREVISTO": (real_map.get(xv) - previsto_map.get(xv))
             if (real_map.get(xv) is not None and previsto_map.get(xv) is not None) else None,
     } for xv in xs])
-    st.download_button(
-        f"Exportar Curva S — {escolha}",
-        exportar.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
-        file_name=f'curva_s_{chave}.csv', mime="text/csv", key=f"curva_s_csv_{chave}")
+    with menu_cs:
+        st.download_button(
+            f"Exportar Curva S — {escolha}",
+            exportar.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+            file_name=f'curva_s_{chave}.csv', mime="text/csv",
+            key=f"curva_s_csv_{chave}", use_container_width=True)
 
 
 def _curva_s_comparativo(geral: dict, prio: dict) -> None:
