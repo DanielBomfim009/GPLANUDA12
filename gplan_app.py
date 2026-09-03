@@ -10914,6 +10914,8 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
         lanc_bruto, depara, f"{cache_key}:bruto")
     status_circ = {i: texto(r["STATUS"])
                    for i, r in enumerate(lanc_bruto.to_dict("records"))}
+    nome_circ = {i: texto(r["CIRCUITO"])
+                for i, r in enumerate(lanc_bruto.to_dict("records"))}
     pedestal = medicao_pedestal(cache_key)
     infra = medicao_infraestrutura(cache_key)
 
@@ -10931,7 +10933,8 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
             avanco_doc_tag[texto(r["TAG"])] = cert_num(r.get("AVANCO_DOCUMENTAL")) * 100
 
     # Os circuitos que CHEGAM em cada ponta -- o cert_circuitos_por_ponta
-    # indexa só os que saem. A caixa precisa dos dois lados (ver cabo_ok).
+    # indexa só os que saem. Hub precisa dos dois lados, e instrumento em
+    # malha série também (ver circuitos_da_tag).
     circ_chegam: dict[str, set] = {}
     traduz_ponta = _cert_traduz(depara)
     for i, r in enumerate(lanc_bruto.to_dict("records")):
@@ -10942,25 +10945,47 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
         for alvo in traduz_ponta.get(dst, ()):
             circ_chegam.setdefault(alvo, set()).add(i)
 
-    caixas = {texto(r["TAG"]) for r in resumo.to_dict("records")
-              if texto(r.get("GRUPO_REGRA")).upper() == "CAIXA"}
+    # Caixa e painel são JUNÇÃO -- todo cabo que toca eles (saindo OU
+    # chegando) é deles, sem um nome próprio que os identifique. O PN-12-238
+    # tem 10 linhas tocando ele (6 saindo, 4 chegando) e nenhuma se chama
+    # "C-PN-12-238"; usuário, 2026-09-03: "caixa que tem cabos de entradas e
+    # saidas, ou painel" são os casos normais de ter mais de um circuito.
+    hubs = {texto(r["TAG"]) for r in resumo.to_dict("records")
+            if texto(r.get("GRUPO_REGRA")).upper() in ("CAIXA", "PAINEL")}
 
-    def cabo_ok(tag: str) -> bool:
-        """A caixa fecha com TUDO lançado, o instrumento com o cabo dele.
+    def circuitos_da_tag(tag: str) -> set[int]:
+        """Os circuitos DE VERDADE da TAG -- pelo NOME, não por quem é a
+        ORIGEM da linha.
 
-        Para um instrumento o cabo que importa é o próprio -- o que sai dele.
-        A caixa é junção: ela só está pronta quando todos os cabos que
-        chegam E todos os que saem estão Concluído. A CFF-12-0001C contava
-        100% olhando só o tronco de saída, e tinha o C-HV-120001 chegando
-        nela sem lançar.
+        Malha em série (detector de fumaça YST, por ex.) nomeia o cabo pelo
+        DESTINO: "C-YST-121100" tem ORIGEM=YST-121101 (o detector anterior
+        na cadeia) e DESTINO=YST-121100 -- é o cabo que CHEGA nele, não um
+        que sai. Indexar só por ORIGEM (como cert_circuitos_por_ponta faz,
+        certo pra ligação em estrela) pegava o cabo errado pra esses casos:
+        o YST-121149 contava "C-PN-12-238-02" e "C-YST-121150" (2 circuitos
+        que SAEM dele rumo ao painel e ao próximo da cadeia) e ignorava o
+        "C-YST-121149" que é o dele de verdade -- 1 circuito, não 2. E o
+        YST-121100/YST-121188, cujo único circuito é assim, apareciam "sem
+        circuito" (Cabo 0/1) tendo o cabo 100% Concluído. Usuário,
+        2026-09-03: "só existe 1 circuito para YST-121149 que seria o
+        circuito C-YST-121149, o YST-121100 também que é o C-YST-121100".
 
-        Sem circuito cadastrado não é "pronto": é desconhecido, e desconhecido
-        não autoriza medição.
+        Por isso o critério agora é o NOME: o circuito "C-<TAG>" (sinal) e
+        "C-<TAG>-P..." (potência, sufixo que pode vir antes de um "(R)" no
+        fim do nome). Sem nenhum nomeado entre os candidatos (ORIGEM ou
+        DESTINO da tag), cai no que sempre funcionou -- só ORIGEM -- em vez
+        de inventar circuito pra famílias não validadas (ex. válvula em
+        cadeia HV, com vários CC-HV-*-A/B cruzados).
         """
-        ids = set(circ_da_ponta.get(tag, set()))
-        if tag in caixas:
-            ids |= circ_chegam.get(tag, set())
-        return bool(ids) and all(status_circ.get(i) == "Concluído" for i in ids)
+        ids_saem = set(circ_da_ponta.get(tag, set()))
+        if tag in hubs:
+            return ids_saem | circ_chegam.get(tag, set())
+        candidatos = ids_saem | circ_chegam.get(tag, set())
+        alvo = f"C-{tag}"
+        nomeados = {i for i in candidatos
+                    if nome_circ.get(i) == alvo
+                    or re.sub(r"-P\d*", "", nome_circ.get(i, ""), count=1) == alvo}
+        return nomeados or ids_saem
 
     por_tag: dict[str, list] = {}
     for r in esperados.to_dict("records"):
@@ -11047,16 +11072,11 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
                     infra_sem_planta_tot += 1
                     if bool(aprovado(pd.Series([d["STATUS_SIGEM"]])).iloc[0]):
                         infra_sem_planta_ok += 1
-        # Cabo: os circuitos DE VERDADE da TAG (mesma fonte que cabo_ok usa),
-        # não quantos relatórios citam o cabo. cert_circuitos_por_ponta já
-        # une sinal ("C-<TAG>") e potência ("C-<TAG>-P") no mesmo set quando
-        # os dois saem da TAG (ver memória certificacao_sinal_potencia) --
-        # por isso 1 circuito vira "Cabo" (sem fração) e 2 vira "Cabo X/2",
-        # nunca 3 (não existe uma terceira perna).
+        # Cabo: os circuitos DE VERDADE da TAG (ver circuitos_da_tag), não
+        # quantos relatórios citam o cabo -- 1 circuito vira "Cabo" (sem
+        # fração), 2 (sinal+potência) vira "Cabo X/2".
         if tem_cabo:
-            ids = set(circ_da_ponta.get(tag, set()))
-            if tag in caixas:
-                ids |= circ_chegam.get(tag, set())
+            ids = circuitos_da_tag(tag)
             total_c = len(ids) if ids else 1
             feitos_c = (sum(1 for i in ids if status_circ.get(i) == "Concluído")
                        if ids else 0)
