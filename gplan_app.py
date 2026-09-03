@@ -1081,10 +1081,16 @@ def inject_css():
            botao + texto lado a lado, 46px (usuario, 2026-09-03). !important
            tambem no proprio atributo style: especificidade normal nunca
            vence inline, só !important consegue. */
-        [data-testid="stFileUploader"] { height: 46px !important; }
+        /* NAO forçar altura no wrapper de fora (stFileUploader): o rotulo
+           "Filtrar por lista de TAGs" mora DENTRO dele, acima da caixa de
+           drop -- travar o wrapper nos mesmos 46px da caixa fazia rotulo +
+           caixa juntos passarem do espaco alocado, e a caixa vazava por
+           cima do "Buscar TAG" logo abaixo (achado ao vivo, 2026-09-03).
+           Deixa o wrapper com altura natural (rotulo + caixa de 46px); so a
+           caixa em si e que fica mais baixa que o padrao do Streamlit. */
         [data-testid="stFileUploaderDropzone"] {
-          height: 46px !important; min-height: 0 !important;
-          flex-direction: row !important; align-items: center !important;
+          height: 46px !important; min-height: 0 !important; overflow: hidden !important;
+          flex-direction: row !important; flex-wrap: nowrap !important; align-items: center !important;
           padding: 6px 12px !important; gap: 10px;
           /* O config.toml trava base="dark" no proprio Streamlit -- os
              widgets nativos nascem com a cor escura fixa da ENGINE do
@@ -1095,12 +1101,20 @@ def inject_css():
              esses sim mudam com o tema. */
           background: var(--dark-card) !important;
           border-color: var(--border-color) !important; }
-        [data-testid="stFileUploaderDropzoneInstructions"] { margin: 0 !important; }
+        /* Sem overflow:hidden + nowrap, "200MB per file..." quebrava linha
+           em telas mais estreitas, vazava pra fora da caixa de 46px e
+           invadia o rotulo "Buscar TAG" logo abaixo dela (achado testando
+           em 1100px de largura -- em 1650px nao aparecia, por isso passou
+           batido na primeira verificacao; usuario, 2026-09-03). */
+        [data-testid="stFileUploaderDropzoneInstructions"] {
+          margin: 0 !important; overflow: hidden !important; min-width: 0; }
         [data-testid="stFileUploaderDropzoneInstructions"] > div { padding: 0 !important; }
-        [data-testid="stFileUploaderDropzoneInstructions"] span { color: var(--text-3) !important; }
+        [data-testid="stFileUploaderDropzoneInstructions"] span {
+          color: var(--text-3) !important; white-space: nowrap !important;
+          overflow: hidden !important; text-overflow: ellipsis !important; display: block; }
         [data-testid="stFileUploaderDropzone"] button {
           background: var(--dark-card-2) !important; border-color: var(--border-color) !important;
-          color: var(--text-1) !important; }
+          color: var(--text-1) !important; flex-shrink: 0; }
         /* O indicador de execucao do Streamlit -- "Running", "Stop", "Rerun" --
            nasce com a cor do config e some no tema claro. Fica sobre o
            conteudo, entao leva superficie propria para nao se perder nele. */
@@ -10922,31 +10936,20 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
             vistos.add(doc)
             docs_por_id[doc] = texto(d["STATUS_SIGEM"])
             etapa = medicao_etapa(texto(d["RELATORIO"]), texto(d["ORIGEM_REGRA"]))
-            # O documento aprovado no SIGEM é o juiz final e vem NA FRENTE do
-            # físico: ninguém aprova o relatório sem o serviço ter acontecido.
-            # Quando ele está aprovado, a etapa fecha mesmo que a coluna de
-            # campo ainda não tenha sido atualizada -- a planilha de campo
-            # atrasa, o parecer não volta atrás.
+            # Etapa e AVANÇO FÍSICO -- o documento/SIGEM não entra aqui, só
+            # na barra DOC (avanco_doc) e no chip "Documental" (mais
+            # abaixo). São duas perguntas diferentes: "o campo já fez"
+            # (etapa) e "o papel já foi aprovado" (documental), e uma não
+            # decide a outra -- misturar as duas foi o erro que o usuário
+            # apontou (2026-09-03: "as etapas não têm nada a ver com
+            # documento, além do tubing").
             #
-            # EXCETO quando o campo nega que o EVENTO físico em si tenha
-            # acontecido -- "Não Localizado"/"Não Montado" dizem que o
-            # trabalho ainda não ocorreu (nao ha avanco fisico pra
-            # comemorar), o que é diferente de "Reprovado" na calibração:
-            # reprovado pressupõe que a calibração AGIU sobre o instrumento
-            # (o avanço físico aconteceu), só o veredito é que não passou --
-            # por isso Reprovado NAO veta, mas "Não Localizado"/"Não
-            # Montado" vetam (explicado pelo usuário, 2026-09-03, depois de
-            # eu ter generalizado errado pra calibração também).
-            veto_fisico = (
-                (etapa == "localização" and texto(t["STATUS_LOCALIZACAO"]).upper() == "NÃO LOCALIZADO")
-                or (etapa == "montagem" and texto(t["STATUS_MONTAGEM"]).upper() == "NÃO MONTADO")
-            )
-            if veto_fisico:
-                passou = False
-            elif bool(aprovado(pd.Series([d["STATUS_SIGEM"]])).iloc[0]):
-                passou = True
-            elif etapa == "calibração":
-                passou = texto(t["STATUS_CALIBRACAO"]) == "Aprovado"
+            # "Reprovado" na calibração conta como feito: pressupõe que a
+            # calibração ACONTECEU (o técnico foi lá e testou), só o
+            # veredito que não passou -- só "-"/branco (ainda não
+            # calibrado) fica de fora.
+            if etapa == "calibração":
+                passou = texto(t["STATUS_CALIBRACAO"]) in ("Aprovado", "Reprovado")
             elif etapa == "localização":
                 passou = texto(t["STATUS_LOCALIZACAO"]) == "LOCALIZADO"
             elif etapa == "montagem":
@@ -10957,7 +10960,14 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
                 passou = pedestal.get(tag, 0.0) >= 0.999
             elif etapa == "infraestrutura":
                 planta = _planta_do_texto(doc)
-                passou = bool(planta) and infra.get(planta, 0.0) >= 0.999
+                if planta:
+                    passou = infra.get(planta, 0.0) >= 0.999
+                else:
+                    # RIMTU (tubing): documento por TAG, sem sigla de planta
+                    # pra cruzar com a 11_BASE_INFRAESTRUTURA -- sem fato de
+                    # campo próprio, é a única etapa que ainda depende do
+                    # SIGEM aprovado (exceção nomeada pelo usuário).
+                    passou = bool(aprovado(pd.Series([d["STATUS_SIGEM"]])).iloc[0])
             else:
                 passou = False
             marca = etapas.setdefault(etapa, [0, 0])
