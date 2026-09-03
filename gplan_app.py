@@ -10449,15 +10449,20 @@ def dialogo_perfil():
 # O mapa é por (RELATÓRIO, REGRA DE ORIGEM), não só pelo nome do relatório: o
 # RIR aparece duas vezes com sentidos diferentes (o do instrumento é
 # localização, o do cabo é lançamento), e o RIMSI também (suporte por planta é
-# documento, pedestal tem base própria com avanço).
+# infraestrutura, pedestal tem base própria com avanço).
 #
-#   "calibração"  -> STATUS_CALIBRACAO == Aprovado
-#   "localização" -> STATUS_LOCALIZACAO == LOCALIZADO
-#   "montagem"    -> STATUS_MONTAGEM == Montado
-#   "cabo"        -> todos os circuitos da TAG Concluído
-#   "pedestal"    -> avanço 100% na 08_BASE_PEDESTAL
-#   "documento"   -> o próprio relatório aprovado no SIGEM (não há fato de
-#                    campo separado para ler; o documento É a evidência)
+#   "calibração"     -> STATUS_CALIBRACAO == Aprovado
+#   "localização"    -> STATUS_LOCALIZACAO == LOCALIZADO
+#   "montagem"       -> STATUS_MONTAGEM == Montado
+#   "cabo"           -> todos os circuitos da TAG Concluído
+#   "pedestal"       -> avanço 100% na 08_BASE_PEDESTAL
+#   "infraestrutura" -> avanço físico da planta (bandeja/eletroduto/suporte)
+#                       na 11_BASE_INFRAESTRUTURA, cruzando pela sigla no fim
+#                       do DOCUMENTO_ESPERADO (ex.: "CHZ-322") -- não mais o
+#                       relatório aprovado no SIGEM. Passou a seguir o físico
+#                       da planta em vez do papel (pedido do usuário,
+#                       2026-09-03): o RIMII/RIMSI "por planta" media o avanço
+#                       de infra de campo, não é evidência em si como o CCP.
 # A chave é (RELATÓRIO, trecho da regra de origem). Trecho, e não o texto
 # inteiro: a regra do CCP se chama "BASE: CCP obrigatorio exceto Caixa de
 # Juncao Fieldbus e PAINEL", e casar pelo texto completo faz a etapa cair
@@ -10470,8 +10475,8 @@ MEDICAO_REGRA = [
     ("RIFMI", "", "montagem"),
     # A caixa também é montada em campo, só que o relatório dela tem outro
     # nome: RIFMI é do instrumento, RIMJBI é da caixa de junção. Tratar o
-    # RIMJBI como documento fazia 484 caixas dependerem de papel para uma
-    # etapa que o STATUS_MONTAGEM já responde.
+    # RIMJBI como infraestrutura fazia 484 caixas dependerem de papel para
+    # uma etapa que o STATUS_MONTAGEM já responde.
     ("RIMJBI", "", "montagem"),
     # A caixa de junção fieldbus não recebe CCP -- a regra do CCP exclui ela
     # e o painel de propósito. O relatório de teste funcional dela ocupa esse
@@ -10480,18 +10485,19 @@ MEDICAO_REGRA = [
     ("RTFCJI", "", "calibração"),
     ("RILTCI", "", "cabo"),
     ("CTECRI", "", "cabo"),
-    ("RIMTU", "", "documento"),
-    ("RIMII", "", "documento"),
+    ("RIMTU", "", "infraestrutura"),
+    ("RIMII", "", "infraestrutura"),
     ("RIMSI", "pedestal", "pedestal"),
-    ("RIMSI", "", "documento"),
+    ("RIMSI", "", "infraestrutura"),
 ]
 
 
 # As quatro famílias que o mapa não nomeia (RILM, RIMITPI, RIMJBI, RTFCJI)
-# caem em "documento": sem fato de campo declarado para elas, quem responde é
-# o próprio relatório aprovado. É o padrão conservador -- nunca dá uma TAG por
-# pronta sem prova.
-MEDICAO_PADRAO = "documento"
+# caem em "infraestrutura": sem fato de campo próprio mapeado, o avanço da
+# planta na 11_BASE_INFRAESTRUTURA (ou o relatório aprovado, na falta dele)
+# é quem responde. É o padrão conservador -- nunca dá uma TAG por pronta sem
+# prova.
+MEDICAO_PADRAO = "infraestrutura"
 
 
 def medicao_etapa(relatorio: str, origem: str) -> str:
@@ -10504,7 +10510,22 @@ def medicao_etapa(relatorio: str, origem: str) -> str:
 
 
 MEDICAO_ORDEM = ["calibração", "localização", "montagem", "cabo", "pedestal",
-                 "documento"]
+                 "infraestrutura"]
+
+
+# Sigla da planta (ex.: "CHZ-322") no FIM de uma string -- funciona tanto no
+# desenho completo da 11_BASE_INFRAESTRUTURA ("DE-5290.00-22111-800-CHZ-
+# 322_B", que termina com um sufixo de revisão depois da sigla) quanto no
+# DOCUMENTO_ESPERADO do RIMII/RIMSI ("..._RIMII_ELD-800-CHZ-322", que termina
+# direto na sigla, sem sufixo). O teto de 4 dígitos no número exclui TAG de
+# instrumento (6 dígitos, ex. "AE-127004") sem precisar reconhecer as duas
+# formas por regra separada -- o próprio formato já distingue.
+_RE_PLANTA = re.compile(r"([A-Z]{2,5}-\d{2,4})(?:_[A-Za-z0-9]+)?$")
+
+
+def _planta_do_texto(texto: object) -> str:
+    m = _RE_PLANTA.search(str(texto or "").strip().upper())
+    return m.group(1) if m else ""
 
 
 def vazio_para_traco(valor) -> str:
@@ -10558,6 +10579,53 @@ def medicao_pedestal(cache_key: str) -> dict:
     return saida
 
 
+@st.cache_data(show_spinner=False, max_entries=2)
+def medicao_infraestrutura(cache_key: str) -> dict:
+    """Sigla da planta (ex.: "CHZ-322") -> avanço físico geral dela, de 0 a 1.
+
+    Vem da aba 11_BASE_INFRAESTRUTURA já normalizada pelo pipeline: DESENHO
+    (endereço completo -- a sigla mora no fim dele) e AVANCO_GERAL (fração,
+    já pondera bandeja/eletroduto/suporte juntos, "independente do tipo da
+    infra"). O DOCUMENTO_ESPERADO do RIMII/RIMSI "por planta" só carrega a
+    sigla, sem o endereço -- a mesma _planta_do_texto lê os dois lados e as
+    pontas terminam iguais.
+
+    Mais de uma linha pode repetir a mesma sigla -- cada uma cobre um trecho
+    físico diferente do mesmo desenho -- e a planta só fecha quando TODOS os
+    trechos dela fecham: fica com o PIOR avanço entre eles, mesma lógica do
+    pedestal (nunca superestimar).
+
+    Sem a aba (planilha gerada por pipeline antigo, ou 11_BASE_INFRAESTRUTURA
+    ainda não subida) devolve vazio, e o critério cai para reprovar em vez de
+    derrubar a tela -- o que não se sabe não autoriza medir.
+    """
+    client = get_supabase_client()
+    if client is not None:
+        fonte = io.BytesIO(client.storage.from_(SUPABASE_BUCKET)
+                           .download(SUPABASE_FILE_PATH))
+    elif os.path.exists(LOCAL_EXCEL_FALLBACK):
+        fonte = LOCAL_EXCEL_FALLBACK
+    else:
+        return {}
+    try:
+        base = pd.read_excel(fonte, sheet_name="11_BASE_INFRAESTRUTURA")
+    except Exception:
+        return {}
+    if base.empty or "DESENHO" not in base.columns or "AVANCO_GERAL" not in base.columns:
+        return {}
+    saida: dict[str, float] = {}
+    for r in base.to_dict("records"):
+        planta = _planta_do_texto(r.get("DESENHO"))
+        if not planta:
+            continue
+        try:
+            a = float(r.get("AVANCO_GERAL"))
+        except (TypeError, ValueError):
+            continue
+        saida[planta] = min(saida.get(planta, 1.0), a)
+    return saida
+
+
 @st.cache_data(show_spinner=False, max_entries=3)
 def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
                       esperados: pd.DataFrame, lanc: pd.DataFrame,
@@ -10570,9 +10638,10 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
     localização numa linha e cabo na outra.
 
     A etapa guarda "quantos passaram de quantos", não um sim/não. Uma TAG com
-    quatro relatórios de documento e três aprovados tinha a etapa contada como
-    feita e como pendente ao mesmo tempo, e a tela pintava de verde -- porque
-    olhava a lista de feitas primeiro. Agora verde exige o total.
+    quatro relatórios de infraestrutura e três com a planta 100% fechada
+    tinha a etapa contada como feita e como pendente ao mesmo tempo, e a
+    tela pintava de verde -- porque olhava a lista de feitas primeiro. Agora
+    verde exige o total.
 
     Duas leituras adicionais, lado a lado com a física, sem uma decidir pela
     outra: avanco_doc é o AVANCO_DOCUMENTAL que a 07_TAG_RESUMO já calcula
@@ -10588,6 +10657,7 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
     status_circ = {i: texto(r["STATUS"])
                    for i, r in enumerate(lanc.to_dict("records"))}
     pedestal = medicao_pedestal(cache_key)
+    infra = medicao_infraestrutura(cache_key)
 
     medidas, valor_medido = set(), {}
     if "MEDIDO_GITEC" in resumo.columns:
@@ -10670,6 +10740,9 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
                 passou = cabo_ok(tag)
             elif etapa == "pedestal":
                 passou = pedestal.get(tag, 0.0) >= 0.999
+            elif etapa == "infraestrutura":
+                planta = _planta_do_texto(doc)
+                passou = bool(planta) and infra.get(planta, 0.0) >= 0.999
             else:
                 passou = False
             marca = etapas.setdefault(etapa, [0, 0])
