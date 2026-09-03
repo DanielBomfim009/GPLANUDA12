@@ -928,6 +928,36 @@ try {
 </script>""", height=0)
 
 
+def expandir_menu_lateral() -> None:
+    """O Streamlit recolhe o menu da lateral sozinho quando a lista de
+    paginas passa de uma certa altura, atras de um botao "View X more" /
+    "View less". Com a secao Avanço com 4 paginas isso empurrou a
+    Administração pra trás do botão -- o usuário não quer esse
+    esconde-mostra, quer o menu inteiro sempre visível.
+
+    Não há parâmetro em st.navigation pra desligar isso, então clica no
+    botão sozinho (revela os itens escondidos, que o React só monta no DOM
+    nesse clique) e depois esconde o botão em si. Observer porque o
+    Streamlit redesenha esse pedaço da lateral a cada rerun -- mesmo motivo
+    de traduzir_campos_de_senha.
+    """
+    st.components.v1.html("""
+<script>
+try {
+  const doc = parent.document;
+  const expandir = () => {
+    const btn = doc.querySelector('[data-testid="stSidebarNavViewButton"]');
+    if (btn && /more/i.test(btn.textContent)) { btn.click(); }
+    doc.querySelectorAll('[data-testid="stSidebarNavViewButton"]').forEach(b => {
+      b.style.display = 'none';
+    });
+  };
+  expandir();
+  new MutationObserver(expandir).observe(doc.body, {childList: true, subtree: true});
+} catch (e) {}
+</script>""", height=0)
+
+
 def exigir_login() -> dict:
     """Sem login não desenha nada. Devolve o usuário ou para a execução.
 
@@ -11002,14 +11032,15 @@ def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
                          depara: pd.DataFrame, sigem: pd.DataFrame,
                          cache_key: str = ""):
     """Recorte da Previsão Medição: só a tabela de prontidão física --
-    recorte, busca e exportação -- sem os cartões de indicador, a
-    distribuição por etapa nem valores em R$.
+    busca e exportação -- sem os cartões de indicador, a distribuição por
+    etapa, valores em R$ ou o segmento Prontas/A medir/Já medidas.
 
-    Existe pra conferir a etapa de avanço físico direto, sem abrir a
-    Previsão Medição (pedido do usuário, 2026-09-03: ele mora na
-    Administração e tem o "Mostrar valores" e os indicadores financeiros
-    que essa consulta não precisa). Mesma fonte -- medicao_prontidao -- e
-    mesmo cache, então as duas telas nunca divergem uma da outra.
+    Sempre TODAS as TAGs, sem recorte por etapa de medição de propósito: a
+    tela existe pra olhar o avanço físico como um todo, não uma fila de
+    quem está perto de medir -- quem filtra é a busca abaixo e os filtros
+    da lateral (pedido do usuário, 2026-09-03). Mesma fonte --
+    medicao_prontidao -- e mesmo cache que a Previsão Medição, então as
+    duas telas nunca divergem uma da outra.
     """
     render_header("Avanço Físico")
     linhas = medicao_prontidao(tags, resumo, esperados, lanc, depara, cache_key)
@@ -11022,32 +11053,11 @@ def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
     def cor_pct(pct: float) -> str:
         return "feito" if pct >= 99.5 else ("andando" if pct > 0 else "parado")
 
-    medidas = [l for l in linhas if l["medida"]]
-    fila = [l for l in linhas if not l["medida"]]
-    prontas = [l for l in fila if l["falta"] == 0]
-    a_medir = [l for l in fila if l["falta"] == 1]
-    em_andamento = [l for l in fila if l["falta"] >= 2]
-
-    GRUPOS = {
-        "Todas": linhas,
-        "Prontas para medição": prontas,
-        "A medir": a_medir,
-        "Em andamento": em_andamento,
-        "Já medidas": medidas,
-    }
-    DESCRICAO = {
-        "Todas": "todas as TAGs com relatório esperado neste recorte",
-        "Prontas para medição": "TAGs com todas as etapas físicas concluídas, "
-                                "aguardando medição",
-        "A medir": "falta uma etapa física para entrar na fila",
-        "Em andamento": "duas etapas físicas ou mais ainda em aberto",
-        "Já medidas": "medidas no GITEC -- fora da fila",
-    }
-    escolha = st.segmented_control(
-        "Recorte", list(GRUPOS),
-        format_func=lambda k: f"{k} · {br_num(len(GRUPOS[k]))}",
-        default="Prontas para medição", key="af_grupo") or "Prontas para medição"
-    grupo = GRUPOS[escolha]
+    # Sem recorte de proposito -- a intencao desta aba e nao ter nada
+    # exclusivo de medicao (Prontas/A medir/Ja medidas), e sim mostrar
+    # SEMPRE todas as TAGs; quem filtra e a busca abaixo e os filtros da
+    # lateral (pedido do usuario, 2026-09-03).
+    grupo = linhas
 
     busca = st.text_input("Buscar TAG", key="af_busca",
                           placeholder="Digite parte do nome da TAG…")
@@ -11098,9 +11108,10 @@ def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
         rodape = f' · mostrando as {TETO} primeiras de {br_num(len(ordem))}'
     render_html(
         '<div class="gplan-panel ct-painel"><div class="gplan-panel-title">'
-        f'Tags · {esc(escolha)}'
+        "Tags"
         f'<span class="gtbl-muted" style="font-weight:500">'
-        f'{esc(DESCRICAO.get(escolha, ""))} · {br_num(len(ordem))} TAGs{rodape}'
+        f'todas as TAGs com relatório esperado · '
+        f'{br_num(len(ordem))} TAGs{rodape}'
         '</span></div><div class="ct-rolo">'
         '<table class="gtbl med-tab"><thead><tr><th>TAG</th><th>Status</th>'
         '<th>Avanço físico / documental</th><th>Etapas</th></tr></thead>'
@@ -12461,6 +12472,7 @@ def main():
         secoes["Administração"] = [medicao_page, curva_s_page, admin_page]
 
     nav = st.navigation(secoes, position="sidebar")
+    expandir_menu_lateral()
     nav.run()
 
 
