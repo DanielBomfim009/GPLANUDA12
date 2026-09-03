@@ -1864,16 +1864,29 @@ def inject_css():
         div[class*="st-key-expmenu_"] { display:flex !important; justify-content:flex-end;
           width:100% !important; margin:-6px 0 10px; }
         div[class*="st-key-expmenu_"] [data-testid="stPopover"] button {
-          width:34px !important; height:34px !important; min-height:0 !important;
-          padding:0 !important; border-radius:8px !important;
+          width:36px !important; height:36px !important; min-height:0 !important;
+          padding:0 !important; border-radius:50% !important;
           display:inline-flex !important; align-items:center; justify-content:center;
           background:var(--dark-card) !important; border:1px solid var(--border-color) !important;
-          box-shadow:none !important; }
+          box-shadow:none !important; transition:background 120ms, border-color 120ms, transform 120ms; }
         div[class*="st-key-expmenu_"] [data-testid="stPopover"] button:hover {
-          border-color:rgba(var(--rgb-azul),.5) !important;
-          background:rgba(var(--rgb-azul),0.12) !important; }
+          border-color:rgba(var(--rgb-azul),.55) !important;
+          background:rgba(var(--rgb-azul),0.16) !important;
+          transform:translateY(-1px); }
+        div[class*="st-key-expmenu_"] [data-testid="stPopover"] button:active {
+          transform:translateY(0); background:rgba(var(--rgb-azul),0.24) !important; }
+        /* Streamlit sempre desenha uma setinha (expand_more) do lado do
+           icone do popover, pensada pra botao com rotulo de texto -- num
+           botao so-icone ela sobra e some no aperto do circulo de 36px,
+           virando um traço ilegivel do lado do ⋮. O icone principal fica
+           sozinho, span com aria-hidden e decorativo mesmo (Streamlit ja
+           marca assim), sem perda de acessibilidade. */
+        div[class*="st-key-expmenu_"] [data-testid="stPopoverButton"] div[aria-hidden="true"] {
+          display:none !important; }
         div[class*="st-key-expmenu_"] [data-testid="stPopover"] button [data-testid="stIconMaterial"] {
           margin:0 !important; font-size:19px !important; color:var(--text-1) !important; }
+        div[class*="st-key-expmenu_"] [data-testid="stPopover"] button:hover [data-testid="stIconMaterial"] {
+          color:var(--accent-blue) !important; }
         /* Corpo do popover: botoes de download empilhados, largura toda. */
         div[data-testid="stPopoverBody"] .stDownloadButton button {
           width:100% !important; justify-content:flex-start !important; }
@@ -7964,7 +7977,12 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     # E uma pergunta diferente dos filtros abaixo ("o que falta lancar pra
     # estes tipos", nao um recorte da tela) e funciona independente deles,
     # e independente de estar olhando um painel/caixa especifico ou nao.
-    with st.expander("Exportar pendências de cabo"):
+    # Mesmo menu "..." das outras paginas -- so que aqui o corpo tem um
+    # controle proprio (prefixo de TAG) e uma previa em tabela, entao o
+    # popover fica maior que os outros, mas o gatilho e a posicao (topo,
+    # perto do titulo) sao os mesmos.
+    with menu_exportar("expmenu_cert"):
+        st.caption("Exportar pendências de cabo")
         prefixos_txt = st.text_input(
             "Prefixos de TAG, separados por vírgula", value="AST,OST",
             key="cert_export_prefixos")
