@@ -1731,8 +1731,15 @@ def inject_css():
            vao de ~16px do proprio Streamlit entre elas aparecendo como
            quebra. Achado comparando com o print do usuario: a dele tinha
            uma barra so, a minha tinha duas. */
+        /* O vao ENTRE campos (SOP -> SSOP -> SKID...) vem do proprio
+           stVerticalBlock do st.form (gap:16px default do Streamlit) somado
+           a margin de cada campo -- 16+5+5=26px, visivelmente grande demais
+           pro usuario ("continua errado" comparando o 8501). Aperta os
+           dois lados: o gap do form e a margin do campo. */
+        section[data-testid="stSidebar"] [data-testid="stForm"] > [data-testid="stVerticalBlock"] {
+          gap:4px !important; }
         section[data-testid="stSidebar"] [data-testid="stVerticalBlock"]:has(> .stElementContainer .gf-campo-rot) {
-          position:relative; padding-left:9px; margin:5px 0; gap:3px !important; }
+          position:relative; padding-left:9px; margin:4px 0; gap:3px !important; }
         section[data-testid="stSidebar"] [data-testid="stVerticalBlock"]:has(> .stElementContainer .gf-campo-rot)::before {
           content:""; position:absolute; left:0; top:1px; bottom:1px; width:2.5px; border-radius:2px; }
         .gf-campo-rot { margin:0; font-size:9.5px; line-height:1.2; }
