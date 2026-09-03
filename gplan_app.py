@@ -2076,31 +2076,41 @@ def inject_css():
 
         /* a lista de opcoes e portalada para fora do widget: sem regra propria
            ela nasce com o fundo do config e o texto some */
+        /* Sem qualificador de tag (nao "div[data-testid=...]"): o dropdown
+           do MULTISELECT (BaseWeb, sidebar) e um <ul data-testid=
+           "stSelectboxVirtualDropdown"> sem role nenhum -- "div[data-testid
+           =...]" nunca batia nele (exigia a tag ser DIV) e "[role=listbox]"
+           tambem nao (nao tem role), entao o popup do multiselect ficava
+           de fora dos dois seletores e continuava com o fundo escuro do
+           config.toml no tema claro ("o filtro rápido continua escuro",
+           usuario 2026-09-03). O selectbox comum (react-aria) tem
+           role="listbox" numa DIV e ja batia -- so o multiselect (BaseWeb)
+           que escapava. Selector so por atributo casa os dois motores,
+           qualquer que seja a tag. */
         [role="listbox"], [role="dialog"] [role="listbox"],
-        div[data-testid="stSelectboxVirtualDropdown"],
-        div[data-testid="stSelectboxVirtualDropdown"] ul,
-        div[data-baseweb="popover"],
-        div[data-testid="stSelectboxVirtualDropdownEmpty"] {
+        [data-testid="stSelectboxVirtualDropdown"],
+        [data-testid="stSelectboxVirtualDropdown"] ul,
+        [data-baseweb="popover"],
+        [data-testid="stSelectboxVirtualDropdownEmpty"] {
           background: var(--dark-card) !important; color: var(--text-1) !important;
           border: 1px solid var(--border-color) !important;
           box-shadow: 0 18px 46px var(--sombra) !important; }
         [role="option"],
-        div[data-testid="stSelectboxVirtualDropdown"] li,
-        div[data-testid="stSelectboxVirtualDropdownEmpty"] li {
+        [data-testid="stSelectboxVirtualDropdown"] li,
+        [data-testid="stSelectboxVirtualDropdownEmpty"] li {
           color: var(--text-1) !important; background: transparent !important; }
         [role="option"]:hover, [role="option"][data-focused],
         [role="option"][aria-selected="true"],
-        div[data-testid="stSelectboxVirtualDropdown"] li:hover {
+        [data-testid="stSelectboxVirtualDropdown"] li:hover {
           background: rgba(var(--rgb-azul),0.16) !important; color: var(--text-1) !important; }
         /* "No results" (multiselect sem opcao que bata com o que foi
            digitado) usa um testid diferente do dropdown normal
            (stSelectboxVirtualDropdownEmpty, nao stSelectboxVirtualDropdown)
            -- ficou de fora da regra acima e continuava com o fundo escuro
-           do config.toml mesmo no tema claro ("o filtro rápido... continua
-           escuro", usuario 2026-09-03). O texto dele fica num <li> sem
-           role="option" nem classe propria, so um span dentro -- pega pelo
-           proprio testid do container. */
-        div[data-testid="stSelectboxVirtualDropdownEmpty"] * {
+           do config.toml mesmo no tema claro. O texto dele fica num <li>
+           sem role="option" nem classe propria, so um span dentro -- pega
+           pelo proprio testid do container. */
+        [data-testid="stSelectboxVirtualDropdownEmpty"] * {
           color: var(--text-3) !important; }
 
         /* O body guarda as cores do config.toml, e e nele que os portais
