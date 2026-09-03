@@ -2078,17 +2078,30 @@ def inject_css():
            ela nasce com o fundo do config e o texto some */
         [role="listbox"], [role="dialog"] [role="listbox"],
         div[data-testid="stSelectboxVirtualDropdown"],
-        div[data-testid="stSelectboxVirtualDropdown"] ul {
+        div[data-testid="stSelectboxVirtualDropdown"] ul,
+        div[data-baseweb="popover"],
+        div[data-testid="stSelectboxVirtualDropdownEmpty"] {
           background: var(--dark-card) !important; color: var(--text-1) !important;
           border: 1px solid var(--border-color) !important;
           box-shadow: 0 18px 46px var(--sombra) !important; }
         [role="option"],
-        div[data-testid="stSelectboxVirtualDropdown"] li {
+        div[data-testid="stSelectboxVirtualDropdown"] li,
+        div[data-testid="stSelectboxVirtualDropdownEmpty"] li {
           color: var(--text-1) !important; background: transparent !important; }
         [role="option"]:hover, [role="option"][data-focused],
         [role="option"][aria-selected="true"],
         div[data-testid="stSelectboxVirtualDropdown"] li:hover {
           background: rgba(var(--rgb-azul),0.16) !important; color: var(--text-1) !important; }
+        /* "No results" (multiselect sem opcao que bata com o que foi
+           digitado) usa um testid diferente do dropdown normal
+           (stSelectboxVirtualDropdownEmpty, nao stSelectboxVirtualDropdown)
+           -- ficou de fora da regra acima e continuava com o fundo escuro
+           do config.toml mesmo no tema claro ("o filtro rápido... continua
+           escuro", usuario 2026-09-03). O texto dele fica num <li> sem
+           role="option" nem classe propria, so um span dentro -- pega pelo
+           proprio testid do container. */
+        div[data-testid="stSelectboxVirtualDropdownEmpty"] * {
+          color: var(--text-3) !important; }
 
         /* O body guarda as cores do config.toml, e e nele que os portais
            nascem: sem isto o menu suspenso abre escuro no tema claro. */
@@ -10929,6 +10942,23 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
             continue
         etapas: dict[str, list] = {}
         vistos, docs_por_id = set(), {}
+        # Cabo/Pedestal/Infraestrutura tem, cada um, um numero VARIAVEL de
+        # documentos por TAG (RIR-cabo + RILTCI + CTECRI pro mesmo cabo;
+        # RIMII-eletroduto + RIMII-bandeja + RIMSI-suporte pra mesma planta;
+        # 1 ou 2 linhas de pedestal) -- mas o FATO fisico por tras e so um
+        # (ou dois, sinal+potencia/planta+tubing). Contar por documento
+        # inflava a etapa: um TAG com 1 circuito real virava "Cabo 2/2" (a
+        # cada relatorio que cita o cabo somando 1 no total), um com 2
+        # circuitos (sinal+potencia) virava "3/3". Usuario, 2026-09-03:
+        # "HSS com um unico circuito contando como 2 cabo... AST contando
+        # como 3, sendo que so tem 2... verifique pela coluna circuito".
+        # Por isso essas tres NAO tallyam dentro do loop -- so marcam que
+        # apareceram, e o total de verdade e calculado uma vez por TAG,
+        # depois do loop, direto da fonte fisica (circuito/pedestal/planta).
+        tem_cabo = False
+        tem_pedestal = False
+        infra_plantas: set[str] = set()
+        infra_sem_planta_tot, infra_sem_planta_ok = 0, 0
         for d in docs:
             doc = texto(d["DOCUMENTO_ESPERADO"])
             if doc in vistos:          # o mesmo documento não conta duas vezes
@@ -10950,29 +10980,73 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
             # calibrado) fica de fora.
             if etapa == "calibração":
                 passou = texto(t["STATUS_CALIBRACAO"]) in ("Aprovado", "Reprovado")
+                marca = etapas.setdefault(etapa, [0, 0])
+                marca[1] += 1
+                marca[0] += 1 if passou else 0
             elif etapa == "localização":
                 passou = texto(t["STATUS_LOCALIZACAO"]) == "LOCALIZADO"
+                marca = etapas.setdefault(etapa, [0, 0])
+                marca[1] += 1
+                marca[0] += 1 if passou else 0
             elif etapa == "montagem":
                 passou = texto(t["STATUS_MONTAGEM"]) == "Montado"
+                marca = etapas.setdefault(etapa, [0, 0])
+                marca[1] += 1
+                marca[0] += 1 if passou else 0
             elif etapa == "cabo":
-                passou = cabo_ok(tag)
+                tem_cabo = True
             elif etapa == "pedestal":
-                passou = pedestal.get(tag, 0.0) >= 0.999
+                tem_pedestal = True
             elif etapa == "infraestrutura":
                 planta = _planta_do_texto(doc)
                 if planta:
-                    passou = infra.get(planta, 0.0) >= 0.999
+                    # Normalmente 1 so por TAG (RIMII eletroduto+bandeja e
+                    # RIMSI suporte da MESMA planta) -- o set garante que so
+                    # conta 1 fatia mesmo que existam 3 documentos pra ela.
+                    infra_plantas.add(planta)
                 else:
                     # RIMTU (tubing): documento por TAG, sem sigla de planta
                     # pra cruzar com a 11_BASE_INFRAESTRUTURA -- sem fato de
-                    # campo próprio, é a única etapa que ainda depende do
-                    # SIGEM aprovado (exceção nomeada pelo usuário).
-                    passou = bool(aprovado(pd.Series([d["STATUS_SIGEM"]])).iloc[0])
-            else:
-                passou = False
-            marca = etapas.setdefault(etapa, [0, 0])
-            marca[1] += 1
-            marca[0] += 1 if passou else 0
+                    # campo próprio, é a única sub-etapa que ainda depende
+                    # do SIGEM aprovado (exceção nomeada pelo usuário) --
+                    # E é um fato FISICO DIFERENTE do da planta (tubagem
+                    # não é bandeja/eletroduto/suporte), por isso soma como
+                    # fatia própria, não se funde com infra_plantas.
+                    infra_sem_planta_tot += 1
+                    if bool(aprovado(pd.Series([d["STATUS_SIGEM"]])).iloc[0]):
+                        infra_sem_planta_ok += 1
+        # Cabo: os circuitos DE VERDADE da TAG (mesma fonte que cabo_ok usa),
+        # não quantos relatórios citam o cabo. cert_circuitos_por_ponta já
+        # une sinal ("C-<TAG>") e potência ("C-<TAG>-P") no mesmo set quando
+        # os dois saem da TAG (ver memória certificacao_sinal_potencia) --
+        # por isso 1 circuito vira "Cabo" (sem fração) e 2 vira "Cabo X/2",
+        # nunca 3 (não existe uma terceira perna).
+        if tem_cabo:
+            ids = set(circ_da_ponta.get(tag, set()))
+            if tag in caixas:
+                ids |= circ_chegam.get(tag, set())
+            total_c = len(ids) if ids else 1
+            feitos_c = (sum(1 for i in ids if status_circ.get(i) == "Concluído")
+                       if ids else 0)
+            etapas["cabo"] = [feitos_c, total_c]
+        # Pedestal: um valor de avanço só por TAG (medicao_pedestal já
+        # resolve pro PIOR entre pedestais, se a TAG aparecer em mais de
+        # um) -- nunca "2/2" só porque duas linhas da 08_BASE_PEDESTAL
+        # citam a mesma TAG.
+        if tem_pedestal:
+            ok = pedestal.get(tag, 0.0) >= 0.999
+            etapas["pedestal"] = [1 if ok else 0, 1]
+        # Infraestrutura: uma fatia por planta distinta (quase sempre 1, o
+        # avanço da planta já combina eletroduto+bandeja+suporte) mais uma
+        # fatia por documento de tubing sem planta -- no máximo 2 no total,
+        # nunca as 3-4 que os documentos brutos sugeririam.
+        if infra_plantas or infra_sem_planta_tot:
+            feitos_i, total_i = infra_sem_planta_ok, infra_sem_planta_tot
+            for planta in infra_plantas:
+                total_i += 1
+                if infra.get(planta, 0.0) >= 0.999:
+                    feitos_i += 1
+            etapas["infraestrutura"] = [feitos_i, total_i]
         total = sum(v[1] for v in etapas.values())
         if not total:
             continue
@@ -11150,13 +11224,11 @@ def render_previsao_medicao(tags: pd.DataFrame, resumo: pd.DataFrame,
                 continue
             ok, tot = l["etapas"][e]
             classe = "ok" if ok == tot else ("warn" if ok else "crit")
-            # Infraestrutura nao mostra fracao: o AVANCO_GERAL da planta ja e
-            # o proprio RIMII+RIMSI combinados num numero so (so bate 100%
-            # com os tres tipos avancados), entao "1/3 documentos aprovados
-            # no papel" e um recorte de burocracia, nao de fisico -- mistura
-            # as duas leituras que a tela existe pra separar (pedido do
-            # usuario, 2026-09-03).
-            quanto = "" if tot == 1 or e == "infraestrutura" else f" {ok}/{tot}"
+            # tot agora e sempre um FATO fisico de verdade (circuito real,
+            # planta distinta, avanço de pedestal) -- não mais contagem de
+            # documento -- entao a fração pode aparecer pra todas as etapas
+            # por igual, sem caso especial pra infraestrutura.
+            quanto = "" if tot == 1 else f" {ok}/{tot}"
             selos += (f'<span class="gtbl-badge {classe}">'
                       f'{esc(e.capitalize())}{quanto}</span> ')
         status = (
@@ -11312,7 +11384,11 @@ def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
                 continue
             ok, tot = l["etapas"][e]
             classe = "ok" if ok == tot else ("warn" if ok else "crit")
-            quanto = "" if tot == 1 or e == "infraestrutura" else f" {ok}/{tot}"
+            # tot agora e sempre um FATO fisico de verdade (circuito real,
+            # planta distinta, avanço de pedestal) -- não mais contagem de
+            # documento -- entao a fração pode aparecer pra todas as etapas
+            # por igual, sem caso especial pra infraestrutura.
+            quanto = "" if tot == 1 else f" {ok}/{tot}"
             selos += (f'<span class="gtbl-badge {classe}">'
                       f'{esc(e.capitalize())}{quanto}</span> ')
         status = (
