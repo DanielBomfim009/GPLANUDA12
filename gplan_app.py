@@ -10924,7 +10924,13 @@ def render_previsao_medicao(tags: pd.DataFrame, resumo: pd.DataFrame,
                 continue
             ok, tot = l["etapas"][e]
             classe = "ok" if ok == tot else ("warn" if ok else "crit")
-            quanto = "" if tot == 1 else f" {ok}/{tot}"
+            # Infraestrutura nao mostra fracao: o AVANCO_GERAL da planta ja e
+            # o proprio RIMII+RIMSI combinados num numero so (so bate 100%
+            # com os tres tipos avancados), entao "1/3 documentos aprovados
+            # no papel" e um recorte de burocracia, nao de fisico -- mistura
+            # as duas leituras que a tela existe pra separar (pedido do
+            # usuario, 2026-09-03).
+            quanto = "" if tot == 1 or e == "infraestrutura" else f" {ok}/{tot}"
             selos += (f'<span class="gtbl-badge {classe}">'
                       f'{esc(e.capitalize())}{quanto}</span> ')
         status = (
