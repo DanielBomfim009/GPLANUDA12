@@ -10889,9 +10889,22 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
     if tags.empty:
         return []
     texto = lambda v: str(v).strip()
-    circ_da_ponta, _ = cert_circuitos_por_ponta(lanc, depara, cache_key)
+    # Avanço Físico conta só o circuito de VERDADE, lançado na base bruta --
+    # ter mais de um é normal (sinal+potência, caixa com entrada e saída,
+    # painel) e continua contando todos. O que fica de fora são os remendos
+    # que o pipeline acrescenta (CERT_MARCA_REMENDO): eles existem só pra
+    # fechar o desenho/segmento da Certificação (sem eles o avanço de cabo
+    # de lá fica incorreto -- usuário, 2026-09-03), mas aqui, sem aquele
+    # desenho pra fechar, contar um remendo como circuito pendente inventa
+    # um "Cabo 1/2" que não existe na obra. A Certificação (cert_panorama e
+    # afins) continua usando o `lanc` cheio, com remendo -- só esta função
+    # isola pra base bruta.
+    lanc_bruto = lanc[~lanc["DOC_REF"].apply(
+        lambda v: CERT_MARCA_REMENDO in str(v or ""))]
+    circ_da_ponta, _ = cert_circuitos_por_ponta(
+        lanc_bruto, depara, f"{cache_key}:bruto")
     status_circ = {i: texto(r["STATUS"])
-                   for i, r in enumerate(lanc.to_dict("records"))}
+                   for i, r in enumerate(lanc_bruto.to_dict("records"))}
     pedestal = medicao_pedestal(cache_key)
     infra = medicao_infraestrutura(cache_key)
 
@@ -10912,7 +10925,7 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
     # indexa só os que saem. A caixa precisa dos dois lados (ver cabo_ok).
     circ_chegam: dict[str, set] = {}
     traduz_ponta = _cert_traduz(depara)
-    for i, r in enumerate(lanc.to_dict("records")):
+    for i, r in enumerate(lanc_bruto.to_dict("records")):
         dst = texto(r["DESTINO"])
         if dst in ("", "nan"):
             continue
