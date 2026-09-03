@@ -1860,9 +1860,18 @@ def inject_css():
            Selector por substring (nao um .st-key- exato) porque cada
            pagina/bloco usa uma key propria (ex.: expmenu_af, expmenu_cs_
            geral) pra nao colidir quando mais de um bloco roda no mesmo
-           run, mas todas compartilham o mesmo visual. */
-        div[class*="st-key-expmenu_"] { display:flex !important; justify-content:flex-end;
-          width:100% !important; margin:-6px 0 10px; }
+           run, mas todas compartilham o mesmo visual.
+
+           NAO usar width:100% + justify-content:flex-end aqui: o proprio
+           popover do Streamlit abre ancorado no wrapper (stLayoutWrapper),
+           nao no botao -- com o wrapper esticado pra linha toda, o painel
+           nascia colado na ESQUERDA da tela, a mais de 900px do botao na
+           direita (achado testando ao vivo, comparando a posicao real do
+           stPopoverBody com a do botao). margin-left:auto empurra o
+           wrapper pra direita SEM esticar ele, entao o wrapper e o botao
+           ficam do mesmo tamanho/posicao e o popover abre no lugar certo. */
+        div[class*="st-key-expmenu_"] { width:fit-content !important;
+          margin:-6px 0 10px auto; }
         div[class*="st-key-expmenu_"] [data-testid="stPopover"] button {
           width:36px !important; height:36px !important; min-height:0 !important;
           padding:0 !important; border-radius:50% !important;
@@ -1887,9 +1896,32 @@ def inject_css():
           margin:0 !important; font-size:19px !important; color:var(--text-1) !important; }
         div[class*="st-key-expmenu_"] [data-testid="stPopover"] button:hover [data-testid="stIconMaterial"] {
           color:var(--accent-blue) !important; }
-        /* Corpo do popover: botoes de download empilhados, largura toda. */
+        /* Corpo do popover como lista suspensa (referencia do usuario: menu
+           do Power BI/Excel -- icone + rotulo por linha, sem caixa, realce
+           de fundo no hover cobrindo a linha toda). type="tertiary" no
+           st.download_button ja tira boa parte do estilo de botao; o resto
+           (altura, alinhamento, hover) e daqui. */
+        div[data-testid="stPopoverBody"] { min-width:230px; padding:6px !important; }
         div[data-testid="stPopoverBody"] .stDownloadButton button {
-          width:100% !important; justify-content:flex-start !important; }
+          width:100% !important; justify-content:flex-start !important;
+          gap:10px !important; padding:8px 10px !important; border-radius:8px !important;
+          font-size:13px !important; font-weight:500 !important;
+          color:var(--text-1) !important; transition:background 100ms; }
+        div[data-testid="stPopoverBody"] .stDownloadButton button:hover {
+          background:rgba(var(--rgb-azul),0.14) !important; }
+        div[data-testid="stPopoverBody"] .stDownloadButton button [data-testid="stIconMaterial"] {
+          font-size:17px !important; color:var(--text-3) !important; }
+        div[data-testid="stPopoverBody"] .stDownloadButton button:hover [data-testid="stIconMaterial"] {
+          color:var(--accent-blue) !important; }
+        /* Divisor de secao dentro do menu (ex.: "Pendencias" separando do
+           "Exportar tudo" acima) -- rotulo pequeno com um traço em cima,
+           igual um cabecalho de grupo de menu nativo. */
+        div[data-testid="stPopoverBody"] .expmenu-divisor {
+          font-size:10.5px; font-weight:700; letter-spacing:.3px; text-transform:uppercase;
+          color:var(--text-3); border-top:1px solid var(--border-color);
+          margin:6px 2px 4px; padding-top:8px; }
+        div[data-testid="stPopoverBody"] [data-testid="stCaptionContainer"] {
+          padding:0 10px 4px; }
 
         /* ---------------------------------------------------------------
            Chrome do proprio Streamlit. O config.toml fixa base="dark", entao
@@ -8029,7 +8061,8 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
             st.download_button(
                 "Baixar pendências de cabo (CSV)", csv,
                 file_name=f"pendencias_cabo_{'_'.join(prefixos)}.csv",
-                mime="text/csv", key="cert_export_download")
+                mime="text/csv", key="cert_export_download",
+                icon=":material/cable:", type="tertiary", use_container_width=True)
             st.dataframe(df_export, hide_index=True, width="stretch")
 
     escolhido = {c: st.session_state.get(f"cert_f_{c}", "Todos") for c, _ in campos}
@@ -10821,7 +10854,23 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
             # Quando ele está aprovado, a etapa fecha mesmo que a coluna de
             # campo ainda não tenha sido atualizada -- a planilha de campo
             # atrasa, o parecer não volta atrás.
-            if bool(aprovado(pd.Series([d["STATUS_SIGEM"]])).iloc[0]):
+            #
+            # Isso vale pra campo em BRANCO ("-", ainda não chegou a
+            # atualização) -- não pra campo com um NEGATIVO EXPLÍCITO
+            # ("Não Localizado", "Reprovado", "Não Montado"). Um SIGEM
+            # aprovado não apaga um "Não Localizado" registrado -- são duas
+            # informações genuinamente diferentes (uma é sobre o papel, a
+            # outra sobre o campo), e o negativo explícito vence: achado
+            # relatado pelo usuário, TAG com STATUS_LOCALIZACAO "Não
+            # Localizado" pintando o selo de Localização verde (2026-09-03).
+            veto_fisico = (
+                (etapa == "calibração" and texto(t["STATUS_CALIBRACAO"]).upper() == "REPROVADO")
+                or (etapa == "localização" and texto(t["STATUS_LOCALIZACAO"]).upper() == "NÃO LOCALIZADO")
+                or (etapa == "montagem" and texto(t["STATUS_MONTAGEM"]).upper() == "NÃO MONTADO")
+            )
+            if veto_fisico:
+                passou = False
+            elif bool(aprovado(pd.Series([d["STATUS_SIGEM"]])).iloc[0]):
                 passou = True
             elif etapa == "calibração":
                 passou = texto(t["STATUS_CALIBRACAO"]) == "Aprovado"
@@ -11090,7 +11139,7 @@ def render_previsao_medicao(tags: pd.DataFrame, resumo: pd.DataFrame,
             "Exportar",
             exportar.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
             file_name="previsao_medicao.csv", mime="text/csv", key="medicao_csv",
-            use_container_width=True)
+            icon=":material/download:", type="tertiary", use_container_width=True)
 
 
 def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
@@ -11268,15 +11317,17 @@ def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
             "Exportar tudo (CSV)",
             exportar.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
             file_name="avanco_fisico.csv", mime="text/csv", key="af_csv",
-            use_container_width=True)
-        st.caption("Pendências -- uma linha por pendência, não por TAG:")
+            icon=":material/download:", type="tertiary", use_container_width=True)
+        render_html('<div class="expmenu-divisor">Pendências · uma linha por '
+                    'pendência, não por TAG</div>')
         if linhas_fisica:
             df_fis = pd.DataFrame(linhas_fisica)
             st.download_button(
                 "Pendência física (CSV)",
                 df_fis.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
                 file_name="pendencias_fisica.csv", mime="text/csv",
-                key="af_pend_fisica", use_container_width=True)
+                key="af_pend_fisica", icon=":material/engineering:",
+                type="tertiary", use_container_width=True)
             st.caption(f"{br_num(len(linhas_fisica))} pendências em "
                       f"{br_num(len({r['TAG'] for r in linhas_fisica}))} TAGs")
         else:
@@ -11286,7 +11337,8 @@ def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
                 "Pendência documental (CSV)",
                 doc_pend.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
                 file_name="pendencias_documental.csv", mime="text/csv",
-                key="af_pend_doc", use_container_width=True)
+                key="af_pend_doc", icon=":material/description:",
+                type="tertiary", use_container_width=True)
             st.caption(f"{br_num(len(doc_pend))} documentos pendentes em "
                       f"{br_num(doc_pend['TAG'].nunique())} TAGs")
         else:
@@ -12159,7 +12211,8 @@ def _curva_s_bloco(c: dict, escolha: str, chave: str) -> None:
             f"Exportar Curva S — {escolha}",
             exportar.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
             file_name=f'curva_s_{chave}.csv', mime="text/csv",
-            key=f"curva_s_csv_{chave}", use_container_width=True)
+            key=f"curva_s_csv_{chave}", icon=":material/download:",
+            type="tertiary", use_container_width=True)
 
 
 def _curva_s_comparativo(geral: dict, prio: dict) -> None:
