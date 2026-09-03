@@ -1085,9 +1085,22 @@ def inject_css():
         [data-testid="stFileUploaderDropzone"] {
           height: 46px !important; min-height: 0 !important;
           flex-direction: row !important; align-items: center !important;
-          padding: 6px 12px !important; gap: 10px; }
+          padding: 6px 12px !important; gap: 10px;
+          /* O config.toml trava base="dark" no proprio Streamlit -- os
+             widgets nativos nascem com a cor escura fixa da ENGINE do
+             Streamlit, nao da nossa var(--dark-card), entao no tema claro
+             essa caixa ficava escura enquanto o resto da pagina virava
+             claro ("algumas cores continuam brancas e outras escuras",
+             usuario 2026-09-03). Sobrescreve com os tokens de verdade, que
+             esses sim mudam com o tema. */
+          background: var(--dark-card) !important;
+          border-color: var(--border-color) !important; }
         [data-testid="stFileUploaderDropzoneInstructions"] { margin: 0 !important; }
         [data-testid="stFileUploaderDropzoneInstructions"] > div { padding: 0 !important; }
+        [data-testid="stFileUploaderDropzoneInstructions"] span { color: var(--text-3) !important; }
+        [data-testid="stFileUploaderDropzone"] button {
+          background: var(--dark-card-2) !important; border-color: var(--border-color) !important;
+          color: var(--text-1) !important; }
         /* O indicador de execucao do Streamlit -- "Running", "Stop", "Rerun" --
            nasce com a cor do config e some no tema claro. Fica sobre o
            conteudo, entao leva superficie propria para nao se perder nele. */
@@ -1919,8 +1932,49 @@ def inject_css():
            do Power BI/Excel -- icone + rotulo por linha, sem caixa, realce
            de fundo no hover cobrindo a linha toda). type="tertiary" no
            st.download_button ja tira boa parte do estilo de botao; o resto
-           (altura, alinhamento, hover) e daqui. */
-        div[data-testid="stPopoverBody"] { min-width:230px; padding:6px !important; }
+           (altura, alinhamento, hover) e daqui.
+
+           O segundo print do usuario (componente React com framer-motion)
+           nao roda nesse stack -- Streamlit nao executa spring animation
+           nem monta esse componente -- mas a SENSACAO visual dele (painel
+           translucido com blur, entrada suave, itens surgindo em sequencia)
+           da pra aproximar so com CSS: backdrop-filter, @keyframes na
+           entrada do popover e um atraso por item via :nth-of-type.
+           Reduced-motion desliga tudo, mesmo padrao da tela de login. */
+        @keyframes expmenu-entra {
+          from { opacity:0; transform:translateY(-6px) scale(.96); }
+          to   { opacity:1; transform:translateY(0) scale(1); }
+        }
+        @keyframes expmenu-item-entra {
+          from { opacity:0; transform:translateX(6px); }
+          to   { opacity:1; transform:translateX(0); }
+        }
+        /* CUIDADO: stPopoverBody e o elemento que a biblioteca de
+           posicionamento (Floating UI, por baixo do Streamlit) move via
+           style inline -- position:fixed + transform:translate(Xpx,Ypx)
+           calculado a partir do botao. Uma animation aqui que tambem anima
+           "transform" GANHA da posicao inline (achado testando ao vivo: o
+           painel foi pro canto (0,0) da tela, ignorando a ancoragem no
+           botao) -- por isso o blur/fundo ficam no proprio stPopoverBody,
+           mas a animacao de entrada (que mexe em transform) vai no FILHO
+           dele, um nivel abaixo, que a lib de posicionamento nao toca. */
+        div[data-testid="stPopoverBody"] {
+          min-width:230px; padding:6px !important;
+          background:var(--dark-card) !important;
+          backdrop-filter:blur(14px) saturate(1.4); -webkit-backdrop-filter:blur(14px) saturate(1.4); }
+        div[data-testid="stPopoverBody"] > div {
+          animation:expmenu-entra 220ms cubic-bezier(.16,1,.3,1) both; }
+        div[data-testid="stPopoverBody"] > div > * {
+          animation:expmenu-item-entra 200ms ease-out both; animation-delay:40ms; }
+        div[data-testid="stPopoverBody"] > div > *:nth-of-type(2) { animation-delay:80ms; }
+        div[data-testid="stPopoverBody"] > div > *:nth-of-type(3) { animation-delay:120ms; }
+        div[data-testid="stPopoverBody"] > div > *:nth-of-type(4) { animation-delay:160ms; }
+        div[data-testid="stPopoverBody"] > div > *:nth-of-type(5) { animation-delay:200ms; }
+        div[data-testid="stPopoverBody"] > div > *:nth-of-type(n+6) { animation-delay:240ms; }
+        @media (prefers-reduced-motion:reduce) {
+          div[data-testid="stPopoverBody"] > div,
+          div[data-testid="stPopoverBody"] > div > * { animation:none !important; }
+        }
         div[data-testid="stPopoverBody"] .stDownloadButton button {
           width:100% !important; justify-content:flex-start !important;
           gap:10px !important; padding:8px 10px !important; border-radius:8px !important;
