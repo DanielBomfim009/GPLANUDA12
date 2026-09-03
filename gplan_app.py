@@ -1841,7 +1841,6 @@ def inject_css():
         [data-testid="stNumberInputContainer"],
         [data-testid="stTextArea"] textarea,
         [data-testid="stDateInput"] div[role="group"],
-        [data-baseweb="select"] > div, [data-baseweb="input"],
         .stTextInput input, .stNumberInput input, .stTextArea textarea {
           background: var(--dark-card-2) !important; color: var(--text-1) !important;
           border-color: var(--border-color) !important; }
@@ -1871,24 +1870,24 @@ def inject_css():
         section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a span {
           color: inherit !important; }
         [data-testid="stSelectbox"] svg, [data-testid="stMultiSelect"] svg,
-        [data-testid="stTextInput"] svg, [data-baseweb="select"] svg {
+        [data-testid="stTextInput"] svg {
           fill: var(--text-2) !important; color: var(--text-2) !important; }
         input::placeholder, textarea::placeholder {
           color: var(--text-3) !important; opacity: 1 !important; }
 
         /* a lista de opcoes e portalada para fora do widget: sem regra propria
            ela nasce com o fundo do config e o texto some */
-        [role="listbox"], [role="dialog"] [role="listbox"], [data-baseweb="menu"],
+        [role="listbox"], [role="dialog"] [role="listbox"],
         div[data-testid="stSelectboxVirtualDropdown"],
         div[data-testid="stSelectboxVirtualDropdown"] ul {
           background: var(--dark-card) !important; color: var(--text-1) !important;
           border: 1px solid var(--border-color) !important;
           box-shadow: 0 18px 46px var(--sombra) !important; }
-        [role="option"], [data-baseweb="menu"] li,
+        [role="option"],
         div[data-testid="stSelectboxVirtualDropdown"] li {
           color: var(--text-1) !important; background: transparent !important; }
         [role="option"]:hover, [role="option"][data-focused],
-        [role="option"][aria-selected="true"], [data-baseweb="menu"] li:hover,
+        [role="option"][aria-selected="true"],
         div[data-testid="stSelectboxVirtualDropdown"] li:hover {
           background: rgba(var(--rgb-azul),0.16) !important; color: var(--text-1) !important; }
 
@@ -2603,8 +2602,7 @@ def inject_css():
         .fmodal-body .ficha-sub { margin-top:4px; }
 
         /* Fundo desfocado atras do modal da ficha. */
-        div[data-testid="stDialog"] > div:first-child,
-        div[data-baseweb="modal"] > div:first-child {
+        div[data-testid="stDialog"] > div:first-child {
           backdrop-filter: blur(6px) !important;
           -webkit-backdrop-filter: blur(6px) !important;
           background: var(--overlay) !important;
