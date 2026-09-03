@@ -1708,48 +1708,78 @@ def inject_css():
            label em duas linhas (Streamlit quebra \n\n em dois <p>). A 1a
            linha vira o titulo, a 2a a contagem + seta, cada uma com seu
            proprio estilo via :nth-of-type. */
+        /* A sidebar util tem so ~210px (medido): tudo aqui e calibrado pra
+           essa largura, nao pra um cartao de dashboard. Opcao "D" escolhida
+           entre 4 mockups (2026-09-03) -- sem icone nenhum, so barra de cor. */
         section[data-testid="stSidebar"] .st-key-flt_toggle button {
           background:var(--dark-card-2) !important; border:1px solid var(--border-color) !important;
-          border-radius:12px !important; padding:12px 14px 12px 44px !important;
-          height:auto !important; min-height:52px; position:relative;
+          border-radius:10px !important; padding:8px 10px !important;
+          height:auto !important; min-height:38px; position:relative;
           flex-direction:column !important; align-items:flex-start !important;
-          justify-content:center !important; gap:2px !important; }
-        section[data-testid="stSidebar"] .st-key-flt_toggle button::before {
-          content:""; position:absolute; left:12px; top:50%; transform:translateY(-50%);
-          width:22px; height:22px; border-radius:7px; background:rgba(var(--rgb-azul),.16);
-          background-image:url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235b8def' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4h18l-7 8v7l-4 2v-9z'/%3E%3C/svg%3E");
-          background-repeat:no-repeat; background-position:center; background-size:13px; }
+          justify-content:center !important; gap:1px !important; }
         section[data-testid="stSidebar"] .st-key-flt_toggle button p {
           text-align:left !important; white-space:nowrap !important; overflow:hidden !important;
           text-overflow:ellipsis !important; width:100%; }
         section[data-testid="stSidebar"] .st-key-flt_toggle button p:first-of-type {
-          font-size:13px !important; font-weight:700 !important; color:var(--text-1) !important; }
+          font-size:11.5px !important; font-weight:700 !important; color:var(--text-1) !important; }
         section[data-testid="stSidebar"] .st-key-flt_toggle button p:nth-of-type(2) {
-          font-size:11.5px !important; font-weight:600 !important; color:var(--accent-blue) !important; }
-        /* Cada campo: badge de icone colorido + rotulo, igual du_tile das
-           outras telas -- reaproveita .tile/.fxc-* que ja existem. */
-        .gf-campo-rot { display:flex; align-items:center; gap:8px; margin:10px 0 5px; }
-        .gf-campo-rot svg { width:15px; height:15px; padding:5px; border-radius:7px;
-          box-sizing:content-box; flex:none; }
-        .gf-campo-rot.fxc-azul svg  { color:var(--accent-blue);   background:rgba(var(--rgb-azul),.14); }
-        .gf-campo-rot.fxc-roxo svg  { color:var(--accent-purple); background:rgba(var(--rgb-roxo),.14); }
-        .gf-campo-rot.fxc-verde svg { color:var(--accent-green);  background:rgba(var(--rgb-verde),.14); }
-        .gf-campo-rot.fxc-ambar svg { color:var(--accent-amber);  background:rgba(var(--rgb-ambar),.14); }
-        .gf-campo-rot.fxc-teal svg  { color:var(--accent-teal);   background:rgba(var(--rgb-teal),.14); }
-        .gf-campo-rot span { font-size:11px; font-weight:700; letter-spacing:.3px;
-          text-transform:uppercase; color:var(--text-2); }
-        section[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] > div {
+          font-size:10px !important; font-weight:600 !important; color:var(--accent-blue) !important; }
+        /* Cada campo: so uma barra de cor a esquerda do rotulo (rotulo na
+           mesma cor) -- sem badge de icone, a opcao mais enxuta dos 4
+           mockups. A mesma cor volta na borda esquerda do proprio campo
+           (dois blocos abaixo, por .st-key-gf_<chave>), pra ligar rotulo e
+           campo visualmente sem precisar de um cartao unico envolvendo os
+           dois (Streamlit renderiza cada um no seu proprio container). */
+        .gf-campo-rot { border-left:2.5px solid; padding-left:7px; margin:9px 0 4px; }
+        .gf-campo-rot span { font-size:9.5px; font-weight:700; letter-spacing:.2px;
+          text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .gf-campo-rot.fxc-azul  { border-left-color:var(--accent-blue); }
+        .gf-campo-rot.fxc-azul  span { color:var(--accent-blue); }
+        .gf-campo-rot.fxc-roxo  { border-left-color:var(--accent-purple); }
+        .gf-campo-rot.fxc-roxo  span { color:var(--accent-purple); }
+        .gf-campo-rot.fxc-verde { border-left-color:var(--accent-green); }
+        .gf-campo-rot.fxc-verde span { color:var(--accent-green); }
+        .gf-campo-rot.fxc-ambar { border-left-color:var(--accent-amber); }
+        .gf-campo-rot.fxc-ambar span { color:var(--accent-amber); }
+        .gf-campo-rot.fxc-teal  { border-left-color:var(--accent-teal); }
+        .gf-campo-rot.fxc-teal  span { color:var(--accent-teal); }
+        /* [role="group"] dentro de stSelectbox, nao [data-baseweb="select"]:
+           o Streamlit deste ambiente monta o combobox com react-aria-
+           components, nao BaseWeb -- [data-baseweb] nao existe nesse DOM
+           (achado ao testar a Opcao D: a cor nao aparecia no campo, so no
+           rotulo). role="group" e o unico marcador estavel; as classes
+           st-emotion-cache-* em volta dele mudam a cada build. */
+        section[data-testid="stSidebar"] [data-testid="stSelectbox"] [role="group"] {
           background:var(--dark-card) !important; border-color:var(--border-color) !important;
-          border-radius:10px !important; font-size:11.5px !important; min-height:34px !important;
+          border-radius:8px !important; font-size:11px !important; min-height:30px !important;
           transition:border-color 120ms; }
-        section[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"]:hover > div {
+        section[data-testid="stSidebar"] [data-testid="stSelectbox"] [role="group"]:hover {
           border-color:rgba(var(--rgb-azul),.5) !important; }
+        /* A mesma barra de cor do rotulo, agora na borda esquerda do campo
+           -- liga visualmente rotulo + campo sem precisar de um cartao so.
+           Prefixo section[data-testid="stSidebar"] repetido de proposito:
+           sem ele essa regra tem MENOS seletores de atributo que a geral
+           acima (border-color, que tambem mexe no lado esquerdo) e perdia
+           o empate de especificidade mesmo com !important dos dois lados. */
+        section[data-testid="stSidebar"] .st-key-gf_sop [role="group"] {
+          border-left:2.5px solid var(--accent-blue) !important; }
+        section[data-testid="stSidebar"] .st-key-gf_ssop_prioritario [role="group"] {
+          border-left:2.5px solid var(--accent-purple) !important; }
+        section[data-testid="stSidebar"] .st-key-gf_skid [role="group"] {
+          border-left:2.5px solid var(--accent-green) !important; }
+        section[data-testid="stSidebar"] .st-key-gf_cff [role="group"] {
+          border-left:2.5px solid var(--accent-amber) !important; }
+        section[data-testid="stSidebar"] .st-key-gf_teste_malha [role="group"] {
+          border-left:2.5px solid var(--accent-teal) !important; }
         /* Limpar/Aplicar lado a lado, mesmo tamanho -- limpar e acao leve
-           (contorno), aplicar e a acao primaria (preenchida, cor do tema). */
+           (contorno), aplicar e a acao primaria (preenchida, cor do tema).
+           Rotulo curto de proposito ("Limpar"/"Aplicar"): a coluna tem uns
+           80px, "Limpar filtros" quebrava linha e o botao dobrava de altura. */
         section[data-testid="stSidebar"] .stButton button,
         section[data-testid="stSidebar"] [data-testid="stFormSubmitButton"] button {
-          width:100%; font-size:11.5px !important; font-weight:700 !important;
-          padding:8px 10px !important; border-radius:9px !important; margin-top:6px; }
+          width:100%; font-size:11px !important; font-weight:700 !important;
+          padding:6px 4px !important; min-height:0 !important; border-radius:8px !important;
+          margin-top:4px !important; white-space:nowrap; }
         section[data-testid="stSidebar"] .st-key-gf_limpar button {
           background:transparent !important; border:1px dashed var(--border-color) !important;
           color:var(--text-3) !important; box-shadow:none !important; }
@@ -1757,7 +1787,7 @@ def inject_css():
           color:var(--txt-vermelho) !important; border-color:rgba(var(--rgb-vermelho),.4) !important;
           background:rgba(var(--rgb-vermelho),.08) !important; }
         section[data-testid="stSidebar"] .st-key-gf_aplicar button {
-          border-radius:9px !important; }
+          border-radius:8px !important; }
         /* ------- botao de tema: so o icone, preso no alto a direita -------
            Fora do fluxo, ao lado do menu do proprio Streamlit. O rotulo existe
            para leitor de tela, mas nao ocupa espaco. */
@@ -10056,15 +10086,16 @@ FILTROS = [
     ("teste_malha", "Teste de Malha", "Todos", "tags", "PREVISAO_TESTE_MALHA"),
 ]
 
-# Cor e ícone de cada campo no painel da lateral (sidebar_filtros) -- à parte
-# de FILTROS pra não mexer nos vários lugares que já desempacotam a
-# 5-tupla dele. Cores e ícones batem com o mockup que o Daniel mandou.
+# Cor de cada campo no painel da lateral (sidebar_filtros) -- à parte de
+# FILTROS pra não mexer nos vários lugares que já desempacotam a 5-tupla
+# dele. Opção "D" escolhida entre 4 mockups (2026-09-03): sem ícone, só uma
+# barra de cor à esquerda do rótulo e do próprio campo -- a mais enxuta.
 FILTRO_VISUAL = {
-    "sop": ("azul", "documento"),
-    "ssop_prioritario": ("roxo", "estrela"),
-    "skid": ("verde", "etiqueta"),
-    "cff": ("ambar", "pasta"),
-    "teste_malha": ("teal", "check_circulo"),
+    "sop": "azul",
+    "ssop_prioritario": "roxo",
+    "skid": "verde",
+    "cff": "ambar",
+    "teste_malha": "teal",
 }
 
 
@@ -10096,6 +10127,11 @@ def _tags_do_filtro(chave: str, valor: str, tags, resumo, esperados) -> set:
     if chave == "cff":
         return set(tags.loc[tags["CFF"].astype(str).str.strip() == valor, "TAG"])
     if chave == "teste_malha":
+        # coluna nova -- pode ainda nao existir na base carregada (Supabase
+        # desatualizado); nesse caso o campo nem aparece no formulario, mas
+        # um ?teste_malha= vindo de URL cairia aqui direto.
+        if "PREVISAO_TESTE_MALHA" not in tags.columns:
+            return set()
         return set(tags.loc[tags["PREVISAO_TESTE_MALHA"].astype(str).str.strip() == valor, "TAG"])
     if chave == "grupo":
         return set(resumo.loc[resumo["GRUPO_REGRA"].map(sentence_case) == valor, "TAG"])
@@ -10127,7 +10163,7 @@ def consumir_filtros_url(tags: pd.DataFrame, resumo: pd.DataFrame,
     st.session_state["_flt_url"] = token
     base = {"tags": tags, "resumo": resumo, "esperados": esperados}
     for chave, _, padrao, fonte, coluna in FILTROS:
-        if chave not in vindo:
+        if chave not in vindo or coluna not in base[fonte].columns:
             continue
         serie = base[fonte][coluna]
         validos = _valores(serie.map(sentence_case) if chave in NORMALIZA else serie)
@@ -10224,26 +10260,31 @@ def sidebar_filtros(tags: pd.DataFrame, resumo: pd.DataFrame,
         if st.session_state["_flt_aberto"]:
             with st.form("gf_form", border=False):
                 for chave, rotulo, padrao, fonte, coluna in FILTROS:
-                    escolhas = {c: escolhido(c, p) for c, _, p, _, _ in FILTROS}
                     base = {"tags": tags, "resumo": resumo, "esperados": esperados}[fonte]
+                    if coluna not in base.columns:
+                        # coluna nova (ex.: PREVISAO_TESTE_MALHA) que o codigo
+                        # ja conhece mas a planilha carregada agora ainda nao
+                        # tem -- acontece na porta que le do Supabase antes de
+                        # alguem subir a base atualizada. Sumir o campo aqui e
+                        # melhor que estourar erro pra tela inteira.
+                        continue
+                    escolhas = {c: escolhido(c, p) for c, _, p, _, _ in FILTROS}
                     sub = base[base["TAG"].isin(
                         _universo(escolhas, tags, resumo, esperados, pular=chave))]
                     serie = sub[coluna].map(sentence_case) if chave in NORMALIZA else sub[coluna]
                     opcoes = [padrao] + _valores(serie)
                     if st.session_state.get(f"gf_{chave}", padrao) not in opcoes:
                         st.session_state[f"gf_{chave}"] = padrao
-                    cor, icone = FILTRO_VISUAL.get(chave, ("azul", "documento"))
+                    cor = FILTRO_VISUAL.get(chave, "azul")
                     render_html(
                         f'<div class="gf-campo-rot fxc-{cor}">'
-                        f'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
-                        f'stroke-linecap="round" stroke-linejoin="round">{KPI_ICONS.get(icone, "")}'
-                        f'</svg><span>{esc(rotulo)}</span></div>')
+                        f'<span>{esc(rotulo)}</span></div>')
                     st.selectbox(rotulo, opcoes, key=f"gf_{chave}", label_visibility="collapsed")
 
-                col_limpar, col_aplicar = st.columns(2)
-                col_limpar.form_submit_button("Limpar filtros", key="gf_limpar",
+                col_limpar, col_aplicar = st.columns(2, gap="small")
+                col_limpar.form_submit_button("Limpar", key="gf_limpar",
                                               on_click=_limpar_filtros, use_container_width=True)
-                col_aplicar.form_submit_button("Aplicar filtros", key="gf_aplicar",
+                col_aplicar.form_submit_button("Aplicar", key="gf_aplicar",
                                                type="primary", use_container_width=True)
 
             escolhas = {c: escolhido(c, p) for c, _, p, _, _ in FILTROS}
