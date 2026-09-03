@@ -1063,12 +1063,17 @@ def inject_css():
 
         .stApp { background: var(--dark-bg); }
         /* Streamlit usa 96px topo / 80px lateral / 160px rodape por padrao,
-           o que deixa uma faixa vazia enorme no fim da pagina e desperdica largura. */
+           o que deixa uma faixa vazia enorme no fim da pagina e desperdica largura.
+           Ainda assim, 32px de topo + os 60px da barra estAppHeader (nativa,
+           embaixo) somavam quase 100px de vazio antes do titulo de qualquer
+           pagina -- "como se todo desenvolvimento fosse criado do meio da
+           tela pra baixo" (usuario, 2026-09-03). Reduz os dois lados. */
         [data-testid="stMainBlockContainer"], .block-container {
-          padding: 32px 44px 48px !important;
+          padding: 16px 44px 48px !important;
           max-width: 1600px !important;
         }
-        [data-testid="stHeader"] { background: transparent !important; }
+        [data-testid="stHeader"] { background: transparent !important;
+          height: 44px !important; min-height: 44px !important; }
         /* O indicador de execucao do Streamlit -- "Running", "Stop", "Rerun" --
            nasce com a cor do config e some no tema claro. Fica sobre o
            conteudo, entao leva superficie propria para nao se perder nele. */
@@ -2255,7 +2260,7 @@ def inject_css():
           .fx-corpo { grid-template-columns:1fr; }
         }
 
-        .gplan-header { display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px; }
+        .gplan-header { display:flex; justify-content:space-between; align-items:center; margin-bottom: 14px; }
         .gplan-header h1 { font-size: 24px; font-weight: 700; color: var(--text-1); margin: 0; letter-spacing: -0.4px; }
         .gplan-updated {
           font-size: 12.5px; color: var(--text-2); display:flex; align-items:center; gap: 8px;
@@ -10855,17 +10860,17 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
             # campo ainda não tenha sido atualizada -- a planilha de campo
             # atrasa, o parecer não volta atrás.
             #
-            # Isso vale pra campo em BRANCO ("-", ainda não chegou a
-            # atualização) -- não pra campo com um NEGATIVO EXPLÍCITO
-            # ("Não Localizado", "Reprovado", "Não Montado"). Um SIGEM
-            # aprovado não apaga um "Não Localizado" registrado -- são duas
-            # informações genuinamente diferentes (uma é sobre o papel, a
-            # outra sobre o campo), e o negativo explícito vence: achado
-            # relatado pelo usuário, TAG com STATUS_LOCALIZACAO "Não
-            # Localizado" pintando o selo de Localização verde (2026-09-03).
+            # EXCETO quando o campo nega que o EVENTO físico em si tenha
+            # acontecido -- "Não Localizado"/"Não Montado" dizem que o
+            # trabalho ainda não ocorreu (nao ha avanco fisico pra
+            # comemorar), o que é diferente de "Reprovado" na calibração:
+            # reprovado pressupõe que a calibração AGIU sobre o instrumento
+            # (o avanço físico aconteceu), só o veredito é que não passou --
+            # por isso Reprovado NAO veta, mas "Não Localizado"/"Não
+            # Montado" vetam (explicado pelo usuário, 2026-09-03, depois de
+            # eu ter generalizado errado pra calibração também).
             veto_fisico = (
-                (etapa == "calibração" and texto(t["STATUS_CALIBRACAO"]).upper() == "REPROVADO")
-                or (etapa == "localização" and texto(t["STATUS_LOCALIZACAO"]).upper() == "NÃO LOCALIZADO")
+                (etapa == "localização" and texto(t["STATUS_LOCALIZACAO"]).upper() == "NÃO LOCALIZADO")
                 or (etapa == "montagem" and texto(t["STATUS_MONTAGEM"]).upper() == "NÃO MONTADO")
             )
             if veto_fisico:
