@@ -10997,6 +10997,138 @@ def render_previsao_medicao(tags: pd.DataFrame, resumo: pd.DataFrame,
         file_name="previsao_medicao.csv", mime="text/csv", key="medicao_csv")
 
 
+def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
+                         esperados: pd.DataFrame, lanc: pd.DataFrame,
+                         depara: pd.DataFrame, sigem: pd.DataFrame,
+                         cache_key: str = ""):
+    """Recorte da Previsão Medição: só a tabela de prontidão física --
+    recorte, busca e exportação -- sem os cartões de indicador, a
+    distribuição por etapa nem valores em R$.
+
+    Existe pra conferir a etapa de avanço físico direto, sem abrir a
+    Previsão Medição (pedido do usuário, 2026-09-03: ele mora na
+    Administração e tem o "Mostrar valores" e os indicadores financeiros
+    que essa consulta não precisa). Mesma fonte -- medicao_prontidao -- e
+    mesmo cache, então as duas telas nunca divergem uma da outra.
+    """
+    render_header("Avanço Físico")
+    linhas = medicao_prontidao(tags, resumo, esperados, lanc, depara, cache_key)
+    if not linhas:
+        render_html('<div class="gplan-panel"><div class="gtbl-empty">'
+                    "Nenhuma TAG com relatório esperado neste recorte."
+                    "</div></div>")
+        return
+
+    def cor_pct(pct: float) -> str:
+        return "feito" if pct >= 99.5 else ("andando" if pct > 0 else "parado")
+
+    medidas = [l for l in linhas if l["medida"]]
+    fila = [l for l in linhas if not l["medida"]]
+    prontas = [l for l in fila if l["falta"] == 0]
+    a_medir = [l for l in fila if l["falta"] == 1]
+    em_andamento = [l for l in fila if l["falta"] >= 2]
+
+    GRUPOS = {
+        "Todas": linhas,
+        "Prontas para medição": prontas,
+        "A medir": a_medir,
+        "Em andamento": em_andamento,
+        "Já medidas": medidas,
+    }
+    DESCRICAO = {
+        "Todas": "todas as TAGs com relatório esperado neste recorte",
+        "Prontas para medição": "TAGs com todas as etapas físicas concluídas, "
+                                "aguardando medição",
+        "A medir": "falta uma etapa física para entrar na fila",
+        "Em andamento": "duas etapas físicas ou mais ainda em aberto",
+        "Já medidas": "medidas no GITEC -- fora da fila",
+    }
+    escolha = st.segmented_control(
+        "Recorte", list(GRUPOS),
+        format_func=lambda k: f"{k} · {br_num(len(GRUPOS[k]))}",
+        default="Prontas para medição", key="af_grupo") or "Prontas para medição"
+    grupo = GRUPOS[escolha]
+
+    busca = st.text_input("Buscar TAG", key="af_busca",
+                          placeholder="Digite parte do nome da TAG…")
+    if busca.strip():
+        alvo = busca.strip().upper()
+        grupo = [l for l in grupo if alvo in l["tag"].upper()]
+
+    TETO = 150
+    ordem = sorted(grupo, key=lambda l: (l["falta"], -l["n_feito"], l["tag"]))
+    mostradas = ordem[:TETO]
+
+    corpo = ""
+    for l in mostradas:
+        cor = cor_pct(l["pct"])
+        cor_doc = cor_pct(l["avanco_doc"])
+        selos = ""
+        for e in MEDICAO_ORDEM:
+            if e not in l["etapas"]:
+                continue
+            ok, tot = l["etapas"][e]
+            classe = "ok" if ok == tot else ("warn" if ok else "crit")
+            quanto = "" if tot == 1 or e == "infraestrutura" else f" {ok}/{tot}"
+            selos += (f'<span class="gtbl-badge {classe}">'
+                      f'{esc(e.capitalize())}{quanto}</span> ')
+        status = (
+            f'<span class="pm-chip {"on" if l["falta"] == 0 else "off"}">'
+            f'Físico</span>'
+            f'<span class="pm-chip {"on" if l["medida"] else "off"}">'
+            f'Medição</span>'
+            f'<span class="pm-chip {"on" if l["relatorio_aprovado"] else "off"}">'
+            f'Documental</span>')
+        corpo += (
+            f'<tr><td>{tag_link(l["tag"])}</td>'
+            f'<td><div class="pm-status">{status}</div></td>'
+            f'<td><div class="pm-duplabar">'
+            f'<div class="lin"><span class="lb">FÍS</span>'
+            f'<span class="tr"><i class="{cor}" style="width:{l["pct"]:.0f}%">'
+            f'</i></span><span class="vl">{br_pct(l["pct"], 0)}</span></div>'
+            f'<div class="lin"><span class="lb">DOC</span>'
+            f'<span class="tr"><i class="{cor_doc}" style="width:'
+            f'{l["avanco_doc"]:.0f}%"></i></span>'
+            f'<span class="vl">{br_pct(l["avanco_doc"], 0)}</span></div>'
+            f'</div></td>'
+            f'<td class="med-selos">{selos}</td></tr>')
+
+    rodape = ""
+    if len(ordem) > TETO:
+        rodape = f' · mostrando as {TETO} primeiras de {br_num(len(ordem))}'
+    render_html(
+        '<div class="gplan-panel ct-painel"><div class="gplan-panel-title">'
+        f'Tags · {esc(escolha)}'
+        f'<span class="gtbl-muted" style="font-weight:500">'
+        f'{esc(DESCRICAO.get(escolha, ""))} · {br_num(len(ordem))} TAGs{rodape}'
+        '</span></div><div class="ct-rolo">'
+        '<table class="gtbl med-tab"><thead><tr><th>TAG</th><th>Status</th>'
+        '<th>Avanço físico / documental</th><th>Etapas</th></tr></thead>'
+        f'<tbody>{corpo}</tbody></table></div></div>')
+
+    # As fichas das TAGs da tabela. Só das mostradas: gerar as milhares
+    # custaria dezenas de MB de HTML para modais que ninguém vai abrir.
+    render_html(fichas_completas([l["tag"] for l in mostradas], resumo,
+                                 esperados, tags, sigem, cache_key,
+                                 origem="avanco_fisico"))
+
+    exportar = pd.DataFrame([{
+        "TAG": l["tag"], "DESCRICAO": l["descricao"],
+        "ETAPAS_FEITAS": l["n_feito"], "ETAPAS_TOTAL": l["total"],
+        "AVANCO_FISICO_PCT": round(l["pct"], 1),
+        "AVANCO_DOCUMENTAL_PCT": round(l["avanco_doc"], 1),
+        "FECHADAS": " + ".join(sorted(l["fechadas"], key=MEDICAO_ORDEM.index)),
+        "ABERTAS": " + ".join(sorted(l["abertas"], key=MEDICAO_ORDEM.index)),
+        "MEDIDA_NO_GITEC": "sim" if l["medida"] else "nao",
+        "RELATORIO_APROVADO": "sim" if l["relatorio_aprovado"] else "nao",
+        "SOP": l["sop"], "SKID": l["skid"],
+    } for l in sorted(linhas, key=lambda x: (x["medida"], x["falta"], x["tag"]))])
+    st.download_button(
+        "Exportar",
+        exportar.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+        file_name="avanco_fisico.csv", mime="text/csv", key="af_csv")
+
+
 # =====================================================================
 # Curva S -- duas curvas, dois modelos:
 #
@@ -12281,6 +12413,13 @@ def main():
                                sigem, cache_key)),
         title="Previsão Medição", icon=":material/paid:",
         url_path="previsao-medicao")
+    avanco_fisico_page = st.Page(
+        lambda: _sob_carga("Conferindo o que o campo já fechou",
+                           lambda: render_avanco_fisico(
+                               tags, resumo, esperados, lancamento, depara,
+                               sigem, cache_key)),
+        title="Avanço Físico", icon=":material/trending_up:",
+        url_path="avanco-fisico")
     curva_s_page = st.Page(
         lambda: _sob_carga("Calculando avanço de montagem por semana",
                            lambda: render_curva_s(tags, cache_key)),
@@ -12311,6 +12450,11 @@ def main():
         avanco.append(planta_page)
     if pode("ver_certificacao"):
         avanco.append(certificacao_page)
+    # Mesma audiencia da Previsao Medicao (dado bruto de prontidao fisica,
+    # so sem os valores em R$) -- "administrar" de proposito, nao um dos
+    # tres de cima, pra nao abrir pra papel que hoje nao ve essa base.
+    if pode("administrar"):
+        avanco.append(avanco_fisico_page)
     if avanco:
         secoes["Avanço"] = avanco
     if pode("administrar"):
