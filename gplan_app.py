@@ -1735,7 +1735,7 @@ def inject_css():
           position:relative; padding-left:9px; margin:5px 0; gap:3px !important; }
         section[data-testid="stSidebar"] [data-testid="stVerticalBlock"]:has(> .stElementContainer .gf-campo-rot)::before {
           content:""; position:absolute; left:0; top:1px; bottom:1px; width:2.5px; border-radius:2px; }
-        .gf-campo-rot { margin:0; }
+        .gf-campo-rot { margin:0; font-size:9.5px; line-height:1.2; }
         .gf-campo-rot span { font-size:9.5px; font-weight:700; letter-spacing:.2px;
           text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .gf-campo-rot.fxc-azul  span { color:var(--accent-blue); }
