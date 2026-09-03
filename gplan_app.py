@@ -1475,7 +1475,6 @@ def inject_css():
         .cs-vao-rotulo { font-size:10.5px; font-weight:800; }
         .cs-vao-rotulo.cs-vao-ok { fill:var(--accent-teal); }
         .cs-vao-rotulo.cs-vao-alerta { fill:var(--accent-red); }
-        .cs-ritmo-nota { font-size:11px; color:var(--text-3); margin-top:10px; line-height:1.5; }
         .cs-vazio { padding:38px 20px; text-align:center; color:var(--text-3); font-size:13px; }
 
         /* Cabecalho de cada curva dentro de "Visao geral" -- divisor visivel
@@ -11561,30 +11560,6 @@ def _curva_s_bloco(c: dict, escolha: str, chave: str) -> None:
                            x_hoje=c["x_atual"])
         legenda_prazo = ('<span class="prazo"><span class="marca"></span>Prazo</span>'
                          if c["prazo_x"] is not None else "")
-        if c["eixo_data"]:
-            if c["termino_x"]:
-                dias_dif = (c["prazo"] - date.fromordinal(int(c["termino_x"]))).days
-                if dias_dif > 0:
-                    desvio_txt = f'{br_num(dias_dif)} dia{"" if dias_dif == 1 else "s"} à frente do previsto'
-                elif dias_dif < 0:
-                    desvio_txt = f'{br_num(-dias_dif)} dia{"" if dias_dif == -1 else "s"} atrás do previsto'
-                else:
-                    desvio_txt = "exatamente em cima do previsto"
-            else:
-                desvio_txt = "em cima do previsto"
-            nota = ("Tendência: curva em S do ponto de hoje até o total, na semana que o "
-                   "ritmo médio real indicar como término -- sem leituras suficientes ainda, "
-                   f"esse ritmo é o necessário pra fechar o previsto no prazo. Hoje está "
-                   f"{desvio_txt}; fazer mais que a média antecipa o término, fazer menos atrasa.")
-        elif c["ritmo"]:
-            nota = ("Tendência: média ponderada do ritmo semanal real, peso maior para as "
-                   "semanas mais recentes -- projetada a partir do último ponto de Real "
-                   f'informado (semana {c["x_atual"]}).')
-        else:
-            nota = ("Real até aqui: reconstruído a partir de Status de Montagem + Semana "
-                   "Programada da 01_BASE_TAGS (quem já foi montado, contado na semana em "
-                   "que foi programado -- não há data de conclusão em nenhuma base). "
-                   "Tendência liga quando você informar a semana atual na 10_BASE_CURVA_S.")
         render_html(f"""
           <div class="gplan-panel cs-painel">
             <div class="cs-legenda">
@@ -11594,7 +11569,6 @@ def _curva_s_bloco(c: dict, escolha: str, chave: str) -> None:
               {legenda_prazo}
             </div>
             {svg}
-            <div class="cs-ritmo-nota">{esc(nota)}</div>
           </div>""")
     with col_resumo:
         render_html(_curva_s_resumo_lateral(c, escolha))
