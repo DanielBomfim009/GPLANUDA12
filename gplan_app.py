@@ -2440,6 +2440,7 @@ def inject_css():
         .gtbl-badge.crit { color:var(--txt-vermelho); background:rgba(var(--rgb-vermelho),0.16); border:1px solid rgba(var(--rgb-vermelho),0.28); }
         .gtbl-badge.warn { color:var(--txt-ambar); background:rgba(var(--rgb-ambar),0.14); border:1px solid rgba(var(--rgb-ambar),0.26); }
         .gtbl-badge.ok   { color:var(--txt-teal); background:rgba(var(--rgb-teal),0.13); border:1px solid rgba(var(--rgb-teal),0.24); }
+        .gtbl-badge.verde { color:var(--txt-verde); background:rgba(var(--rgb-verde),0.14); border:1px solid rgba(var(--rgb-verde),0.26); }
         /* etapa do caminho, nao alerta: azul, a mesma familia da pill de TAG */
         .gtbl-badge.andamento { color:var(--txt-azul); background:rgba(var(--rgb-azul),0.14); border:1px solid rgba(var(--rgb-azul),0.26); }
         .gtbl-badge.roxo { color:var(--txt-roxo); background:rgba(var(--rgb-roxo),0.14); border:1px solid rgba(var(--rgb-roxo),0.26); }
@@ -10758,6 +10759,34 @@ MEDICAO_ORDEM = ["calibração", "localização", "montagem", "cabo", "pedestal"
                  "infraestrutura"]
 
 
+def selo_calibracao(status: str) -> tuple[str, str]:
+    """Rótulo e cor do selo de Calibração -- o status em si, não um ok/alerta
+    genérico. Usuário, 2026-09-04: sem status/traço fica "Calibração"
+    vermelho; Aprovado fica "Aprovado" verde; Reprovado fica "Reprovado"
+    vermelho; Cancelado fica "Cancelado" azul.
+    """
+    if status == "Aprovado":
+        return "Aprovado", "verde"
+    if status == "Reprovado":
+        return "Reprovado", "crit"
+    if status == "Cancelado":
+        return "Cancelado", "andamento"
+    return "Calibração", "crit"
+
+
+def selo_localizacao(status: str) -> tuple[str, str]:
+    """Rótulo e cor do selo de Localização -- mesma lógica de
+    selo_calibracao. Usuário, 2026-09-04: sem status/traço e Não Localizado
+    ficam "Localização" vermelho (não repetem o texto do status); Localizado
+    fica "Localizado" verde; Almoxarifado Consag fica "Localização" azul.
+    """
+    if status == "LOCALIZADO":
+        return "Localizado", "verde"
+    if status == "ALMOXARIFADO CONSAG":
+        return "Localização", "andamento"
+    return "Localização", "crit"
+
+
 # Sigla da planta (ex.: "CHZ-322") no FIM de uma string -- funciona tanto no
 # desenho completo da 11_BASE_INFRAESTRUTURA ("DE-5290.00-22111-800-CHZ-
 # 322_B", que termina com um sufixo de revisão depois da sigla) quanto no
@@ -11122,6 +11151,8 @@ def medicao_prontidao(tags: pd.DataFrame, resumo: pd.DataFrame,
             "preco": cert_num(t.get("PRECO_UNITARIO")),
             "sop": vazio_para_traco(t.get("SOP")),
             "skid": vazio_para_traco(t.get("SKID")),
+            "status_calibracao": texto(t.get("STATUS_CALIBRACAO")),
+            "status_localizacao": texto(t.get("STATUS_LOCALIZACAO")),
         })
     return linhas
 
@@ -11435,6 +11466,19 @@ def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
             if e not in l["etapas"]:
                 continue
             ok, tot = l["etapas"][e]
+            # Calibração e Localização mostram o STATUS em si (Aprovado,
+            # Reprovado, Localizado...), não um ok/alerta genérico -- pedido
+            # do usuário, 2026-09-04, pra ver de cara qual dos motivos
+            # travou a etapa, em vez de um "Calibração" vermelho igual pra
+            # "nunca calibrou" e "reprovou".
+            if e == "calibração":
+                rotulo, classe = selo_calibracao(l["status_calibracao"])
+                selos += f'<span class="gtbl-badge {classe}">{esc(rotulo)}</span> '
+                continue
+            if e == "localização":
+                rotulo, classe = selo_localizacao(l["status_localizacao"])
+                selos += f'<span class="gtbl-badge {classe}">{esc(rotulo)}</span> '
+                continue
             classe = "ok" if ok == tot else ("warn" if ok else "crit")
             # tot agora e sempre um FATO fisico de verdade (circuito real,
             # planta distinta, avanço de pedestal) -- não mais contagem de
