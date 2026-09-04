@@ -4024,9 +4024,11 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
 def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame,
                       sigem: pd.DataFrame, cache_key: str = ""):
     # Com filtro ativo o cabecalho diz quanto sobrou: sem isso a aba mostra um
-    # numero menor e nada na tela explica por que.
+    # numero menor e nada na tela explica por que. Documento unico, igual ao
+    # resto da pagina -- senao o pill conta linha (TAG x documento) enquanto
+    # a tabela debaixo conta relatorio, e os dois numeros se contradizem.
     render_header("Relatórios previstos",
-                  extra_pill=f"<strong>{br_num(len(esperados))}</strong> relatórios"
+                  extra_pill=f"<strong>{br_num(esperados['DOCUMENTO_ESPERADO'].nunique())}</strong> relatórios"
                   if st.session_state.get("_flt_selo") else None)
 
     # Mantem ORIGEM_REGRA no dataframe (sem exibir): e ela que separa
@@ -4067,22 +4069,20 @@ def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.Da
                     "DOCUMENTO_ESPERADO", "STATUS_SIGEM", "REVISAO_SIGEM", "DATA_SIGEM"]
         df = df[search_any_column(df[visiveis], search)]
 
-    if sel_rel or sel_sts or search:
-        render_html(
-            '<div class="flt-summary">Exibindo <strong>'
-            + br_num(len(df))
-            + "</strong> de "
-            + br_num(len(esperados))
-            + " relatórios</div>"
-        )
-
     # Esta faixa responde "quantos relatorios estao em cada status" -- e o
     # relatorio e o documento, nao a linha. Um RIMII/RIMSI de infra por planta
     # e uma linha por TAG (ate 806 pra um so), e contar linha contava o mesmo
-    # parecer uma vez por TAG pendurada nele. A tabela de baixo continua por
-    # linha de proposito -- ali a pergunta e outra, "o que falta para cada
-    # TAG", e cada linha e a pendencia de uma TAG de verdade.
+    # parecer uma vez por TAG pendurada nele.
     doc_unico = df.drop_duplicates(subset=["DOCUMENTO_ESPERADO"])
+
+    if sel_rel or sel_sts or search:
+        render_html(
+            '<div class="flt-summary">Exibindo <strong>'
+            + br_num(len(doc_unico))
+            + "</strong> de "
+            + br_num(esperados["DOCUMENTO_ESPERADO"].nunique())
+            + " relatórios</div>"
+        )
     st_norm = doc_unico["STATUS_SIGEM"].astype(str).str.strip().str.upper()
     render_html(faixa_resumo([
         ("No recorte", br_num(len(doc_unico)), None),
@@ -4093,23 +4093,43 @@ def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.Da
         ("Cancelados", br_num(int((st_norm == "CANCELADO").sum())), None),
     ]))
 
-    df_page = paginate(df, "relatorios", f"{search}|{sel_rel}|{sel_sts}")
+    # A tabela agora segue a mesma unidade da faixa acima: um RELATORIO, nao
+    # um par (TAG, relatorio). Usuario, 2026-09-04: "a aba e exatamente de
+    # relatorio, nenhum relatorio deve se repetir... se houver atualizacao,
+    # tem que ficar no interno da ficha de cada relatorio" -- e a ficha
+    # (ficha_relatorio_html) ja lista os N instrumentos e o historico de
+    # revisao inteiro, so a tabela ainda repetia a mesma linha uma vez por
+    # TAG (806 vezes, no pior caso). tags_por_doc sai do esperados INTEIRO,
+    # nao do recorte filtrado -- quantos instrumentos dependem do documento e
+    # um fato do documento, que buscar/filtrar nao muda.
+    tags_por_doc = (esperados.groupby("DOCUMENTO_ESPERADO")["TAG"]
+                    .apply(lambda s: sorted({str(t) for t in s})).to_dict())
+    df_page = paginate(doc_unico, "relatorios", f"{search}|{sel_rel}|{sel_sts}")
 
     rows = ""
+    tags_com_ficha, docs_multi = [], []
     for _, r in df_page.iterrows():
+        doc = r["DOCUMENTO_ESPERADO"]
+        tags_doc = tags_por_doc.get(doc, [str(r["TAG"])])
+        if len(tags_doc) == 1:
+            tag_cel = tag_link(tags_doc[0])
+            tags_com_ficha.append(tags_doc[0])
+        else:
+            tag_cel = f'<span class="gtbl-muted">{br_num(len(tags_doc))} instrumentos</span>'
+            docs_multi.append(doc)
         rows += f"""
             <tr>
-              <td>{tag_link(r['TAG'])}</td>
+              <td>{tag_cel}</td>
               <td>{esc(r['DESCRICAO'])}</td>
               <td class="gtbl-muted">{esc(str(r['GRUPO']).title())}</td>
               <td class="gtbl-strong">{esc(r['RELATORIO'])}</td>
               <td class="gtbl-muted">{esc(r['REFERENCIA'])}</td>
-              <td class="gtbl-mono">{esc(r['DOCUMENTO_ESPERADO'])}</td>
+              <td class="gtbl-mono">{esc(doc)}</td>
               <td class="gtbl-num">{yes_no_badge(r['EXISTE_NO_SIGEM'])}</td>
               <td>{status_badge(r['STATUS_SIGEM'])}</td>
               <td class="gtbl-num gtbl-muted">{esc(r['REVISAO_SIGEM'])}</td>
               <td class="gtbl-num gtbl-muted">{esc(r['DATA_SIGEM'])}</td>
-              <td class="gtbl-num">{botao_detalhes(r['DOCUMENTO_ESPERADO'], POSTADO(r['STATUS_SIGEM']))}</td>
+              <td class="gtbl-num">{botao_detalhes(doc, POSTADO(r['STATUS_SIGEM']))}</td>
             </tr>
         """
     render_html(
@@ -4121,8 +4141,13 @@ def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.Da
             "Nenhum relatório encontrado para essa busca.",
         )
         + "</div>"
-        + fichas_completas(df_page["TAG"].tolist(), resumo, esperados, tags,
+        + fichas_completas(tags_com_ficha, resumo, esperados, tags,
                            sigem, cache_key, origem="rel")
+        # fichas_completas ja cobre os documentos das linhas de 1 tag (via o
+        # proprio tags_com_ficha) -- so os de VARIAS tags ficam de fora dela
+        # (nenhuma das tags que o citam entrou em tags_com_ficha), por isso
+        # entram aqui, a parte, sem duplicar a ficha das de 1 tag so.
+        + fichas_relatorios_html(docs_multi, esperados, _revisoes_por_doc(cache_key, sigem))
     )
 
 
