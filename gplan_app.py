@@ -11306,6 +11306,18 @@ def render_previsao_medicao(tags: pd.DataFrame, resumo: pd.DataFrame,
             if e not in l["etapas"]:
                 continue
             ok, tot = l["etapas"][e]
+            # Calibração e Localização mostram o STATUS em si (Aprovado,
+            # Reprovado, Localizado...), não um ok/alerta genérico -- mesmo
+            # tratamento do Avanço Físico (usuário, 2026-09-04), pra ficar
+            # consistente entre as duas telas.
+            if e == "calibração":
+                rotulo, classe = selo_calibracao(l["status_calibracao"])
+                selos += f'<span class="gtbl-badge {classe}">{esc(rotulo)}</span> '
+                continue
+            if e == "localização":
+                rotulo, classe = selo_localizacao(l["status_localizacao"])
+                selos += f'<span class="gtbl-badge {classe}">{esc(rotulo)}</span> '
+                continue
             classe = "ok" if ok == tot else ("warn" if ok else "crit")
             # tot agora e sempre um FATO fisico de verdade (circuito real,
             # planta distinta, avanço de pedestal) -- não mais contagem de
