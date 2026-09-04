@@ -5040,21 +5040,26 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
     )
 
 
-def render_sigem(sigem: pd.DataFrame, esperados: pd.DataFrame | None = None,
-                 filtrado: bool = False):
-    """A base crua do SIGEM, recortada pelo filtro da lateral quando ha um.
+def render_sigem(sigem: pd.DataFrame, esperados: pd.DataFrame | None = None):
+    """A base crua do SIGEM, sempre recortada pros documentos do NOSSO
+    controle.
 
-    Com filtro ativo sobram os documentos das tags escolhidas. Isso deixa de
-    fora o que nao casa com tag nenhuma -- justamente o que se costuma vir
-    procurar aqui --, entao a contagem diz quantos ficaram de fora, em vez de
-    o numero simplesmente encolher sem explicacao.
+    O SIGEM e da obra inteira, nao so deste controle documental (ver memoria
+    escopo_das_bases_datadas) -- sem este recorte a aba misturava documento
+    de instrumentacao com currículo, treinamento e qualquer outra coisa que
+    a planta inteira posta no mesmo SIGEM. Usuario, 2026-09-04: "eu queria
+    que ficasse somente tudo que for relacionado aos meus tag's". Segue o
+    filtro lateral (SOP/SKID/etc.) por tabela: e o `esperados` ja filtrado
+    que chega aqui que decide o recorte, entao apertar um filtro na lateral
+    encolhe ainda mais o de baixo, mas o de cima (fora do nosso controle)
+    nunca reaparece.
     """
     total = len(sigem)
-    if filtrado and esperados is not None:
+    if esperados is not None:
         sigem = sigem[sigem["DOCUMENTO"].isin(set(esperados["DOCUMENTO_ESPERADO"]))]
     pill = f"<strong>{br_num(len(sigem))}</strong> documentos"
-    if filtrado and len(sigem) != total:
-        pill += f" · {br_num(total - len(sigem))} fora do filtro"
+    if len(sigem) != total:
+        pill += f" · {br_num(total - len(sigem))} fora do nosso controle"
     render_header("Base SIGEM", extra_pill=pill)
 
     status_options = ["Todos"] + sorted(sigem["STATUS"].dropna().unique().tolist())
@@ -12911,7 +12916,7 @@ def main():
     relatorios_page = st.Page(lambda: _sob_carga("Carregando os relatórios", lambda: render_relatorios(esperados, resumo, tags, sigem, cache_key)), title="Relatórios", icon=":material/description:", url_path="relatorios")
     progresso_page = st.Page(lambda: _sob_carga("Abrindo o Progresso", lambda: render_progresso(resumo, esperados, tags, sigem, cache_key)), title="Progresso", icon=":material/insights:", url_path="progresso")
     pesquisa_page = st.Page(lambda: _sob_carga("Carregando as tags", lambda: render_pesquisa_tag(resumo, esperados, tags, sigem, cache_key, lancamento, depara)), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
-    sigem_page = st.Page(lambda: _sob_carga("Carregando a base SIGEM", lambda: render_sigem(sigem, esperados, any(escolhas.values()))), title="Base SIGEM", icon=":material/database:", url_path="sigem")
+    sigem_page = st.Page(lambda: _sob_carga("Carregando a base SIGEM", lambda: render_sigem(sigem, esperados)), title="Base SIGEM", icon=":material/database:", url_path="sigem")
     gitec_page = st.Page(lambda: _sob_carga("Carregando a medição de campo", lambda: render_gitec(gitec_f, resumo, tags, esperados, sigem, cache_key)), title="Gitec", icon=":material/engineering:", url_path="gitec")
     planta_page = st.Page(lambda: _sob_carga("Desenhando o avanço na planta", lambda: render_planta(tags, resumo, locacao, aux_areas, esperados, sigem, cache_key)), title="Planta", icon=":material/map:", url_path="planta")
     certificacao_page = st.Page(lambda: _sob_carga("Montando a cadeia de certificação", lambda: render_certificacao(tags, lancamento, depara, resumo, esperados, sigem, cache_key)), title="Certificação", icon=":material/fact_check:", url_path="certificacao")
