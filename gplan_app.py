@@ -4229,8 +4229,30 @@ def sup_por_tag(itens: pd.DataFrame, hoje: pd.Timestamp) -> dict[str, dict]:
     return por_tag
 
 
+def sup_historico_html(tag: str, movs: pd.DataFrame) -> str:
+    """Historico de mudanca de status desta TAG, direto de 14_MOVIMENTACOES
+    (tipo "suprimento") -- Fase 2: o pipeline grava aqui a cada atualização,
+    comparando o que a TAG tinha antes com o que ela tem agora. Sem essa
+    aba (planilha de antes da Fase 2) ou sem nenhuma mudança ainda pra essa
+    TAG, mostra a nota em vez de um painel vazio.
+    """
+    if movs.empty or "TIPO" not in movs.columns:
+        return '<p class="fx-nota">Histórico ainda não disponível nesta planilha.</p>'
+    hist = movs[(movs["TIPO"] == "suprimento") & (movs["OBJETO"].astype(str) == tag)]
+    if hist.empty:
+        return '<p class="fx-nota">Nenhuma mudança de status registrada ainda para esta TAG.</p>'
+    hist = hist.sort_values("DATA", ascending=False)
+    linhas = "".join(
+        f'<div class="sup-tl-linha"><span class="sup-tl-marca warn"></span>'
+        f'<span class="sup-tl-corpo"><span class="sup-tl-fase">'
+        f'{esc(r["DE"])} &rarr; {esc(r["PARA"])}</span>'
+        f'<span class="sup-tl-data">{esc(r["DATA"])}</span></span></div>'
+        for _, r in hist.iterrows())
+    return f'<div class="sup-tl">{linhas}</div>'
+
+
 def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
-                       hoje: pd.Timestamp) -> str:
+                       hoje: pd.Timestamp, movimentacoes: pd.DataFrame) -> str:
     tiles = (
         fx_tile("Itens de suprimento", br_num(resumo_tag["n_itens"]), "caixa", "#5b8def")
         + fx_tile("Recebidos", br_num(resumo_tag["recebidos"]), "ok", "#34d399")
@@ -4252,6 +4274,8 @@ def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
             + fx_dado("Progresso total", br_pct(r["TOTAL_PROGRESSO"]))
             + "</div>"
             + sup_timeline_html(r["_fases"]))
+    corpo += fx_painel("Histórico de mudanças de status", "relogio",
+                       sup_historico_html(tag, movimentacoes))
     return (f'<div class="fx"><div class="fx-cab"><span class="marca">{fx_svg("tag")}</span>'
             f'<div><h2>{esc(tag)}</h2><p>Rastreabilidade de suprimento</p></div></div>'
             f'<div class="fx-tiles">{tiles}</div>'
@@ -4260,15 +4284,17 @@ def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
 
 
 def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
-                       tags: pd.DataFrame, cache_key: str = ""):
-    """Rastreabilidade de suprimento por TAG -- Fase 1: estado atual da
-    09_BASE_SUPRIMENTOS.xlsx (Mapa de Suprimentos UDA, só Instrumentação).
+                       tags: pd.DataFrame, movimentacoes: pd.DataFrame,
+                       cache_key: str = ""):
+    """Rastreabilidade de suprimento por TAG -- estado atual da
+    09_BASE_SUPRIMENTOS.xlsx (Mapa de Suprimentos UDA, só Instrumentação)
+    mais o histórico de mudança de status por TAG (Fase 2, gravado pelo
+    pipeline em 14_MOVIMENTACOES, tipo "suprimento").
 
     Não é a planilha exibida: cada item guarda o ciclo inteiro (Requisição
     até Entrega na Obra, com Previsto/Reprogramado/Real por etapa), e essa
     tela responde "qual é a situação do suprimento de cada TAG", não "qual é
-    a linha da planilha". Fase 2 (pipeline) acrescenta o histórico dia-a-dia
-    por cima disso, sem mudar o que já está aqui.
+    a linha da planilha".
     """
     render_header("Suprimentos")
     if itens.empty:
@@ -4371,7 +4397,7 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
                   '<a class="fmodal-bg" href="#fechado" aria-label="Fechar"></a>'
                   '<div class="fmodal-box">'
                   '<a class="fmodal-x" href="#fechado" aria-label="Fechar">&times;</a>'
-                  f'{sup_ficha_tag_html(tag, itens_tag, resumo_tags[tag], hoje)}'
+                  f'{sup_ficha_tag_html(tag, itens_tag, resumo_tags[tag], hoje, movimentacoes)}'
                   "</div></div>")
     render_html(fichas)
 
@@ -13270,7 +13296,7 @@ def main():
         render_perfil_lateral()
 
     dashboard_page = st.Page(lambda: _sob_carga("Carregando o painel", lambda: render_dashboard(resumo, esperados, tags, sigem, cache_key)), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
-    suprimentos_page = st.Page(lambda: _sob_carga("Carregando suprimentos", lambda: render_suprimentos(suprimentos_itens, suprimentos_estoque, tags, cache_key)), title="Suprimentos", icon=":material/local_shipping:", url_path="suprimentos")
+    suprimentos_page = st.Page(lambda: _sob_carga("Carregando suprimentos", lambda: render_suprimentos(suprimentos_itens, suprimentos_estoque, tags, movimentacoes, cache_key)), title="Suprimentos", icon=":material/local_shipping:", url_path="suprimentos")
     relatorios_page = st.Page(lambda: _sob_carga("Carregando os relatórios", lambda: render_relatorios(esperados, resumo, tags, sigem, cache_key)), title="Relatórios", icon=":material/description:", url_path="relatorios")
     progresso_page = st.Page(lambda: _sob_carga("Abrindo o Progresso", lambda: render_progresso(resumo, esperados, tags, sigem, cache_key)), title="Progresso", icon=":material/insights:", url_path="progresso")
     pesquisa_page = st.Page(lambda: _sob_carga("Carregando as tags", lambda: render_pesquisa_tag(resumo, esperados, tags, sigem, cache_key, lancamento, depara)), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
