@@ -9255,14 +9255,15 @@ UA_TOM = {"SEM COMENTÁRIOS": "ok", "PARA CONSTRUÇÃO": "ok", "CERTIFICADO": "o
 UA_CHEGADA = {"MONTADO": "ok", "CONCLUÍDO": "ok", "CONCLUIDO": "ok", "LOCALIZADO": "ok",
               "EM PROGRAMAÇÃO": "warn", "EM ANDAMENTO": "warn", "PROGRAMADO": "warn",
               "NÃO MONTADO": "crit", "NÃO LOCALIZADO": "crit", "NÃO INICIADO": "crit",
-              "NÃO PROGRAMADO": "crit", "REMOVER": "crit"}
+              "NÃO PROGRAMADO": "crit", "REMOVER": "crit", "HOLD": "crit",
+              "CANCELADO": "crit", "MAT PRONTO": "ok"}
 
 UA_MESES = ["jan", "fev", "mar", "abr", "mai", "jun",
             "jul", "ago", "set", "out", "nov", "dez"]
 
 # A frente de cada tipo de movimentação, na ordem em que aparece na tela.
 UA_FRENTES = {"documento": "Documento", "montagem": "Montagem", "cabo": "Cabo",
-              "campo": "Campo", "cadastro": "Cadastro"}
+              "campo": "Campo", "suprimento": "Suprimento", "cadastro": "Cadastro"}
 
 # Quantos dias a aba mostra. Quem usou o sistema ontem ou na semana passada
 # abre e vê o que mudou de lá para cá, sem escolher nada.
