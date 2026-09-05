@@ -44,15 +44,6 @@ LOCAL_EXCEL_FALLBACK = os.path.join(
 )
 SUPABASE_BUCKET = "gplan-data"
 SUPABASE_FILE_PATH = "CONTROLE_DOCUMENTAL_INSTRUMENTACAO_ATUAL.xlsx"
-# Suprimentos ainda nao passa pelo pipeline (isso e a Fase 2, que vai gravar
-# historico igual a 14_MOVIMENTACOES) -- por enquanto le direto da base bruta
-# que o Daniel atualiza na pasta de bases, fora da planilha combinada.
-SUPRIMENTOS_LOCAL_FALLBACK = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..",
-    "Controle de Relatório dos Instrumentos", "00_BASES_ATUALIZACAO",
-    "00_COLOCAR_ATUALIZADAS_AQUI", "09_BASE_SUPRIMENTOS.xlsx",
-)
-SUPRIMENTOS_FILE_PATH = "09_BASE_SUPRIMENTOS.xlsx"
 PAGE_SIZE = 100
 # O Render roda em UTC; sem converter, o cabecalho mostrava 3h a mais.
 BR_TZ = "America/Sao_Paulo"
@@ -322,76 +313,39 @@ def get_source_cache_key() -> str:
     return str(os.path.getmtime(LOCAL_EXCEL_FALLBACK)) if os.path.exists(LOCAL_EXCEL_FALLBACK) else "missing"
 
 
-@st.cache_data(ttl=60)
-def get_suprimentos_cache_key() -> str:
-    """Independente do cache_key da planilha principal -- a 09_BASE_
-    SUPRIMENTOS.xlsx e um arquivo a parte, atualizado no seu proprio ritmo."""
-    client = get_supabase_client()
-    if client is not None:
-        try:
-            files = client.storage.from_(SUPABASE_BUCKET).list()
-        except Exception:
-            return "missing"
-        for f in files:
-            if f["name"] == SUPRIMENTOS_FILE_PATH:
-                return f.get("updated_at", "") or f.get("id", "")
-        return "missing"
-    return (str(os.path.getmtime(SUPRIMENTOS_LOCAL_FALLBACK))
-            if os.path.exists(SUPRIMENTOS_LOCAL_FALLBACK) else "missing")
-
-
 # ==========================================================================
-#  Suprimentos -- leitura da 09_BASE_SUPRIMENTOS.xlsx
+#  Suprimentos -- leitura de 09_SUPRIMENTOS_ITENS/09_SUPRIMENTOS_ESTOQUE
 # ==========================================================================
-# A aba "Mapa de Suprimentos UDA" tem DUAS linhas de cabecalho (3 e 5) sobre
-# as MESMAS colunas -- a linha 3 e o rotulo generico ("Planejada"/
-# "Reprogramada"/"Realizada" repetido pra toda etapa), a linha 5 e o nome
-# tecnico especifico ("K.O.M. Previsto", "Recebimento LD Previsto"...). Nem
-# uma nem outra sozinha da nome unico pra cada coluna (a 3 repete "Planejada"
-# 15 vezes), entao o mapa aqui e por POSICAO, conferido direto na planilha
-# real -- ver memoria de sessao sobre a analise da 09_BASE_SUPRIMENTOS.
-SUP_LINHA_DADOS = 6  # 0-based: linha 7 da planilha, onde os dados comecam
-SUP_COL = {
-    "PROJETO": 1, "EAP_AREA": 2, "EAP_SUBAREA": 3, "EAP_SYSTEM": 4,
-    "DISCIPLINA": 5, "PROCESSO": 6, "REQUISICAO": 7, "REV": 8,
-    "DATA_APROVACAO_RM": 9, "TITULO": 10, "TAG": 11, "IDENT_CODE": 12,
-    "CODIGO_CLIENTE": 13, "DESCRICAO_MATERIAL": 14, "UNIDADE": 15,
-    "QTDE": 16, "SALDO_COMPRA": 17, "PACOTE_SUPRIMENTOS": 18,
-    "CRITICIDADE": 19, "PRIORIDADE": 20, "NECESSIDADE_OBRA": 21,
-    "STATUS_PW": 25, "DATA_PW": 26, "STATUS_SIGEM": 27, "DATA_SIGEM": 28,
-    "NUMERO_PATEC": 38, "NUM_PEDIDO_COMPRA": 51, "QTDE_PC": 52,
-    "FORNECEDOR": 53, "CATEGORIA_MATERIAL": 54, "LOCAL_EMBARQUE": 55,
-    "INCOTERM": 56, "PRAZO_DIAS": 57, "CATEGORIA_DILIGENCIAMENTO": 58,
-    "DILIGENCIADOR": 59, "NUM_SOLICITACAO_INSPECAO": 95,
-    "NUM_RELATORIO_INSPECAO": 97, "NUMERO_CLM": 102, "DATA_CLM": 103,
-    "STATUS": 108, "TOTAL_PROGRESSO": 109, "SEMANA_UDA_REAL": 111,
-    "SEMANA_UDA": 112,
-}
-# Cada etapa do ciclo de suprimento, na ordem em que acontece -- (rotulo,
-# col_previsto, col_reprogramado, col_real). So entra na timeline de um item
-# a etapa que tiver ALGUM dos tres preenchido; sem isso a ficha mostraria 20
-# etapas vazias pra um item simples que só passou por Requisição/PW/SIGEM/PO.
+# As duas abas ja vem prontas na planilha combinada -- o pipeline
+# (update_current_workbook_from_bases.py, load_suprimentos_itens/estoque)
+# le a 09_BASE_SUPRIMENTOS.xlsx bruta (que tem duas linhas de cabecalho
+# sobre as mesmas colunas, e so o pipeline sabe a posicao de cada uma) e
+# grava aqui com nome de coluna normal, um por etapa do ciclo de compra --
+# usuario, 2026-09-05: "faça com que a base 09 ja fique inclusa no
+# processo da base oficial". So Instrumentacao entra (recorte ja feito no
+# pipeline).
+#
+# Cada etapa do ciclo, na ordem em que acontece -- (rotulo, codigo da
+# coluna no pipeline: <codigo>_PREVISTO/_REPROG/_REAL). So entra na
+# timeline de um item a etapa que tiver ALGUM dos tres preenchido; sem
+# isso a ficha mostraria 20 etapas vazias pra um item simples que só
+# passou por Requisição/PW/SIGEM/PO.
 SUP_FASES = [
-    ("Requisição", 22, 23, 24),
-    ("Cotação", 29, 30, 31),
-    ("Recebimento de proposta", 32, 33, 34),
-    ("Envio engenharia (PATEC)", 35, 36, 37),
-    ("Emissão PW", 39, 40, 41),
-    ("Envio SIGEM", 42, 43, 44),
-    ("PATEC aprovado", 45, 46, 47),
-    ("Pedido de compra", 48, 49, 50),
-    ("K.O.M.", 61, 62, 63),
-    ("Recebimento de LD", 64, 65, 66),
-    ("Recebimento de cronograma", 67, 68, 69),
-    ("P.I.M.", 70, 71, 72),
-    ("Recebimento PIT", 73, 74, 75),
-    ("Aprovação DF p/ fabricação", 76, 77, 78),
-    ("Aquisição de matéria-prima", 79, 80, 81),
-    ("Início da fabricação", 82, 83, 84),
-    ("Término da fabricação", 85, 86, 87),
-    ("Inspeção final", 89, 91, 93),
-    ("Embarque nacional", 99, 100, 101),
-    ("Entrega na obra", 105, 106, 107),
+    ("Requisição", "REQUISICAO"), ("Cotação", "COTACAO"),
+    ("Recebimento de proposta", "RECEB_PROPOSTA"),
+    ("Envio engenharia (PATEC)", "ENVIO_ENG"), ("Emissão PW", "EMISSAO_PW"),
+    ("Envio SIGEM", "ENVIO_SIGEM"), ("PATEC aprovado", "PATEC_APROVADO"),
+    ("Pedido de compra", "PEDIDO_COMPRA"), ("K.O.M.", "KOM"),
+    ("Recebimento de LD", "RECEB_LD"),
+    ("Recebimento de cronograma", "RECEB_CRONOGRAMA"), ("P.I.M.", "PIM"),
+    ("Recebimento PIT", "RECEB_PIT"),
+    ("Aprovação DF p/ fabricação", "APROV_DF"),
+    ("Aquisição de matéria-prima", "AQUISICAO_MP"),
+    ("Início da fabricação", "INICIO_FAB"),
+    ("Término da fabricação", "TERMINO_FAB"),
+    ("Inspeção final", "INSPECAO_FINAL"),
+    ("Embarque nacional", "EMBARQUE_NACIONAL"),
+    ("Entrega na obra", "ENTREGA_OBRA"),
 ]
 
 
@@ -405,45 +359,22 @@ def _sup_data(v):
     return None if pd.isna(d) else d
 
 
-@st.cache_data(show_spinner=False)
-def carregar_suprimentos(_client, cache_key: str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Le a 09_BASE_SUPRIMENTOS.xlsx (Supabase, ou a pasta de bases local) e
-    devolve (itens, estoque) -- ainda sem historico, isso e a Fase 2.
+def carregar_suprimentos(excel_file: pd.ExcelFile) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Le 09_SUPRIMENTOS_ITENS/09_SUPRIMENTOS_ESTOQUE da planilha combinada
+    -- devolve (itens, estoque). Ainda sem historico dia-a-dia (isso e a
+    Fase 2, no pipeline, igual a 14_MOVIMENTACOES).
 
-    "Mapa de Suprimentos UDA" e recortado so pra Disciplina = Instrumentação
-    (as outras 4.795 linhas sao Tubulação/Mecânica/Elétrica/etc., fora do
-    escopo do Gplan). Cada linha e um material de uma requisição -- uma TAG
-    pode ter 0, 1 ou vários (9 TAGs na base de hoje têm mais de um).
+    Cada linha de itens e um material de uma requisição -- uma TAG pode ter
+    0, 1 ou vários (9 TAGs na base de hoje têm mais de um). Planilha de
+    antes desta integração (sem essas abas) degrada pra vazio, em vez de
+    quebrar.
     """
     vazio = (pd.DataFrame(), pd.DataFrame())
-    source = None
-    if _client is not None:
-        try:
-            file_bytes = _client.storage.from_(SUPABASE_BUCKET).download(SUPRIMENTOS_FILE_PATH)
-            source = io.BytesIO(file_bytes)
-        except Exception:
-            source = None
-    if source is None:
-        if os.path.exists(SUPRIMENTOS_LOCAL_FALLBACK):
-            source = SUPRIMENTOS_LOCAL_FALLBACK
-        else:
-            return vazio
-
-    try:
-        xf = pd.ExcelFile(source)
-    except Exception:
-        return vazio
-    if "Mapa de Suprimentos UDA" not in xf.sheet_names:
+    if "09_SUPRIMENTOS_ITENS" not in excel_file.sheet_names:
         return vazio
 
-    bruto = pd.read_excel(xf, sheet_name="Mapa de Suprimentos UDA",
-                          header=None, skiprows=SUP_LINHA_DADOS)
-    disciplina = bruto[SUP_COL["DISCIPLINA"]].apply(_sup_texto)
-    bruto = bruto[disciplina.str.contains("nstrumenta", case=False, na=False)].copy()
-    bruto = bruto.reset_index(names="_linha")  # identidade do item: a própria linha da planilha
-
-    itens = pd.DataFrame({nome: bruto[col] for nome, col in SUP_COL.items()})
-    itens["_linha"] = bruto["_linha"]
+    itens = pd.read_excel(excel_file, sheet_name="09_SUPRIMENTOS_ITENS")
+    itens = itens.reset_index(names="_linha")
     for c in ("TAG", "REQUISICAO", "TITULO", "IDENT_CODE", "DESCRICAO_MATERIAL",
               "FORNECEDOR", "CATEGORIA_MATERIAL", "STATUS", "STATUS_PW",
               "STATUS_SIGEM", "PACOTE_SUPRIMENTOS", "PRIORIDADE",
@@ -457,22 +388,22 @@ def carregar_suprimentos(_client, cache_key: str) -> tuple[pd.DataFrame, pd.Data
 
     # As fases de cada item, so as que tem algum dado -- ver SUP_FASES.
     fases_por_linha: dict[int, list] = {}
-    for _, r in bruto.iterrows():
-        linha = r["_linha"]
+    for _, r in itens.iterrows():
         fases = []
-        for rotulo, c_prev, c_reprog, c_real in SUP_FASES:
-            prev, reprog, real = (_sup_data(r[c_prev]), _sup_data(r[c_reprog]),
-                                  _sup_data(r[c_real]))
+        for rotulo, codigo in SUP_FASES:
+            prev = _sup_data(r[f"{codigo}_PREVISTO"])
+            reprog = _sup_data(r[f"{codigo}_REPROG"])
+            real = _sup_data(r[f"{codigo}_REAL"])
             if prev is None and reprog is None and real is None:
                 continue
             fases.append({"fase": rotulo, "previsto": prev, "reprogramado": reprog,
                           "real": real, "concluida": real is not None})
-        fases_por_linha[linha] = fases
+        fases_por_linha[r["_linha"]] = fases
     itens["_fases"] = itens["_linha"].map(fases_por_linha)
 
     estoque = pd.DataFrame()
-    if "almoxarifado-estoque-smat" in xf.sheet_names:
-        estoque = pd.read_excel(xf, sheet_name="almoxarifado-estoque-smat")
+    if "09_SUPRIMENTOS_ESTOQUE" in excel_file.sheet_names:
+        estoque = pd.read_excel(excel_file, sheet_name="09_SUPRIMENTOS_ESTOQUE")
         estoque.columns = [str(c).strip() for c in estoque.columns]
 
     return itens, estoque
@@ -536,9 +467,12 @@ def load_data(cache_key: str):
                      if "14_MOVIMENTACOES" in excel_file.sheet_names
                      else pd.DataFrame(columns=["DATA", "TIPO", "OBJETO", "CAMPO",
                                                 "DE", "PARA", "QTD_TAGS"]))
+    # Suprimentos ja vem pronto na combinada -- ver carregar_suprimentos.
+    suprimentos_itens, suprimentos_estoque = carregar_suprimentos(excel_file)
     resumo = aplicar_regra_aprovados(resumo, esperados)
     return (tags, cabos, tubing, sigem, resumo, esperados, gitec, locacao,
-            aux_areas, lancamento, depara, movimentacoes)
+            aux_areas, lancamento, depara, movimentacoes,
+            suprimentos_itens, suprimentos_estoque)
 
 
 # Um relatorio so conta como avanco depois de aprovado pela fiscalizacao.
@@ -13307,10 +13241,8 @@ def main():
     st.session_state["gplan_atualizado_em"] = data_atualizacao(fonte)
     st.session_state["gplan_fonte"] = fonte_dados(fonte)
     (tags, cabos, tubing, sigem, resumo, esperados,
-     gitec, locacao, aux_areas, lancamento, depara, movimentacoes) = load_data(cache_key)
-    # Arquivo a parte, fora da planilha combinada -- ver carregar_suprimentos.
-    suprimentos_itens, suprimentos_estoque = carregar_suprimentos(
-        get_supabase_client(), get_suprimentos_cache_key())
+     gitec, locacao, aux_areas, lancamento, depara, movimentacoes,
+     suprimentos_itens, suprimentos_estoque) = load_data(cache_key)
 
     with st.sidebar:
         render_html(
