@@ -44,6 +44,15 @@ LOCAL_EXCEL_FALLBACK = os.path.join(
 )
 SUPABASE_BUCKET = "gplan-data"
 SUPABASE_FILE_PATH = "CONTROLE_DOCUMENTAL_INSTRUMENTACAO_ATUAL.xlsx"
+# Suprimentos ainda nao passa pelo pipeline (isso e a Fase 2, que vai gravar
+# historico igual a 14_MOVIMENTACOES) -- por enquanto le direto da base bruta
+# que o Daniel atualiza na pasta de bases, fora da planilha combinada.
+SUPRIMENTOS_LOCAL_FALLBACK = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..",
+    "Controle de Relatório dos Instrumentos", "00_BASES_ATUALIZACAO",
+    "00_COLOCAR_ATUALIZADAS_AQUI", "09_BASE_SUPRIMENTOS.xlsx",
+)
+SUPRIMENTOS_FILE_PATH = "09_BASE_SUPRIMENTOS.xlsx"
 PAGE_SIZE = 100
 # O Render roda em UTC; sem converter, o cabecalho mostrava 3h a mais.
 BR_TZ = "America/Sao_Paulo"
@@ -311,6 +320,162 @@ def get_source_cache_key() -> str:
                 return f.get("updated_at", "") or f.get("id", "")
         return "missing"
     return str(os.path.getmtime(LOCAL_EXCEL_FALLBACK)) if os.path.exists(LOCAL_EXCEL_FALLBACK) else "missing"
+
+
+@st.cache_data(ttl=60)
+def get_suprimentos_cache_key() -> str:
+    """Independente do cache_key da planilha principal -- a 09_BASE_
+    SUPRIMENTOS.xlsx e um arquivo a parte, atualizado no seu proprio ritmo."""
+    client = get_supabase_client()
+    if client is not None:
+        try:
+            files = client.storage.from_(SUPABASE_BUCKET).list()
+        except Exception:
+            return "missing"
+        for f in files:
+            if f["name"] == SUPRIMENTOS_FILE_PATH:
+                return f.get("updated_at", "") or f.get("id", "")
+        return "missing"
+    return (str(os.path.getmtime(SUPRIMENTOS_LOCAL_FALLBACK))
+            if os.path.exists(SUPRIMENTOS_LOCAL_FALLBACK) else "missing")
+
+
+# ==========================================================================
+#  Suprimentos -- leitura da 09_BASE_SUPRIMENTOS.xlsx
+# ==========================================================================
+# A aba "Mapa de Suprimentos UDA" tem DUAS linhas de cabecalho (3 e 5) sobre
+# as MESMAS colunas -- a linha 3 e o rotulo generico ("Planejada"/
+# "Reprogramada"/"Realizada" repetido pra toda etapa), a linha 5 e o nome
+# tecnico especifico ("K.O.M. Previsto", "Recebimento LD Previsto"...). Nem
+# uma nem outra sozinha da nome unico pra cada coluna (a 3 repete "Planejada"
+# 15 vezes), entao o mapa aqui e por POSICAO, conferido direto na planilha
+# real -- ver memoria de sessao sobre a analise da 09_BASE_SUPRIMENTOS.
+SUP_LINHA_DADOS = 6  # 0-based: linha 7 da planilha, onde os dados comecam
+SUP_COL = {
+    "PROJETO": 1, "EAP_AREA": 2, "EAP_SUBAREA": 3, "EAP_SYSTEM": 4,
+    "DISCIPLINA": 5, "PROCESSO": 6, "REQUISICAO": 7, "REV": 8,
+    "DATA_APROVACAO_RM": 9, "TITULO": 10, "TAG": 11, "IDENT_CODE": 12,
+    "CODIGO_CLIENTE": 13, "DESCRICAO_MATERIAL": 14, "UNIDADE": 15,
+    "QTDE": 16, "SALDO_COMPRA": 17, "PACOTE_SUPRIMENTOS": 18,
+    "CRITICIDADE": 19, "PRIORIDADE": 20, "NECESSIDADE_OBRA": 21,
+    "STATUS_PW": 25, "DATA_PW": 26, "STATUS_SIGEM": 27, "DATA_SIGEM": 28,
+    "NUMERO_PATEC": 38, "NUM_PEDIDO_COMPRA": 51, "QTDE_PC": 52,
+    "FORNECEDOR": 53, "CATEGORIA_MATERIAL": 54, "LOCAL_EMBARQUE": 55,
+    "INCOTERM": 56, "PRAZO_DIAS": 57, "CATEGORIA_DILIGENCIAMENTO": 58,
+    "DILIGENCIADOR": 59, "NUM_SOLICITACAO_INSPECAO": 95,
+    "NUM_RELATORIO_INSPECAO": 97, "NUMERO_CLM": 102, "DATA_CLM": 103,
+    "STATUS": 108, "TOTAL_PROGRESSO": 109, "SEMANA_UDA_REAL": 111,
+    "SEMANA_UDA": 112,
+}
+# Cada etapa do ciclo de suprimento, na ordem em que acontece -- (rotulo,
+# col_previsto, col_reprogramado, col_real). So entra na timeline de um item
+# a etapa que tiver ALGUM dos tres preenchido; sem isso a ficha mostraria 20
+# etapas vazias pra um item simples que só passou por Requisição/PW/SIGEM/PO.
+SUP_FASES = [
+    ("Requisição", 22, 23, 24),
+    ("Cotação", 29, 30, 31),
+    ("Recebimento de proposta", 32, 33, 34),
+    ("Envio engenharia (PATEC)", 35, 36, 37),
+    ("Emissão PW", 39, 40, 41),
+    ("Envio SIGEM", 42, 43, 44),
+    ("PATEC aprovado", 45, 46, 47),
+    ("Pedido de compra", 48, 49, 50),
+    ("K.O.M.", 61, 62, 63),
+    ("Recebimento de LD", 64, 65, 66),
+    ("Recebimento de cronograma", 67, 68, 69),
+    ("P.I.M.", 70, 71, 72),
+    ("Recebimento PIT", 73, 74, 75),
+    ("Aprovação DF p/ fabricação", 76, 77, 78),
+    ("Aquisição de matéria-prima", 79, 80, 81),
+    ("Início da fabricação", 82, 83, 84),
+    ("Término da fabricação", 85, 86, 87),
+    ("Inspeção final", 89, 91, 93),
+    ("Embarque nacional", 99, 100, 101),
+    ("Entrega na obra", 105, 106, 107),
+]
+
+
+def _sup_texto(v) -> str:
+    s = str(v).strip() if v is not None else ""
+    return "" if s.lower() in ("nan", "nat", "none", "-") else s
+
+
+def _sup_data(v):
+    d = pd.to_datetime(v, errors="coerce", dayfirst=True)
+    return None if pd.isna(d) else d
+
+
+@st.cache_data(show_spinner=False)
+def carregar_suprimentos(_client, cache_key: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Le a 09_BASE_SUPRIMENTOS.xlsx (Supabase, ou a pasta de bases local) e
+    devolve (itens, estoque) -- ainda sem historico, isso e a Fase 2.
+
+    "Mapa de Suprimentos UDA" e recortado so pra Disciplina = Instrumentação
+    (as outras 4.795 linhas sao Tubulação/Mecânica/Elétrica/etc., fora do
+    escopo do Gplan). Cada linha e um material de uma requisição -- uma TAG
+    pode ter 0, 1 ou vários (9 TAGs na base de hoje têm mais de um).
+    """
+    vazio = (pd.DataFrame(), pd.DataFrame())
+    source = None
+    if _client is not None:
+        try:
+            file_bytes = _client.storage.from_(SUPABASE_BUCKET).download(SUPRIMENTOS_FILE_PATH)
+            source = io.BytesIO(file_bytes)
+        except Exception:
+            source = None
+    if source is None:
+        if os.path.exists(SUPRIMENTOS_LOCAL_FALLBACK):
+            source = SUPRIMENTOS_LOCAL_FALLBACK
+        else:
+            return vazio
+
+    try:
+        xf = pd.ExcelFile(source)
+    except Exception:
+        return vazio
+    if "Mapa de Suprimentos UDA" not in xf.sheet_names:
+        return vazio
+
+    bruto = pd.read_excel(xf, sheet_name="Mapa de Suprimentos UDA",
+                          header=None, skiprows=SUP_LINHA_DADOS)
+    disciplina = bruto[SUP_COL["DISCIPLINA"]].apply(_sup_texto)
+    bruto = bruto[disciplina.str.contains("nstrumenta", case=False, na=False)].copy()
+    bruto = bruto.reset_index(names="_linha")  # identidade do item: a própria linha da planilha
+
+    itens = pd.DataFrame({nome: bruto[col] for nome, col in SUP_COL.items()})
+    itens["_linha"] = bruto["_linha"]
+    for c in ("TAG", "REQUISICAO", "TITULO", "IDENT_CODE", "DESCRICAO_MATERIAL",
+              "FORNECEDOR", "CATEGORIA_MATERIAL", "STATUS", "STATUS_PW",
+              "STATUS_SIGEM", "PACOTE_SUPRIMENTOS", "PRIORIDADE",
+              "DILIGENCIADOR", "SEMANA_UDA", "SEMANA_UDA_REAL"):
+        itens[c] = itens[c].apply(_sup_texto)
+    for c in ("DATA_PW", "DATA_SIGEM", "DATA_APROVACAO_RM", "DATA_CLM"):
+        itens[c] = itens[c].apply(_sup_data)
+    itens["QTDE"] = pd.to_numeric(itens["QTDE"], errors="coerce").fillna(0.0)
+    itens["TOTAL_PROGRESSO"] = pd.to_numeric(
+        itens["TOTAL_PROGRESSO"], errors="coerce").fillna(0.0)
+
+    # As fases de cada item, so as que tem algum dado -- ver SUP_FASES.
+    fases_por_linha: dict[int, list] = {}
+    for _, r in bruto.iterrows():
+        linha = r["_linha"]
+        fases = []
+        for rotulo, c_prev, c_reprog, c_real in SUP_FASES:
+            prev, reprog, real = (_sup_data(r[c_prev]), _sup_data(r[c_reprog]),
+                                  _sup_data(r[c_real]))
+            if prev is None and reprog is None and real is None:
+                continue
+            fases.append({"fase": rotulo, "previsto": prev, "reprogramado": reprog,
+                          "real": real, "concluida": real is not None})
+        fases_por_linha[linha] = fases
+    itens["_fases"] = itens["_linha"].map(fases_por_linha)
+
+    estoque = pd.DataFrame()
+    if "almoxarifado-estoque-smat" in xf.sheet_names:
+        estoque = pd.read_excel(xf, sheet_name="almoxarifado-estoque-smat")
+        estoque.columns = [str(c).strip() for c in estoque.columns]
+
+    return itens, estoque
 
 
 @st.cache_data(show_spinner="Carregando planilha...")
@@ -2297,6 +2462,25 @@ def inject_css():
         .fx-dado .val { font-size:14px; font-weight:700; color:var(--text-1); margin-top:4px;
                         overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
+        /* timeline de fases do suprimento (ficha de TAG, aba Suprimentos) */
+        .sup-tl { display:flex; flex-direction:column; margin-top:10px; }
+        .sup-tl-linha { display:grid; grid-template-columns:14px 1fr; gap:10px;
+                        padding:0 0 14px 3px; position:relative; }
+        .sup-tl-linha:not(:last-child)::before {
+          content:""; position:absolute; left:9.5px; top:14px; bottom:0;
+          width:1px; background:var(--border-color); }
+        .sup-tl-marca { width:11px; height:11px; border-radius:50%; margin-top:2px;
+                        border:2px solid var(--dark-card); z-index:1; }
+        .sup-tl-marca.ok { background:var(--accent-teal); }
+        .sup-tl-marca.warn { background:var(--accent-amber); }
+        .sup-tl-marca.mudo { background:var(--text-3); }
+        .sup-tl-corpo { display:flex; align-items:baseline; justify-content:space-between;
+                        gap:10px; flex-wrap:wrap; }
+        .sup-tl-fase { font-size:12.5px; font-weight:600; color:var(--text-1); }
+        .sup-tl-data { font-size:11.5px; color:var(--text-2); font-variant-numeric:tabular-nums;
+                       white-space:nowrap; }
+        .sup-tl-data i { font-style:normal; color:var(--text-3); margin-left:5px; }
+
         /* rosca */
         .fx-rosca { position:relative; width:112px; aspect-ratio:1; }
         .fx-rosca .centro { position:absolute; inset:0; display:grid; place-content:center;
@@ -4019,6 +4203,243 @@ def render_dashboard(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.Dat
         + fichas_completas(top["TAG"].tolist(), resumo, esperados, tags, sigem, cache_key,
                            origem="dash")
     )
+
+
+# ==========================================================================
+#  Suprimentos -- rastreabilidade de materiais por TAG (Fase 1: estado atual,
+#  sem historico dia-a-dia ainda -- isso e a Fase 2, no pipeline)
+# ==========================================================================
+SUP_STATUS_TOM = {
+    "CONCLUIDO": "ok", "MAT PRONTO": "ok", "CANCELADO": "andamento", "HOLD": "crit",
+}
+
+
+def sup_situacao(row: pd.Series, hoje: pd.Timestamp) -> tuple[str, str]:
+    """Situação do item -- rótulo e tom (classe gtbl-badge).
+
+    Recebido/Cancelado não têm prazo pra checar -- já saíram da fila. Pra
+    quem ainda está andando, o atraso é medido pela primeira fase AINDA não
+    concluída (a que está segurando o item): se ela tem data prevista ou
+    reprogramada no passado, está atrasada; sem nenhuma data pra comparar,
+    fica "Sem previsão" em vez de arriscar um veredito sem base.
+    """
+    status = row["STATUS"]
+    if status == "CONCLUIDO":
+        return "Recebido", "ok"
+    if status == "CANCELADO":
+        return "Cancelado", "andamento"
+    pendentes = [f for f in row["_fases"] if not f["concluida"]]
+    if not pendentes:
+        return ("Sem status" if not status else "Em andamento"), (
+            "mudo" if not status else "warn")
+    alvo = pendentes[0]
+    data = alvo["reprogramado"] or alvo["previsto"]
+    if data is None:
+        return "Em andamento", "warn"
+    if data.normalize() < hoje:
+        return "Atrasado", "crit"
+    return "Em andamento", "warn"
+
+
+def sup_status_pill(status: str) -> str:
+    if not status:
+        return '<span class="gtbl-badge mudo">Sem status</span>'
+    tom = SUP_STATUS_TOM.get(status, "warn")
+    return f'<span class="gtbl-badge {tom}">{esc(sentence_case(status))}</span>'
+
+
+def sup_timeline_html(fases: list) -> str:
+    """A cadeia de fases de um item, na ordem em que acontecem -- concluída
+    (data real) ou prevista (previsto/reprogramado), sem inventar as que
+    não têm nenhum dado (ver carregar_suprimentos)."""
+    if not fases:
+        return '<p class="fx-nota">Sem etapas registradas para este item.</p>'
+    linhas = []
+    for f in fases:
+        if f["concluida"]:
+            marca, data, sub = "ok", f["real"], "concluída"
+        else:
+            data = f["reprogramado"] or f["previsto"]
+            marca = "warn" if data else "mudo"
+            sub = ("reprogramada" if f["reprogramado"] else "prevista") if data else "sem data"
+        data_txt = f"{data:%d/%m/%Y}" if data is not None else "—"
+        linhas.append(
+            f'<div class="sup-tl-linha"><span class="sup-tl-marca {marca}"></span>'
+            f'<span class="sup-tl-corpo"><span class="sup-tl-fase">{esc(f["fase"])}</span>'
+            f'<span class="sup-tl-data">{data_txt}<i>{sub}</i></span></span></div>')
+    return f'<div class="sup-tl">{"".join(linhas)}</div>'
+
+
+def sup_por_tag(itens: pd.DataFrame, hoje: pd.Timestamp) -> dict[str, dict]:
+    """Consolida os itens de cada TAG num resumo -- uma TAG pode ter 0 a N."""
+    por_tag: dict[str, dict] = {}
+    for tag, grupo in itens[itens["TAG"] != ""].groupby("TAG"):
+        situacoes = [sup_situacao(r, hoje) for _, r in grupo.iterrows()]
+        n = len(grupo)
+        recebidos = sum(1 for s, _ in situacoes if s == "Recebido")
+        atrasados = sum(1 for s, _ in situacoes if s == "Atrasado")
+        cancelados = sum(1 for s, _ in situacoes if s == "Cancelado")
+        ativos = n - cancelados
+        if ativos == 0:
+            geral = "Cancelado"
+        elif recebidos == ativos:
+            geral = "100% recebido"
+        elif recebidos > 0:
+            geral = "Parcialmente recebido"
+        elif atrasados > 0:
+            geral = "Atrasado"
+        else:
+            geral = "Em fornecimento"
+        por_tag[tag] = {"n_itens": n, "recebidos": recebidos, "atrasados": atrasados,
+                        "cancelados": cancelados, "geral": geral}
+    return por_tag
+
+
+def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
+                       hoje: pd.Timestamp) -> str:
+    tiles = (
+        fx_tile("Itens de suprimento", br_num(resumo_tag["n_itens"]), "caixa", "#5b8def")
+        + fx_tile("Recebidos", br_num(resumo_tag["recebidos"]), "ok", "#34d399")
+        + fx_tile("Atrasados", br_num(resumo_tag["atrasados"]), "alerta", "#f87171")
+        + fx_tile("Situação geral", resumo_tag["geral"], "seta", "#9d6bff")
+    )
+    corpo = ""
+    for _, r in itens_tag.iterrows():
+        rotulo, tom = sup_situacao(r, hoje)
+        corpo += fx_painel(
+            r["DESCRICAO_MATERIAL"][:70].replace("\n", " "), "cabo",
+            f'<span class="gtbl-badge {tom}" style="margin-bottom:10px;display:inline-block;">'
+            f'{esc(rotulo)}</span>'
+            '<div class="fx-dados">'
+            + fx_dado("Requisição", r["REQUISICAO"] or "—")
+            + fx_dado("Fornecedor", r["FORNECEDOR"] or "—")
+            + fx_dado("Quantidade", f'{br_num(int(r["QTDE"]))} {r["UNIDADE"] or ""}'
+                      if r["QTDE"] else "—")
+            + fx_dado("Progresso total", br_pct(r["TOTAL_PROGRESSO"]))
+            + "</div>"
+            + sup_timeline_html(r["_fases"]))
+    return (f'<div class="fx"><div class="fx-cab"><span class="marca">{fx_svg("tag")}</span>'
+            f'<div><h2>{esc(tag)}</h2><p>Rastreabilidade de suprimento</p></div></div>'
+            f'<div class="fx-tiles">{tiles}</div>'
+            f'<div class="fx-corpo"><div class="fx-col" style="flex:1 1 100%">{corpo}'
+            "</div></div></div>")
+
+
+def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
+                       tags: pd.DataFrame, cache_key: str = ""):
+    """Rastreabilidade de suprimento por TAG -- Fase 1: estado atual da
+    09_BASE_SUPRIMENTOS.xlsx (Mapa de Suprimentos UDA, só Instrumentação).
+
+    Não é a planilha exibida: cada item guarda o ciclo inteiro (Requisição
+    até Entrega na Obra, com Previsto/Reprogramado/Real por etapa), e essa
+    tela responde "qual é a situação do suprimento de cada TAG", não "qual é
+    a linha da planilha". Fase 2 (pipeline) acrescenta o histórico dia-a-dia
+    por cima disso, sem mudar o que já está aqui.
+    """
+    render_header("Suprimentos")
+    if itens.empty:
+        render_html(
+            '<div class="gplan-panel"><div class="gtbl-empty">'
+            "Não encontrei a 09_BASE_SUPRIMENTOS.xlsx (nem no Supabase, nem na pasta "
+            "local de bases). Coloque o arquivo em "
+            "<code>00_BASES_ATUALIZACAO/00_COLOCAR_ATUALIZADAS_AQUI/</code>, ou suba "
+            "pro Supabase com esse nome, pra esta aba funcionar."
+            "</div></div>")
+        return
+
+    hoje = pd.Timestamp.now(tz=BR_TZ).tz_localize(None).normalize()
+    resumo_tags = sup_por_tag(itens, hoje)
+
+    tags_gplan = set(tags["TAG"].astype(str))
+    tags_com_sup = set(resumo_tags)
+    total_tags = len(tags_gplan)
+    com_sup = len(tags_com_sup & tags_gplan)
+    recebidas = sum(1 for r in resumo_tags.values() if r["geral"] == "100% recebido")
+    atrasadas = sum(1 for r in resumo_tags.values() if r["atrasados"] > 0)
+    pct_atendimento = (recebidas / com_sup * 100) if com_sup else 0.0
+
+    kpis = (
+        du_kpi("Total de TAGs", br_num(total_tags), "", 1.0, "#5b8def", "shield")
+        + du_kpi("Com suprimento identificado", br_num(com_sup),
+                 f"{br_pct(com_sup / total_tags * 100) if total_tags else '—'} do total",
+                 (com_sup / total_tags) if total_tags else 0, "#9d6bff", "documento")
+        + du_kpi("Sem suprimento identificado", br_num(total_tags - com_sup), "",
+                 (1 - com_sup / total_tags) if total_tags else 0, "#7c8aa8", "pasta")
+        + du_kpi("TAGs 100% recebidas", br_num(recebidas),
+                 f"{br_pct(pct_atendimento)} de atendimento",
+                 (recebidas / com_sup) if com_sup else 0, "#34d399", "check")
+        + du_kpi("TAGs com atraso", br_num(atrasadas), "", (atrasadas / com_sup) if com_sup else 0,
+                 "#f87171", "clock")
+    )
+    render_html(f'<section class="du-kpis">{kpis}</section>')
+
+    # -------------------------------------------------------- distribuição
+    contagem_status = itens["STATUS"].apply(lambda s: s or "Sem status").value_counts()
+    maior = int(contagem_status.max()) if len(contagem_status) else 1
+    linhas_status = "".join(
+        f'<div class="gr-row"><div class="gr-top"><span class="gr-nome">'
+        f'{esc(sentence_case(status) if status != "Sem status" else status)}</span>'
+        f'<span class="gr-pct">{br_num(int(qtd))}</span></div>'
+        f'<div class="gr-track"><div class="gr-fill" style="width:{qtd/maior*100:.1f}%;"></div></div></div>'
+        for status, qtd in contagem_status.items())
+    render_html(f'<div class="gplan-panel gr-panel"><div class="gplan-panel-title">'
+               f'Distribuição por status</div>{linhas_status}</div>')
+
+    # ------------------------------------------------------------- filtros
+    busca = st.text_input("Buscar TAG ou material", key="sup_busca",
+                          placeholder="Digite a TAG ou parte da descrição do material…")
+    status_opts = sorted({s for s in itens["STATUS"] if s})
+    col1, col2 = st.columns(2)
+    with col1:
+        sel_status = st.multiselect("Status", status_opts, key="sup_status")
+    with col2:
+        sel_situacao = st.multiselect(
+            "Situação", ["Recebido", "Em andamento", "Atrasado", "Cancelado", "Sem status"],
+            key="sup_situacao")
+
+    vista = itens.copy()
+    vista["_situacao"] = vista.apply(lambda r: sup_situacao(r, hoje)[0], axis=1)
+    if busca.strip():
+        alvo = busca.strip().upper()
+        vista = vista[vista["TAG"].str.upper().str.contains(alvo, na=False)
+                     | vista["DESCRICAO_MATERIAL"].str.upper().str.contains(alvo, na=False)]
+    if sel_status:
+        vista = vista[vista["STATUS"].isin(sel_status)]
+    if sel_situacao:
+        vista = vista[vista["_situacao"].isin(sel_situacao)]
+
+    # ----------------------------------------------------------- tabela
+    vista_pag = paginate(vista, "suprimentos", f"{busca}|{sel_status}|{sel_situacao}")
+    linhas = ""
+    for _, r in vista_pag.iterrows():
+        rotulo, tom = r["_situacao"], {"Recebido": "ok", "Atrasado": "crit",
+                                       "Cancelado": "andamento", "Sem status": "mudo",
+                                       "Em andamento": "warn"}[r["_situacao"]]
+        linhas += (
+            f'<tr><td>{tag_link(r["TAG"]) if r["TAG"] else "<span class=\"gtbl-muted\">—</span>"}</td>'
+            f'<td class="gt-corta">{esc(r["DESCRICAO_MATERIAL"][:60].replace(chr(10), " "))}</td>'
+            f'<td class="gtbl-muted gt-corta">{esc(r["FORNECEDOR"] or "—")}</td>'
+            f'<td>{sup_status_pill(r["STATUS"])}</td>'
+            f'<td><span class="gtbl-badge {tom}">{esc(rotulo)}</span></td>'
+            f'<td class="gtbl-num">{br_pct(r["TOTAL_PROGRESSO"])}</td></tr>')
+    render_html(
+        '<div class="gplan-panel">'
+        + html_table(["Tag", "Material", "Fornecedor", "Status", "Situação", "#Progresso"],
+                     linhas, "Nenhum item de suprimento encontrado para esses filtros.")
+        + "</div>")
+
+    # ---------------------------------------------------------- ficha de tag
+    tags_mostradas = [t for t in dict.fromkeys(vista_pag["TAG"]) if t]
+    fichas = ""
+    for tag in tags_mostradas:
+        itens_tag = itens[itens["TAG"] == tag]
+        fichas += (f'<div class="fmodal" id="{ficha_anchor(tag)}">'
+                  '<a class="fmodal-bg" href="#fechado" aria-label="Fechar"></a>'
+                  '<div class="fmodal-box">'
+                  '<a class="fmodal-x" href="#fechado" aria-label="Fechar">&times;</a>'
+                  f'{sup_ficha_tag_html(tag, itens_tag, resumo_tags[tag], hoje)}'
+                  "</div></div>")
+    render_html(fichas)
 
 
 def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame,
@@ -12887,6 +13308,9 @@ def main():
     st.session_state["gplan_fonte"] = fonte_dados(fonte)
     (tags, cabos, tubing, sigem, resumo, esperados,
      gitec, locacao, aux_areas, lancamento, depara, movimentacoes) = load_data(cache_key)
+    # Arquivo a parte, fora da planilha combinada -- ver carregar_suprimentos.
+    suprimentos_itens, suprimentos_estoque = carregar_suprimentos(
+        get_supabase_client(), get_suprimentos_cache_key())
 
     with st.sidebar:
         render_html(
@@ -12913,6 +13337,7 @@ def main():
         render_perfil_lateral()
 
     dashboard_page = st.Page(lambda: _sob_carga("Carregando o painel", lambda: render_dashboard(resumo, esperados, tags, sigem, cache_key)), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
+    suprimentos_page = st.Page(lambda: _sob_carga("Carregando suprimentos", lambda: render_suprimentos(suprimentos_itens, suprimentos_estoque, tags, cache_key)), title="Suprimentos", icon=":material/local_shipping:", url_path="suprimentos")
     relatorios_page = st.Page(lambda: _sob_carga("Carregando os relatórios", lambda: render_relatorios(esperados, resumo, tags, sigem, cache_key)), title="Relatórios", icon=":material/description:", url_path="relatorios")
     progresso_page = st.Page(lambda: _sob_carga("Abrindo o Progresso", lambda: render_progresso(resumo, esperados, tags, sigem, cache_key)), title="Progresso", icon=":material/insights:", url_path="progresso")
     pesquisa_page = st.Page(lambda: _sob_carga("Carregando as tags", lambda: render_pesquisa_tag(resumo, esperados, tags, sigem, cache_key, lancamento, depara)), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
@@ -12958,7 +13383,7 @@ def main():
     # sai por CSS (nth-of-type, ver .stSidebarNav header abaixo) -- o titulo
     # aqui fica so texto puro.
     secoes: dict[str, list] = {
-        "Visão geral": [dashboard_page, progresso_page, pesquisa_page],
+        "Visão geral": [dashboard_page, suprimentos_page, progresso_page, pesquisa_page],
         "Documentação": [relatorios_page, sigem_page, atualizacao_page],
     }
     avanco = []
