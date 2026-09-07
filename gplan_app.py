@@ -2164,6 +2164,16 @@ def inject_css():
         [data-testid="stMultiSelect"] [data-baseweb="select"] > div {
           background: var(--dark-card-2) !important; color: var(--text-1) !important;
           border-color: var(--border-color) !important; }
+        /* st.checkbox tambem tem o quadradinho queimado com o fundo/borda do
+           config.toml -- achado em 2026-09-07 nos checkboxes novos da aba
+           Suprimentos ("Mostrar tambem codigos fora..."), mas o app inteiro
+           tinha isso, nenhum checkbox tinha regra propria ate agora. O
+           quadrado visivel e a div logo apos o input (visualmente escondido
+           via clip-path); a label tem MAIS de uma div -- stWidgetLabel e a
+           outra -- por isso o :not() em vez de pegar todas. */
+        [data-testid="stCheckbox"] label > div:not([data-testid="stWidgetLabel"]) {
+          background: var(--dark-card-2) !important; border-color: var(--border-strong) !important; }
+        [data-testid="stCheckbox"] svg { fill: var(--text-1) !important; }
         /* tudo que esta dentro do controle -- valor escolhido, pilulas,
            contador -- e nao so o input: o texto ali nasce com a cor do
            config.toml e no tema claro fica branco sobre branco */
@@ -2439,24 +2449,56 @@ def inject_css():
                        white-space:nowrap; }
         .sup-tl-data i { font-style:normal; color:var(--text-3); margin-left:5px; }
 
+        /* Suprimentos 2.0 -- cabecalho, tabs Suprimentos/Estoque Geral e o
+           "divisor com rotulo" entre secoes (achado no visual 2.0, 2026-09-07:
+           sem isso os blocos ficam soltos direto no fundo, sem hierarquia --
+           "tudo muito junto", relato do Daniel). */
+        .sup-subtitulo { font-size:12.5px; color:var(--text-3); margin:-6px 0 20px; }
+        .sup-eyebrow { font-size:11px; text-transform:uppercase; letter-spacing:.5px;
+          color:var(--text-3); font-weight:700; margin:30px 0 14px; display:flex;
+          align-items:center; gap:10px; }
+        .sup-eyebrow::after { content:""; flex:1; height:1px; background:var(--border-color); }
+        /* Segmented control do modo Suprimentos/Estoque Geral -- maior que um
+           filtro comum, pra ler como troca de tela e nao como mais um chip. */
+        .st-key-sup_modo [data-testid="stSegmentedControl"] label {
+          font-size:13px !important; padding:10px 20px !important; }
+
         /* Suprimentos -- resumo visual (donut + distribuicao) lado a lado */
-        .sup-row2 { display:grid; grid-template-columns:1fr 1.3fr; gap:16px; margin-bottom:20px; }
+        .sup-row2 { display:grid; grid-template-columns:1fr 1.3fr; gap:16px; margin-bottom:20px;
+          align-items:stretch; }
         @media (max-width:900px) { .sup-row2 { grid-template-columns:1fr; } }
+        .sup-donut-panel { display:flex; flex-direction:column; }
         .sup-donut-row { display:flex; align-items:center; gap:22px; flex-wrap:wrap; }
         .sup-donut-row .fx-leg { flex:1; min-width:170px; }
-        .sup-sec-titulo { font-size:15px; font-weight:800; margin:32px 0 14px; color:var(--text-1); }
+        /* Preenche o vazio que sobrava embaixo da legenda quando o painel
+           estica pra bater a altura do vizinho (achado no visual 2.0). */
+        .sup-donut-foot { margin-top:auto; padding-top:18px;
+          border-top:1px solid var(--border-color); display:flex; justify-content:space-between;
+          align-items:baseline; font-size:11.5px; color:var(--text-2); }
+        .sup-donut-foot b { color:var(--accent-teal); font-size:17px; font-weight:800; }
         .sup-estoque-resumo { display:flex; align-items:center; gap:12px; margin:0 0 16px;
           font-size:12.5px; color:var(--text-2); }
         .sup-estoque-resumo b { color:var(--text-1); font-size:14px; }
+
+        /* Trilho de filtro em cartão -- antes ficava solto direto no fundo da
+           pagina; key=sup_toolbar/sup_est_toolbar vem do st.container(border=
+           True, key=...), mesmo mecanismo de estilizar container nativo por
+           key que a lateral ja usa (.st-key-flt_toggle). */
+        .st-key-sup_toolbar, .st-key-sup_est_toolbar {
+          background:var(--dark-card) !important; border:1px solid var(--border-color) !important;
+          border-radius:16px !important; padding:20px 22px 6px !important; margin-bottom:24px; }
+        .st-key-sup_toolbar [data-testid="stSegmentedControl"] { margin-bottom:6px; }
 
         /* Tabela mestre por TAG (Opção C, escolhida em 2026-09-07) -- não é
            <table>: cada linha é um <details>, pra expandir/recolher sem JS e
            sem rerun do Streamlit -- <tr> não hospeda <details> de forma
            confiável entre navegadores, e o resto do app já resolve
-           interatividade sem servidor assim (ver fmodal, CSS :target). */
+           interatividade sem servidor assim (ver fmodal, CSS :target). Coluna
+           de situação com largura fixa (nao 1.3fr): sobrava vao vazio a
+           direita do badge, achado no visual 2.0. */
         .sup-mestre { padding:8px 22px 16px !important; }
         .sup-mestre-cab, .sup-mestre-linha summary {
-          display:grid; grid-template-columns:22px minmax(140px,1.6fr) 70px 90px 90px 1.3fr;
+          display:grid; grid-template-columns:22px minmax(140px,1fr) 76px 96px 96px 190px;
           align-items:center; gap:10px; }
         .sup-mestre-cab { font-size:10.5px; text-transform:uppercase; letter-spacing:.3px;
           color:var(--text-3); font-weight:700; padding:0 10px 10px;
@@ -4286,6 +4328,29 @@ SUP_GERAL_ORDEM = {"Atrasado": 0, "Parcialmente recebido": 1, "Em fornecimento":
 SUP_GERAL_ROTULOS = ["100% recebido", "Em fornecimento", "Atrasado",
                      "Parcialmente recebido", "Cancelado"]
 
+SUP_FORN_ROTULOS = ["Recebido", "No prazo", "Atrasado", "Sem previsão"]
+
+
+def sup_fornecimento_status(status_fornecimento: object, previsao: object, hoje: pd.Timestamp) -> str:
+    """Situação de fornecimento pela 01_BASE_TAGS (STATUS_FORNECIMENTO/
+    PREVISAO_FORNECIMENTO) -- o mesmo par que já alimenta o card "Previsão de
+    fornecimento" da ficha da TAG (painel_previsao_fornecimento, mais abaixo).
+    É um cálculo mais simples que "Situação geral" (uma data só por TAG, o
+    pior caso entre as linhas de compra da 09_BASE_SUPRIMENTOS, não fase a
+    fase de cada item) -- os dois filtros não batem 1:1 de propósito: são
+    perguntas diferentes sobre a mesma TAG. Pedido do Daniel, 2026-09-07.
+    """
+    if str(status_fornecimento or "").strip().upper() == "CONCLUIDO":
+        return "Recebido"
+    d = pd.to_datetime(previsao, dayfirst=True, errors="coerce")
+    if pd.isna(d):
+        return "Sem previsão"
+    return "Atrasado" if d.normalize() < hoje else "No prazo"
+
+
+def sup_sec_titulo(texto: str) -> str:
+    return f'<div class="sup-eyebrow">{esc(texto)}</div>'
+
 
 def sup_por_tag(itens: pd.DataFrame, hoje: pd.Timestamp,
                 tags_gplan: set[str] | None = None) -> dict[str, dict]:
@@ -4383,10 +4448,16 @@ def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
             "</div></div></div>")
 
 
-def sup_donut(fatias: list[tuple[str, int, str]], total: int, rotulo_centro: str) -> str:
+def sup_donut(fatias: list[tuple[str, int, str]], total: int, rotulo_centro: str,
+              rodape: tuple[str, str] | None = None) -> str:
     """Donut multi-fatia reaproveitando o desenho SVG do du_status (Dashboard,
     "Status SIGEM"), so que fora do layout de altura fixa dele -- fatias e
-    [(rotulo, valor, cor-hex-do-FX_COR), ...] ja na ordem de exibicao."""
+    [(rotulo, valor, cor-hex-do-FX_COR), ...] ja na ordem de exibicao.
+
+    `rodape` (rotulo, valor) e opcional -- some ate o fim do painel (que
+    estica pra bater a altura do painel vizinho) em vez de deixar vao vazio
+    embaixo da legenda; achado no visual 2.0, 2026-09-07.
+    """
     raio, largura = 46.0, 13.0
     circ = 2 * math.pi * raio
     arcos, giro = "", 0.0
@@ -4400,11 +4471,14 @@ def sup_donut(fatias: list[tuple[str, int, str]], total: int, rotulo_centro: str
     legenda = "".join(
         fx_lg(rotulo, br_num(valor), br_pct(valor / total * 100) if total else "—", cor)
         for rotulo, valor, cor in fatias)
+    rodape_html = (
+        f'<div class="sup-donut-foot"><span>{esc(rodape[0])}</span><b>{esc(rodape[1])}</b></div>'
+        if rodape else "")
     return (
         '<div class="sup-donut-row"><div class="du-rosca"><svg viewBox="0 0 120 120">'
         f'<circle class="trilho" cx="60" cy="60" r="{raio}" fill="none" stroke-width="{largura}"></circle>'
         f'{arcos}</svg><div class="centro"><b>{br_num(total)}</b><span>{esc(rotulo_centro)}</span></div>'
-        f'</div><div class="fx-leg">{legenda}</div></div>')
+        f'</div><div class="fx-leg">{legenda}</div></div>{rodape_html}')
 
 
 def sup_linha_mestre(chave: str, info: dict, itens_grupo: pd.DataFrame,
@@ -4454,186 +4528,55 @@ def sup_linha_mestre(chave: str, info: dict, itens_grupo: pd.DataFrame,
         f'</div>{ficha_link}</details>')
 
 
-def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
-                       tags: pd.DataFrame, movimentacoes: pd.DataFrame,
-                       cache_key: str = ""):
-    """Rastreabilidade de suprimento por TAG -- estado atual da
-    09_BASE_SUPRIMENTOS.xlsx (Mapa de Suprimentos UDA, só Instrumentação)
-    mais o histórico de mudança de status por TAG (Fase 2, gravado pelo
-    pipeline em 14_MOVIMENTACOES, tipo "suprimento"), mais o estoque do
-    almoxarifado (09_SUPRIMENTOS_ESTOQUE).
-
-    Layout "master-detail" (Opção C, escolhida pelo Daniel em 2026-09-07
-    entre 3 mockups): resumo visual (donut + distribuição por status) no
-    topo, depois um trilho de filtro (situação geral, status do item, busca,
-    só-com-estoque) ao lado de uma tabela por TAG cujas linhas expandem
-    inline (itens + estoque cruzado) sem abrir a ficha -- a ficha completa
-    (com timeline e histórico) continua a um clique, dentro da linha aberta.
+def render_estoque_geral(estoque: pd.DataFrame, tags_gplan: set[str]) -> None:
+    """Aba de acesso rápido "Estoque Geral" dentro de Suprimentos -- o
+    almoxarifado consolidado (09_SUPRIMENTOS_ESTOQUE) promovido a tela
+    própria em vez de ficar só como seção no fim da rolagem (pedido do
+    Daniel, 2026-09-07, junto com o visual 2.0). Cruzamento com TAG é fraco
+    de propósito (ver KPI "Com TAG cruzada") -- a maioria dos registros é
+    material sem amarração 1:1 com um instrumento (ver [[aba_suprimentos]]).
     """
-    render_header("Suprimentos")
-    if itens.empty:
-        render_html(
-            '<div class="gplan-panel"><div class="gtbl-empty">'
-            "Não encontrei a 09_BASE_SUPRIMENTOS.xlsx (nem no Supabase, nem na pasta "
-            "local de bases). Coloque o arquivo em "
-            "<code>00_BASES_ATUALIZACAO/00_COLOCAR_ATUALIZADAS_AQUI/</code>, ou suba "
-            "pro Supabase com esse nome, pra esta aba funcionar."
-            "</div></div>")
+    if estoque.empty:
+        render_html('<div class="gplan-panel"><div class="gtbl-empty">'
+                    "Sem dados de estoque nesta planilha.</div></div>")
         return
 
-    hoje = pd.Timestamp.now(tz=BR_TZ).tz_localize(None).normalize()
-    tags_gplan = set(tags["TAG"].astype(str))
-    resumo_tags = sup_por_tag(itens, hoje, tags_gplan)
-    # So os que batem com 01_BASE_TAGS -- os KPIs tem que contar a mesma
-    # populacao que "Com suprimento identificado", senao "100% recebidas"
-    # inclui codigo de kit/material generico que nunca foi TAG (achado de
-    # 2026-09-07: 797 "100% recebido" citado pelo Daniel tinha 154 desses).
-    resumo_gplan = {k: v for k, v in resumo_tags.items() if v["eh_gplan"]}
-
-    total_tags = len(tags_gplan)
-    com_sup = len(resumo_gplan)
-    recebidas = sum(1 for r in resumo_gplan.values() if r["geral"] == "100% recebido")
-    atrasadas = sum(1 for r in resumo_gplan.values() if r["atrasados"] > 0)
-    pct_atendimento = (recebidas / com_sup * 100) if com_sup else 0.0
+    contagem_conf = estoque["Status"].value_counts() if "Status" in estoque.columns else pd.Series(dtype=int)
+    tag_col = pd.Series(dtype=str)
+    if "Tag Number" in estoque.columns:
+        tag_col = estoque["Tag Number"].astype(str).str.strip()
+        tag_col = tag_col[~tag_col.str.lower().isin(["nan", "none", ""])]
+    tags_distintas = tag_col.nunique()
+    tags_cruzadas = tag_col[tag_col.isin(tags_gplan)].nunique()
+    conforme = int(contagem_conf.get("CONFORME", 0))
+    cedido = int(contagem_conf.get("CEDIDO-UCR", 0))
+    total_est = len(estoque)
 
     kpis = (
-        du_kpi("Total de TAGs", br_num(total_tags), "", 1.0, "#5b8def", "shield")
-        + du_kpi("Com suprimento identificado", br_num(com_sup),
-                 f"{br_pct(com_sup / total_tags * 100) if total_tags else '—'} do total",
-                 (com_sup / total_tags) if total_tags else 0, "#9d6bff", "documento")
-        + du_kpi("Sem suprimento identificado", br_num(total_tags - com_sup), "",
-                 (1 - com_sup / total_tags) if total_tags else 0, "#7c8aa8", "pasta")
-        + du_kpi("TAGs 100% recebidas", br_num(recebidas),
-                 f"{br_pct(pct_atendimento)} de atendimento",
-                 (recebidas / com_sup) if com_sup else 0, "#34d399", "check")
-        + du_kpi("TAGs com atraso", br_num(atrasadas), "", (atrasadas / com_sup) if com_sup else 0,
-                 "#f87171", "clock")
+        du_kpi("Registros no almoxarifado", br_num(total_est), "", 1.0, "#5b8def", "documento")
+        + du_kpi("Conforme", br_num(conforme), f"{br_pct(conforme / total_est * 100)} do total",
+                 conforme / total_est if total_est else 0, "#34d399", "check")
+        + du_kpi("Cedido-UCR", br_num(cedido), f"{br_pct(cedido / total_est * 100)} do total",
+                 cedido / total_est if total_est else 0, "#f87171", "clock")
+        + du_kpi("Com TAG cruzada", br_num(tags_cruzadas),
+                 f"{br_pct(tags_cruzadas / tags_distintas * 100) if tags_distintas else '—'} "
+                 f"de {br_num(tags_distintas)} distintas",
+                 (tags_cruzadas / tags_distintas) if tags_distintas else 0, "#9d6bff", "pasta")
     )
     render_html(f'<section class="du-kpis">{kpis}</section>')
+    render_html(sup_sec_titulo("Almoxarifado"))
 
-    # ------------------------------------------------------- resumo visual
-    contagem_geral = collections.Counter(r["geral"] for r in resumo_gplan.values())
-    fatias_geral = [(rot, contagem_geral[rot], SUP_GERAL_COR[rot]) for rot in SUP_GERAL_ROTULOS
-                    if contagem_geral[rot]]
-    donut_html = sup_donut(fatias_geral, com_sup, "tags")
-
-    contagem_status = itens["STATUS"].apply(lambda s: s or "Sem status").value_counts()
-    maior = int(contagem_status.max()) if len(contagem_status) else 1
-    linhas_status = "".join(
-        f'<div class="gr-row"><div class="gr-top"><span class="gr-nome">'
-        f'{esc(sentence_case(status) if status != "Sem status" else status)}</span>'
-        f'<span class="gr-pct">{br_num(int(qtd))}</span></div>'
-        f'<div class="gr-track"><div class="gr-fill" style="width:{qtd/maior*100:.1f}%;"></div></div></div>'
-        for status, qtd in contagem_status.items())
-    render_html(
-        '<div class="sup-row2">'
-        f'<div class="gplan-panel"><div class="gplan-panel-title">'
-        f'Situação das {br_num(com_sup)} TAGs com suprimento</div>{donut_html}</div>'
-        f'<div class="gplan-panel gr-panel"><div class="gplan-panel-title">'
-        f'Status dos itens na planilha de suprimentos</div>{linhas_status}</div>'
-        '</div>')
-
-    # ------------------------------------------------------ trilho + tabela
-    mostrar_fora = st.checkbox(
-        "Mostrar também códigos fora da base de TAGs (kits, acessórios, material genérico)",
-        key="sup_fora_gplan",
-        help='A maioria não é uma TAG individual: é o código da própria requisição no lugar da '
-             'TAG, porque a linha é um kit/acessório amarrado a uma TAG real (ex.: "KIT6_FV120058B", '
-             '"VE-120994B_AD") ou material genérico de requisição em lote, sem TAG por natureza '
-             '(ex.: "INS-UDAPL-101", plaquetas de identificação). Ative para ver também esses.')
-    universo = resumo_tags if mostrar_fora else resumo_gplan
-    chave_serie = itens["TAG"].where(itens["TAG"] != "", itens["IDENT_CODE"])
-
-    estoque_por_chave: dict[str, pd.DataFrame] = {}
-    if not estoque.empty and "Tag Number" in estoque.columns:
-        et = estoque.copy()
-        et["_chave"] = et["Tag Number"].astype(str).str.strip()
-        et.loc[et["_chave"].str.lower().isin(["nan", "none", ""]), "_chave"] = ""
-        for chave_e, grupo_e in et[et["_chave"] != ""].groupby("_chave"):
-            estoque_por_chave[chave_e] = grupo_e
-
-    rail_col, main_col = st.columns([1, 3], gap="large")
-    with rail_col:
-        contagem_sit = collections.Counter(r["geral"] for r in universo.values())
-        opcoes_sit = ["Todas"] + [r for r in SUP_GERAL_ROTULOS if contagem_sit[r]]
-        contagens_sit = {"Todas": len(universo), **contagem_sit}
-        sit_escolhida = st.segmented_control(
-            "Situação geral", opcoes_sit,
-            format_func=lambda x: f"{x} · {br_num(contagens_sit.get(x, 0))}",
-            default="Todas", key="sup_geral") or "Todas"
-        status_opts = sorted({s for s in itens["STATUS"] if s})
-        sel_status = st.multiselect("Status do item", status_opts, key="sup_status")
-        busca = st.text_input("Buscar TAG", key="sup_busca", placeholder="Digite a TAG…")
-        so_estoque = st.checkbox("Só com registro no almoxarifado", key="sup_so_estoque")
-
-    linhas_df = pd.DataFrame(
-        [{"CHAVE": k, **v} for k, v in universo.items()],
-        columns=["CHAVE", "n_itens", "recebidos", "atrasados", "cancelados", "geral",
-                "tem_tag", "eh_gplan"])
-    if sit_escolhida != "Todas":
-        linhas_df = linhas_df[linhas_df["geral"] == sit_escolhida]
-    if busca.strip():
-        alvo = busca.strip().upper()
-        linhas_df = linhas_df[linhas_df["CHAVE"].str.upper().str.contains(alvo, na=False)]
-    if sel_status:
-        chaves_com_status = set(chave_serie[itens["STATUS"].isin(sel_status)])
-        linhas_df = linhas_df[linhas_df["CHAVE"].isin(chaves_com_status)]
-    if so_estoque:
-        linhas_df = linhas_df[linhas_df["CHAVE"].isin(estoque_por_chave.keys())]
-    linhas_df = linhas_df.assign(_ordem=linhas_df["geral"].map(SUP_GERAL_ORDEM).fillna(9))
-    linhas_df = linhas_df.sort_values(["_ordem", "CHAVE"])
-
-    with main_col:
-        assinatura = f"{sit_escolhida}|{busca}|{sel_status}|{so_estoque}|{mostrar_fora}"
-        linhas_pag = paginate(linhas_df, "suprimentos_tag", assinatura)
-        corpo = "".join(
-            sup_linha_mestre(
-                row["CHAVE"], row.to_dict(),
-                itens[chave_serie == row["CHAVE"]],
-                estoque_por_chave.get(row["CHAVE"]), hoje)
-            for _, row in linhas_pag.iterrows())
-        cabecalho = (
-            '<div class="sup-mestre-cab"><span></span><span>Tag</span>'
-            '<span class="gt-num">Itens</span><span class="gt-num">Recebidos</span>'
-            '<span class="gt-num">Atrasados</span><span>Situação geral</span></div>')
-        render_html(
-            f'<div class="gplan-panel sup-mestre">{cabecalho}'
-            + (corpo or '<div class="gtbl-empty">Nenhuma TAG encontrada para esses filtros.</div>')
-            + "</div>")
-
-    chaves_mostradas = [c for c in linhas_pag["CHAVE"] if universo[c]["eh_gplan"]]
-    fichas = ""
-    for chave in chaves_mostradas:
-        itens_tag = itens[itens["TAG"] == chave]
-        fichas += (f'<div class="fmodal" id="{ficha_anchor(chave)}">'
-                  '<a class="fmodal-bg" href="#fechado" aria-label="Fechar"></a>'
-                  '<div class="fmodal-box">'
-                  '<a class="fmodal-x" href="#fechado" aria-label="Fechar">&times;</a>'
-                  f'{sup_ficha_tag_html(chave, itens_tag, resumo_tags[chave], hoje, movimentacoes)}'
-                  "</div></div>")
-    render_html(fichas)
-
-    # --------------------------------------------------------------- estoque
-    if estoque.empty:
-        return
-    render_html('<h3 class="sup-sec-titulo">Estoque (almoxarifado)</h3>')
-    contagem_conf = estoque["Status"].value_counts() if "Status" in estoque.columns else pd.Series(dtype=int)
-    render_html(
-        '<div class="sup-estoque-resumo">'
-        f'<span><b>{br_num(len(estoque))}</b> registros no almoxarifado</span>'
-        f'<span class="gtbl-badge ok">{br_num(int(contagem_conf.get("CONFORME", 0)))} conforme</span>'
-        f'<span class="gtbl-badge crit">{br_num(int(contagem_conf.get("CEDIDO-UCR", 0)))} cedido-UCR</span>'
-        '</div>')
-
-    busca_est = st.text_input("Buscar material ou código Consag", key="sup_est_busca",
-                              placeholder="Digite a descrição ou código…")
-    col_a, col_b = st.columns(2)
-    with col_a:
-        almox_opts = sorted({a for a in estoque.get("Almoxarifado", pd.Series(dtype=str))
-                             .dropna().astype(str) if a})
-        sel_almox = st.multiselect("Almoxarifado", almox_opts, key="sup_est_almox")
-    with col_b:
-        sel_conf = st.multiselect("Conformidade", sorted(contagem_conf.index.tolist()), key="sup_est_conf")
+    with st.container(border=True, key="sup_est_toolbar"):
+        col_busca, col_almox, col_conf = st.columns([2, 1, 1])
+        with col_busca:
+            busca_est = st.text_input("Buscar material ou código Consag", key="sup_est_busca",
+                                      placeholder="Digite a descrição, código Consag ou TAG…")
+        with col_almox:
+            almox_opts = sorted({a for a in estoque.get("Almoxarifado", pd.Series(dtype=str))
+                                 .dropna().astype(str) if a})
+            sel_almox = st.multiselect("Almoxarifado", almox_opts, key="sup_est_almox")
+        with col_conf:
+            sel_conf = st.multiselect("Conformidade", sorted(contagem_conf.index.tolist()), key="sup_est_conf")
 
     vista_est = estoque.copy()
     if busca_est.strip():
@@ -4672,6 +4615,212 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
         + html_table(["Tag", "Material", "Local", "#Recebida", "#Estoque", "#Reservada", "Conformidade"],
                      linhas_est, "Nenhum registro de estoque encontrado para esses filtros.")
         + "</div>")
+
+
+def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
+                       tags: pd.DataFrame, movimentacoes: pd.DataFrame,
+                       cache_key: str = ""):
+    """Rastreabilidade de suprimento por TAG -- estado atual da
+    09_BASE_SUPRIMENTOS.xlsx (Mapa de Suprimentos UDA, só Instrumentação)
+    mais o histórico de mudança de status por TAG (Fase 2, gravado pelo
+    pipeline em 14_MOVIMENTACOES, tipo "suprimento"), mais o estoque do
+    almoxarifado (09_SUPRIMENTOS_ESTOQUE, aba rápida "Estoque Geral").
+
+    Layout "master-detail" (Opção C escolhida em 2026-09-07) com visual 2.0
+    (2ª rodada de mockups, mesma data): cabeçalho com subtítulo, tabs
+    "Suprimentos"/"Estoque Geral" no topo, cada bloco em cartão com título
+    próprio (resumo visual, trilho de filtro, tabela) em vez de elementos
+    soltos direto no fundo da página -- e uma tabela por TAG cujas linhas
+    expandem inline (itens + estoque cruzado) sem abrir a ficha; a ficha
+    completa (com timeline e histórico) continua a um clique, dentro da
+    linha aberta.
+    """
+    render_header("Suprimentos")
+    if itens.empty:
+        render_html(
+            '<div class="gplan-panel"><div class="gtbl-empty">'
+            "Não encontrei a 09_BASE_SUPRIMENTOS.xlsx (nem no Supabase, nem na pasta "
+            "local de bases). Coloque o arquivo em "
+            "<code>00_BASES_ATUALIZACAO/00_COLOCAR_ATUALIZADAS_AQUI/</code>, ou suba "
+            "pro Supabase com esse nome, pra esta aba funcionar."
+            "</div></div>")
+        return
+
+    render_html('<p class="sup-subtitulo">Rastreabilidade de material por TAG, '
+               "do pedido à entrega na obra.</p>")
+    tags_gplan = set(tags["TAG"].astype(str))
+    modo = st.segmented_control(
+        "Ver", ["Suprimentos", "Estoque Geral"],
+        format_func=lambda x: (f"🛡 {x}" if x == "Suprimentos"
+                               else f"📦 {x} · {br_num(len(estoque))}"),
+        default="Suprimentos", key="sup_modo", label_visibility="collapsed") or "Suprimentos"
+
+    if modo == "Estoque Geral":
+        render_estoque_geral(estoque, tags_gplan)
+        return
+
+    hoje = pd.Timestamp.now(tz=BR_TZ).tz_localize(None).normalize()
+    resumo_tags = sup_por_tag(itens, hoje, tags_gplan)
+    # So os que batem com 01_BASE_TAGS -- os KPIs tem que contar a mesma
+    # populacao que "Com suprimento identificado", senao "100% recebidas"
+    # inclui codigo de kit/material generico que nunca foi TAG (achado de
+    # 2026-09-07: 797 "100% recebido" citado pelo Daniel tinha 154 desses).
+    resumo_gplan = {k: v for k, v in resumo_tags.items() if v["eh_gplan"]}
+
+    total_tags = len(tags_gplan)
+    com_sup = len(resumo_gplan)
+    recebidas = sum(1 for r in resumo_gplan.values() if r["geral"] == "100% recebido")
+    atrasadas = sum(1 for r in resumo_gplan.values() if r["atrasados"] > 0)
+    pct_atendimento = (recebidas / com_sup * 100) if com_sup else 0.0
+
+    kpis = (
+        du_kpi("Total de TAGs", br_num(total_tags), "", 1.0, "#5b8def", "shield")
+        + du_kpi("Com suprimento identificado", br_num(com_sup),
+                 f"{br_pct(com_sup / total_tags * 100) if total_tags else '—'} do total",
+                 (com_sup / total_tags) if total_tags else 0, "#9d6bff", "documento")
+        + du_kpi("Sem suprimento identificado", br_num(total_tags - com_sup), "",
+                 (1 - com_sup / total_tags) if total_tags else 0, "#7c8aa8", "pasta")
+        + du_kpi("TAGs 100% recebidas", br_num(recebidas),
+                 f"{br_pct(pct_atendimento)} de atendimento",
+                 (recebidas / com_sup) if com_sup else 0, "#34d399", "check")
+        + du_kpi("TAGs com atraso", br_num(atrasadas), "", (atrasadas / com_sup) if com_sup else 0,
+                 "#f87171", "clock")
+    )
+    render_html(f'<section class="du-kpis">{kpis}</section>')
+
+    # ------------------------------------------------------- resumo visual
+    render_html(sup_sec_titulo("Resumo visual"))
+    contagem_geral = collections.Counter(r["geral"] for r in resumo_gplan.values())
+    fatias_geral = [(rot, contagem_geral[rot], SUP_GERAL_COR[rot]) for rot in SUP_GERAL_ROTULOS
+                    if contagem_geral[rot]]
+    donut_html = sup_donut(fatias_geral, com_sup, "tags",
+                           rodape=("Taxa de atendimento", br_pct(pct_atendimento)))
+
+    contagem_status = itens["STATUS"].apply(lambda s: s or "Sem status").value_counts()
+    maior = int(contagem_status.max()) if len(contagem_status) else 1
+    linhas_status = "".join(
+        f'<div class="gr-row"><div class="gr-top"><span class="gr-nome">'
+        f'{esc(sentence_case(status) if status != "Sem status" else status)}</span>'
+        f'<span class="gr-pct">{br_num(int(qtd))}</span></div>'
+        f'<div class="gr-track"><div class="gr-fill" style="width:{qtd/maior*100:.1f}%;"></div></div></div>'
+        for status, qtd in contagem_status.items())
+    render_html(
+        '<div class="sup-row2">'
+        f'<div class="gplan-panel sup-donut-panel"><div class="gplan-panel-title">'
+        f'Situação das {br_num(com_sup)} TAGs com suprimento</div>{donut_html}</div>'
+        f'<div class="gplan-panel gr-panel"><div class="gplan-panel-title">'
+        f'Status dos itens na planilha de suprimentos</div>{linhas_status}</div>'
+        '</div>')
+
+    # ------------------------------------------------------ trilho + tabela
+    render_html(sup_sec_titulo("TAGs com suprimento"))
+    mostrar_fora = st.checkbox(
+        "Mostrar também códigos fora da base de TAGs (kits, acessórios, material genérico)",
+        key="sup_fora_gplan",
+        help='A maioria não é uma TAG individual: é o código da própria requisição no lugar da '
+             'TAG, porque a linha é um kit/acessório amarrado a uma TAG real (ex.: "KIT6_FV120058B", '
+             '"VE-120994B_AD") ou material genérico de requisição em lote, sem TAG por natureza '
+             '(ex.: "INS-UDAPL-101", plaquetas de identificação). Ative para ver também esses.')
+    universo = resumo_tags if mostrar_fora else resumo_gplan
+    chave_serie = itens["TAG"].where(itens["TAG"] != "", itens["IDENT_CODE"])
+
+    estoque_por_chave: dict[str, pd.DataFrame] = {}
+    if not estoque.empty and "Tag Number" in estoque.columns:
+        et = estoque.copy()
+        et["_chave"] = et["Tag Number"].astype(str).str.strip()
+        et.loc[et["_chave"].str.lower().isin(["nan", "none", ""]), "_chave"] = ""
+        for chave_e, grupo_e in et[et["_chave"] != ""].groupby("_chave"):
+            estoque_por_chave[chave_e] = grupo_e
+
+    # "Fornecimento" -- pedido do Daniel, 2026-09-07: a mesma STATUS_FORNECIMENTO/
+    # PREVISAO_FORNECIMENTO que ja alimenta a ficha da TAG, agora tambem como
+    # filtro aqui. So existe pra quem tem TAG real (nao se aplica a kit/generico).
+    tags_com_sup_df = tags[tags["TAG"].astype(str).isin(resumo_gplan.keys())]
+    forn_por_tag = {
+        str(r["TAG"]): sup_fornecimento_status(r.get("STATUS_FORNECIMENTO"),
+                                               r.get("PREVISAO_FORNECIMENTO"), hoje)
+        for _, r in tags_com_sup_df.iterrows()
+    }
+
+    with st.container(border=True, key="sup_toolbar"):
+        contagem_sit = collections.Counter(r["geral"] for r in universo.values())
+        opcoes_sit = ["Todas"] + [r for r in SUP_GERAL_ROTULOS if contagem_sit[r]]
+        contagens_sit = {"Todas": len(universo), **contagem_sit}
+        sit_escolhida = st.segmented_control(
+            "Situação geral", opcoes_sit,
+            format_func=lambda x: f"{x} · {br_num(contagens_sit.get(x, 0))}",
+            default="Todas", key="sup_geral") or "Todas"
+
+        col_forn, col_status, col_busca, col_check = st.columns(
+            [1.1, 1.3, 1.4, 1], vertical_alignment="bottom")
+        with col_forn:
+            contagem_forn = collections.Counter(forn_por_tag.values())
+            opcoes_forn = ["Todas"] + [r for r in SUP_FORN_ROTULOS if contagem_forn[r]]
+            sel_forn = st.selectbox(
+                "Fornecimento", opcoes_forn,
+                format_func=lambda x: (f"Todas · {br_num(sum(contagem_forn.values()))}" if x == "Todas"
+                                       else f"{x} · {br_num(contagem_forn[x])}"),
+                key="sup_forn",
+                help="Cálculo simples por TAG, vindo da 01_BASE_TAGS (STATUS_FORNECIMENTO/"
+                     "PREVISAO_FORNECIMENTO -- o mesmo da ficha da TAG, card \"Previsão de "
+                     "fornecimento\"). É diferente de \"Situação geral\" acima, que olha fase a "
+                     "fase de cada item da planilha de suprimentos: os números podem não bater 1:1.")
+        with col_status:
+            status_opts = sorted({s for s in itens["STATUS"] if s})
+            sel_status = st.multiselect("Status do item", status_opts, key="sup_status")
+        with col_busca:
+            busca = st.text_input("Buscar TAG", key="sup_busca", placeholder="Digite a TAG…")
+        with col_check:
+            so_estoque = st.checkbox("Só com estoque", key="sup_so_estoque")
+
+    linhas_df = pd.DataFrame(
+        [{"CHAVE": k, **v} for k, v in universo.items()],
+        columns=["CHAVE", "n_itens", "recebidos", "atrasados", "cancelados", "geral",
+                "tem_tag", "eh_gplan"])
+    if sit_escolhida != "Todas":
+        linhas_df = linhas_df[linhas_df["geral"] == sit_escolhida]
+    if sel_forn != "Todas":
+        chaves_forn = {t for t, v in forn_por_tag.items() if v == sel_forn}
+        linhas_df = linhas_df[linhas_df["CHAVE"].isin(chaves_forn)]
+    if busca.strip():
+        alvo = busca.strip().upper()
+        linhas_df = linhas_df[linhas_df["CHAVE"].str.upper().str.contains(alvo, na=False)]
+    if sel_status:
+        chaves_com_status = set(chave_serie[itens["STATUS"].isin(sel_status)])
+        linhas_df = linhas_df[linhas_df["CHAVE"].isin(chaves_com_status)]
+    if so_estoque:
+        linhas_df = linhas_df[linhas_df["CHAVE"].isin(estoque_por_chave.keys())]
+    linhas_df = linhas_df.assign(_ordem=linhas_df["geral"].map(SUP_GERAL_ORDEM).fillna(9))
+    linhas_df = linhas_df.sort_values(["_ordem", "CHAVE"])
+
+    assinatura = f"{sit_escolhida}|{sel_forn}|{busca}|{sel_status}|{so_estoque}|{mostrar_fora}"
+    linhas_pag = paginate(linhas_df, "suprimentos_tag", assinatura)
+    corpo = "".join(
+        sup_linha_mestre(
+            row["CHAVE"], row.to_dict(),
+            itens[chave_serie == row["CHAVE"]],
+            estoque_por_chave.get(row["CHAVE"]), hoje)
+        for _, row in linhas_pag.iterrows())
+    cabecalho = (
+        '<div class="sup-mestre-cab"><span></span><span>Tag</span>'
+        '<span class="gt-num">Itens</span><span class="gt-num">Recebidos</span>'
+        '<span class="gt-num">Atrasados</span><span>Situação geral</span></div>')
+    render_html(
+        f'<div class="gplan-panel sup-mestre">{cabecalho}'
+        + (corpo or '<div class="gtbl-empty">Nenhuma TAG encontrada para esses filtros.</div>')
+        + "</div>")
+
+    chaves_mostradas = [c for c in linhas_pag["CHAVE"] if universo[c]["eh_gplan"]]
+    fichas = ""
+    for chave in chaves_mostradas:
+        itens_tag = itens[itens["TAG"] == chave]
+        fichas += (f'<div class="fmodal" id="{ficha_anchor(chave)}">'
+                  '<a class="fmodal-bg" href="#fechado" aria-label="Fechar"></a>'
+                  '<div class="fmodal-box">'
+                  '<a class="fmodal-x" href="#fechado" aria-label="Fechar">&times;</a>'
+                  f'{sup_ficha_tag_html(chave, itens_tag, resumo_tags[chave], hoje, movimentacoes)}'
+                  "</div></div>")
+    render_html(fichas)
 
 
 def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame,
