@@ -359,6 +359,18 @@ def _sup_data(v):
     return None if pd.isna(d) else d
 
 
+def _sup_cel(r: pd.Series, col: str, default: str = "—") -> object:
+    """Valor de uma celula do estoque (planilha crua, sem _sup_texto aplicado
+    -- celula vazia chega como NaN, e "NaN or default" nao funciona porque
+    NaN e truthy em Python)."""
+    v = r.get(col)
+    return default if pd.isna(v) else v
+
+
+def _sup_num0(v) -> int:
+    return int(v) if pd.notna(v) else 0
+
+
 def carregar_suprimentos(excel_file: pd.ExcelFile) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Le 09_SUPRIMENTOS_ITENS/09_SUPRIMENTOS_ESTOQUE da planilha combinada
     -- devolve (itens, estoque). Ainda sem historico dia-a-dia (isso e a
@@ -2142,12 +2154,24 @@ def inject_css():
         .stTextInput input, .stNumberInput input, .stTextArea textarea {
           background: var(--dark-card-2) !important; color: var(--text-1) !important;
           border-color: var(--border-color) !important; }
+        /* Fora da lateral o multiselect/selectbox tambem pode nascer BaseWeb
+           em vez de react-aria (achado em 2026-09-07: "Status"/"Situacao" da
+           aba Suprimentos e "Tipo de relatorio"/"Status SIGEM" de Relatorios
+           ficavam pretos no tema claro -- tinham data-baseweb="select" > div,
+           sem role="group" nenhum, e so a regra de cima existia fora da
+           sidebar; dentro da sidebar o fallback ja existia, ver linha ~1946). */
+        [data-testid="stSelectbox"] [data-baseweb="select"] > div,
+        [data-testid="stMultiSelect"] [data-baseweb="select"] > div {
+          background: var(--dark-card-2) !important; color: var(--text-1) !important;
+          border-color: var(--border-color) !important; }
         /* tudo que esta dentro do controle -- valor escolhido, pilulas,
            contador -- e nao so o input: o texto ali nasce com a cor do
            config.toml e no tema claro fica branco sobre branco */
         [data-testid="stSelectbox"] div[role="group"] *,
         [data-testid="stMultiSelect"] div[role="group"] *,
         [data-testid="stTextInput"] div[role="group"] *,
+        [data-testid="stSelectbox"] [data-baseweb="select"] > div *,
+        [data-testid="stMultiSelect"] [data-baseweb="select"] > div *,
         [data-testid="stSelectbox"] input, [data-testid="stMultiSelect"] input,
         [data-testid="stTextInput"] input, [data-testid="stSelectbox"] button,
         [data-testid="stMultiSelect"] button, [role="combobox"] {
@@ -2414,6 +2438,49 @@ def inject_css():
         .sup-tl-data { font-size:11.5px; color:var(--text-2); font-variant-numeric:tabular-nums;
                        white-space:nowrap; }
         .sup-tl-data i { font-style:normal; color:var(--text-3); margin-left:5px; }
+
+        /* Suprimentos -- resumo visual (donut + distribuicao) lado a lado */
+        .sup-row2 { display:grid; grid-template-columns:1fr 1.3fr; gap:16px; margin-bottom:20px; }
+        @media (max-width:900px) { .sup-row2 { grid-template-columns:1fr; } }
+        .sup-donut-row { display:flex; align-items:center; gap:22px; flex-wrap:wrap; }
+        .sup-donut-row .fx-leg { flex:1; min-width:170px; }
+        .sup-sec-titulo { font-size:15px; font-weight:800; margin:32px 0 14px; color:var(--text-1); }
+        .sup-estoque-resumo { display:flex; align-items:center; gap:12px; margin:0 0 16px;
+          font-size:12.5px; color:var(--text-2); }
+        .sup-estoque-resumo b { color:var(--text-1); font-size:14px; }
+
+        /* Tabela mestre por TAG (Opção C, escolhida em 2026-09-07) -- não é
+           <table>: cada linha é um <details>, pra expandir/recolher sem JS e
+           sem rerun do Streamlit -- <tr> não hospeda <details> de forma
+           confiável entre navegadores, e o resto do app já resolve
+           interatividade sem servidor assim (ver fmodal, CSS :target). */
+        .sup-mestre { padding:8px 22px 16px !important; }
+        .sup-mestre-cab, .sup-mestre-linha summary {
+          display:grid; grid-template-columns:22px minmax(140px,1.6fr) 70px 90px 90px 1.3fr;
+          align-items:center; gap:10px; }
+        .sup-mestre-cab { font-size:10.5px; text-transform:uppercase; letter-spacing:.3px;
+          color:var(--text-3); font-weight:700; padding:0 10px 10px;
+          border-bottom:1px solid var(--border-color); }
+        .sup-mestre-linha { border-bottom:1px solid var(--border-color); }
+        .sup-mestre-linha:last-of-type { border-bottom:none; }
+        .sup-mestre-linha summary { list-style:none; cursor:pointer; padding:11px 10px; font-size:12.5px; }
+        .sup-mestre-linha summary::-webkit-details-marker { display:none; }
+        .sup-mestre-linha summary:hover { background:rgba(var(--rgb-tinta),.025); }
+        .sup-mestre-linha .chev { color:var(--text-3); font-size:10px; transition:transform .12s; }
+        .sup-mestre-linha[open] .chev { transform:rotate(90deg); }
+        .sup-mestre-linha .mono { font-family:ui-monospace,Consolas,monospace; font-weight:700;
+          color:var(--text-1); }
+        .sup-mestre-corpo { background:var(--dark-card-2); border-top:1px solid var(--border-color);
+          padding:16px 20px 18px 42px; display:grid; grid-template-columns:1fr 1fr; gap:22px; }
+        @media (max-width:760px) { .sup-mestre-corpo { grid-template-columns:1fr; } }
+        .sup-mestre-corpo .exp-h { font-size:10px; text-transform:uppercase; letter-spacing:.3px;
+          color:var(--text-3); font-weight:700; margin-bottom:8px; }
+        .sup-mestre-corpo .exp-item { display:flex; justify-content:space-between; gap:10px;
+          font-size:12px; padding:6px 0; border-bottom:1px dashed var(--border-color); color:var(--text-2); }
+        .sup-mestre-corpo .exp-item:last-child { border-bottom:none; }
+        .sup-mestre-ficha { display:block; text-align:right; padding:0 20px 14px 0; font-size:11.5px;
+          font-weight:700; color:var(--accent-blue); text-decoration:none; }
+        .sup-mestre-ficha:hover { text-decoration:underline; }
 
         /* rosca */
         .fx-rosca { position:relative; width:112px; aspect-ratio:1; }
@@ -4204,10 +4271,42 @@ def sup_timeline_html(fases: list) -> str:
     return f'<div class="sup-tl">{"".join(linhas)}</div>'
 
 
-def sup_por_tag(itens: pd.DataFrame, hoje: pd.Timestamp) -> dict[str, dict]:
-    """Consolida os itens de cada TAG num resumo -- uma TAG pode ter 0 a N."""
+SUP_GERAL_COR = {
+    "100% recebido": "#2dd4bf", "Em fornecimento": "#5b8def", "Atrasado": "#f87171",
+    "Parcialmente recebido": "#fbbf24", "Cancelado": "#3a4a68",
+}
+SUP_GERAL_TOM = {
+    "100% recebido": "ok", "Em fornecimento": "andamento", "Atrasado": "crit",
+    "Parcialmente recebido": "warn", "Cancelado": "mudo",
+}
+# Ordem de urgencia (tabela mestre): atrasado primeiro. A ordem de EXIBICAO
+# dos chips/fatias do donut e outra (ver SUP_GERAL_ROTULOS), de proposito.
+SUP_GERAL_ORDEM = {"Atrasado": 0, "Parcialmente recebido": 1, "Em fornecimento": 2,
+                   "100% recebido": 3, "Cancelado": 4}
+SUP_GERAL_ROTULOS = ["100% recebido", "Em fornecimento", "Atrasado",
+                     "Parcialmente recebido", "Cancelado"]
+
+
+def sup_por_tag(itens: pd.DataFrame, hoje: pd.Timestamp,
+                tags_gplan: set[str] | None = None) -> dict[str, dict]:
+    """Consolida os itens por TAG -- ou pelo codigo do item quando a linha
+    nao tem TAG, mesmo criterio do `comparar_suprimentos` (movimentacoes.py,
+    no pipeline): sem TAG, o identificador vira o codigo do item.
+
+    `eh_gplan` marca se a chave bate com uma TAG real de 01_BASE_TAGS.
+    Investigacao de 2026-09-07: boa parte do que NAO bate nao e TAG nenhuma
+    de verdade -- e o codigo da propria requisicao no lugar da TAG, porque a
+    linha e um KIT/acessorio amarrado a uma TAG real (ex. "KIT6_FV120058B",
+    "VE-120994B_AD" -- o TITULO da linha cita a TAG real entre parenteses)
+    ou material generico de requisicao em lote, sem TAG nenhuma por natureza
+    (ex. "INS-UDAPL-101": "PLAQUETA DE IDENTIFICACAO PARA INSTRUMENTO").
+    """
+    tags_gplan = tags_gplan or set()
+    chave_serie = itens["TAG"].where(itens["TAG"] != "", itens["IDENT_CODE"])
     por_tag: dict[str, dict] = {}
-    for tag, grupo in itens[itens["TAG"] != ""].groupby("TAG"):
+    for chave, grupo in itens.groupby(chave_serie):
+        if not chave:
+            continue
         situacoes = [sup_situacao(r, hoje) for _, r in grupo.iterrows()]
         n = len(grupo)
         recebidos = sum(1 for s, _ in situacoes if s == "Recebido")
@@ -4224,8 +4323,9 @@ def sup_por_tag(itens: pd.DataFrame, hoje: pd.Timestamp) -> dict[str, dict]:
             geral = "Atrasado"
         else:
             geral = "Em fornecimento"
-        por_tag[tag] = {"n_itens": n, "recebidos": recebidos, "atrasados": atrasados,
-                        "cancelados": cancelados, "geral": geral}
+        por_tag[chave] = {"n_itens": n, "recebidos": recebidos, "atrasados": atrasados,
+                          "cancelados": cancelados, "geral": geral,
+                          "tem_tag": bool(grupo["TAG"].iloc[0]), "eh_gplan": chave in tags_gplan}
     return por_tag
 
 
@@ -4283,18 +4383,92 @@ def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
             "</div></div></div>")
 
 
+def sup_donut(fatias: list[tuple[str, int, str]], total: int, rotulo_centro: str) -> str:
+    """Donut multi-fatia reaproveitando o desenho SVG do du_status (Dashboard,
+    "Status SIGEM"), so que fora do layout de altura fixa dele -- fatias e
+    [(rotulo, valor, cor-hex-do-FX_COR), ...] ja na ordem de exibicao."""
+    raio, largura = 46.0, 13.0
+    circ = 2 * math.pi * raio
+    arcos, giro = "", 0.0
+    for rotulo, valor, cor in fatias:
+        comp = (valor / total * circ) if total else 0.0
+        arcos += (f'<circle class="fatia {fx_classe_cor(cor)}" cx="60" cy="60" r="{raio}" fill="none" '
+                 f'stroke-width="{largura}" stroke-dasharray="{comp:.2f} {circ - comp:.2f}" '
+                 f'stroke-dashoffset="{-giro:.2f}" transform="rotate(-90 60 60)">'
+                 f'<title>{esc(rotulo)} · {br_num(valor)}</title></circle>')
+        giro += comp
+    legenda = "".join(
+        fx_lg(rotulo, br_num(valor), br_pct(valor / total * 100) if total else "—", cor)
+        for rotulo, valor, cor in fatias)
+    return (
+        '<div class="sup-donut-row"><div class="du-rosca"><svg viewBox="0 0 120 120">'
+        f'<circle class="trilho" cx="60" cy="60" r="{raio}" fill="none" stroke-width="{largura}"></circle>'
+        f'{arcos}</svg><div class="centro"><b>{br_num(total)}</b><span>{esc(rotulo_centro)}</span></div>'
+        f'</div><div class="fx-leg">{legenda}</div></div>')
+
+
+def sup_linha_mestre(chave: str, info: dict, itens_grupo: pd.DataFrame,
+                     estoque_grupo: pd.DataFrame | None, hoje: pd.Timestamp) -> str:
+    """Uma linha da tabela mestre por TAG (Opção C) -- um <details>, não uma
+    <tr>: precisa expandir/recolher por linha sem JS e sem rerun do
+    Streamlit, e <tr> não aceita <details> por dentro de forma confiável
+    entre navegadores. Mesma filosofia do fmodal (CSS puro, sem servidor).
+    """
+    geral = info["geral"]
+    tom = SUP_GERAL_TOM.get(geral, "mudo")
+    if info["eh_gplan"]:
+        tag_html = f'<span class="mono">{esc(chave)}</span>'
+    else:
+        rotulo_extra = "fora do Gplan" if info["tem_tag"] else "sem TAG (código do item)"
+        tag_html = (f'<span class="mono gtbl-muted">{esc(chave)}</span> '
+                   f'<span class="gtbl-badge mudo">{rotulo_extra}</span>')
+
+    itens_html = "".join(
+        f'<div class="exp-item"><span>{esc(r["DESCRICAO_MATERIAL"][:55].replace(chr(10), " "))}</span>'
+        f'<span class="gtbl-badge {sup_situacao(r, hoje)[1]}">{esc(sup_situacao(r, hoje)[0])}</span></div>'
+        for _, r in itens_grupo.iterrows()) or '<div class="exp-item gtbl-muted">Sem itens.</div>'
+
+    if estoque_grupo is not None and not estoque_grupo.empty:
+        estoque_html = "".join(
+            f'<div class="exp-item"><span>{esc(str(_sup_cel(r, "Descrição Curta", ""))[:45].replace(chr(10), " "))}'
+            f' · {esc(_sup_cel(r, "Almoxarifado"))}</span>'
+            f'<span class="gtbl-muted">{br_num(_sup_num0(r.get("Quantidade Estoque")))} em estoque</span></div>'
+            for _, r in estoque_grupo.iterrows())
+    else:
+        estoque_html = ('<div class="exp-item gtbl-muted">Nenhum registro de estoque '
+                        "cruzado com esta TAG.</div>")
+
+    ficha_link = (f'<a class="sup-mestre-ficha" href="#{ficha_anchor(chave)}">Ver ficha completa →</a>'
+                 if info["eh_gplan"] else "")
+
+    return (
+        f'<details class="sup-mestre-linha"><summary>'
+        f'<span class="chev">▸</span>{tag_html}'
+        f'<span class="gt-num">{br_num(info["n_itens"])}</span>'
+        f'<span class="gt-num">{br_num(info["recebidos"])}</span>'
+        f'<span class="gt-num">{br_num(info["atrasados"])}</span>'
+        f'<span class="gtbl-badge {tom}">{esc(geral)}</span></summary>'
+        f'<div class="sup-mestre-corpo">'
+        f'<div><div class="exp-h">Itens ({info["n_itens"]})</div>{itens_html}</div>'
+        f'<div><div class="exp-h">Estoque relacionado</div>{estoque_html}</div>'
+        f'</div>{ficha_link}</details>')
+
+
 def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
                        tags: pd.DataFrame, movimentacoes: pd.DataFrame,
                        cache_key: str = ""):
     """Rastreabilidade de suprimento por TAG -- estado atual da
     09_BASE_SUPRIMENTOS.xlsx (Mapa de Suprimentos UDA, só Instrumentação)
     mais o histórico de mudança de status por TAG (Fase 2, gravado pelo
-    pipeline em 14_MOVIMENTACOES, tipo "suprimento").
+    pipeline em 14_MOVIMENTACOES, tipo "suprimento"), mais o estoque do
+    almoxarifado (09_SUPRIMENTOS_ESTOQUE).
 
-    Não é a planilha exibida: cada item guarda o ciclo inteiro (Requisição
-    até Entrega na Obra, com Previsto/Reprogramado/Real por etapa), e essa
-    tela responde "qual é a situação do suprimento de cada TAG", não "qual é
-    a linha da planilha".
+    Layout "master-detail" (Opção C, escolhida pelo Daniel em 2026-09-07
+    entre 3 mockups): resumo visual (donut + distribuição por status) no
+    topo, depois um trilho de filtro (situação geral, status do item, busca,
+    só-com-estoque) ao lado de uma tabela por TAG cujas linhas expandem
+    inline (itens + estoque cruzado) sem abrir a ficha -- a ficha completa
+    (com timeline e histórico) continua a um clique, dentro da linha aberta.
     """
     render_header("Suprimentos")
     if itens.empty:
@@ -4308,14 +4482,18 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
         return
 
     hoje = pd.Timestamp.now(tz=BR_TZ).tz_localize(None).normalize()
-    resumo_tags = sup_por_tag(itens, hoje)
-
     tags_gplan = set(tags["TAG"].astype(str))
-    tags_com_sup = set(resumo_tags)
+    resumo_tags = sup_por_tag(itens, hoje, tags_gplan)
+    # So os que batem com 01_BASE_TAGS -- os KPIs tem que contar a mesma
+    # populacao que "Com suprimento identificado", senao "100% recebidas"
+    # inclui codigo de kit/material generico que nunca foi TAG (achado de
+    # 2026-09-07: 797 "100% recebido" citado pelo Daniel tinha 154 desses).
+    resumo_gplan = {k: v for k, v in resumo_tags.items() if v["eh_gplan"]}
+
     total_tags = len(tags_gplan)
-    com_sup = len(tags_com_sup & tags_gplan)
-    recebidas = sum(1 for r in resumo_tags.values() if r["geral"] == "100% recebido")
-    atrasadas = sum(1 for r in resumo_tags.values() if r["atrasados"] > 0)
+    com_sup = len(resumo_gplan)
+    recebidas = sum(1 for r in resumo_gplan.values() if r["geral"] == "100% recebido")
+    atrasadas = sum(1 for r in resumo_gplan.values() if r["atrasados"] > 0)
     pct_atendimento = (recebidas / com_sup * 100) if com_sup else 0.0
 
     kpis = (
@@ -4333,7 +4511,12 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
     )
     render_html(f'<section class="du-kpis">{kpis}</section>')
 
-    # -------------------------------------------------------- distribuição
+    # ------------------------------------------------------- resumo visual
+    contagem_geral = collections.Counter(r["geral"] for r in resumo_gplan.values())
+    fatias_geral = [(rot, contagem_geral[rot], SUP_GERAL_COR[rot]) for rot in SUP_GERAL_ROTULOS
+                    if contagem_geral[rot]]
+    donut_html = sup_donut(fatias_geral, com_sup, "tags")
+
     contagem_status = itens["STATUS"].apply(lambda s: s or "Sem status").value_counts()
     maior = int(contagem_status.max()) if len(contagem_status) else 1
     linhas_status = "".join(
@@ -4342,64 +4525,153 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
         f'<span class="gr-pct">{br_num(int(qtd))}</span></div>'
         f'<div class="gr-track"><div class="gr-fill" style="width:{qtd/maior*100:.1f}%;"></div></div></div>'
         for status, qtd in contagem_status.items())
-    render_html(f'<div class="gplan-panel gr-panel"><div class="gplan-panel-title">'
-               f'Distribuição por status</div>{linhas_status}</div>')
+    render_html(
+        '<div class="sup-row2">'
+        f'<div class="gplan-panel"><div class="gplan-panel-title">'
+        f'Situação das {br_num(com_sup)} TAGs com suprimento</div>{donut_html}</div>'
+        f'<div class="gplan-panel gr-panel"><div class="gplan-panel-title">'
+        f'Status dos itens na planilha de suprimentos</div>{linhas_status}</div>'
+        '</div>')
 
-    # ------------------------------------------------------------- filtros
-    busca = st.text_input("Buscar TAG ou material", key="sup_busca",
-                          placeholder="Digite a TAG ou parte da descrição do material…")
-    status_opts = sorted({s for s in itens["STATUS"] if s})
-    col1, col2 = st.columns(2)
-    with col1:
-        sel_status = st.multiselect("Status", status_opts, key="sup_status")
-    with col2:
-        sel_situacao = st.multiselect(
-            "Situação", ["Recebido", "Em andamento", "Atrasado", "Cancelado", "Sem status"],
-            key="sup_situacao")
+    # ------------------------------------------------------ trilho + tabela
+    mostrar_fora = st.checkbox(
+        "Mostrar também códigos fora da base de TAGs (kits, acessórios, material genérico)",
+        key="sup_fora_gplan",
+        help='A maioria não é uma TAG individual: é o código da própria requisição no lugar da '
+             'TAG, porque a linha é um kit/acessório amarrado a uma TAG real (ex.: "KIT6_FV120058B", '
+             '"VE-120994B_AD") ou material genérico de requisição em lote, sem TAG por natureza '
+             '(ex.: "INS-UDAPL-101", plaquetas de identificação). Ative para ver também esses.')
+    universo = resumo_tags if mostrar_fora else resumo_gplan
+    chave_serie = itens["TAG"].where(itens["TAG"] != "", itens["IDENT_CODE"])
 
-    vista = itens.copy()
-    vista["_situacao"] = vista.apply(lambda r: sup_situacao(r, hoje)[0], axis=1)
+    estoque_por_chave: dict[str, pd.DataFrame] = {}
+    if not estoque.empty and "Tag Number" in estoque.columns:
+        et = estoque.copy()
+        et["_chave"] = et["Tag Number"].astype(str).str.strip()
+        et.loc[et["_chave"].str.lower().isin(["nan", "none", ""]), "_chave"] = ""
+        for chave_e, grupo_e in et[et["_chave"] != ""].groupby("_chave"):
+            estoque_por_chave[chave_e] = grupo_e
+
+    rail_col, main_col = st.columns([1, 3], gap="large")
+    with rail_col:
+        contagem_sit = collections.Counter(r["geral"] for r in universo.values())
+        opcoes_sit = ["Todas"] + [r for r in SUP_GERAL_ROTULOS if contagem_sit[r]]
+        contagens_sit = {"Todas": len(universo), **contagem_sit}
+        sit_escolhida = st.segmented_control(
+            "Situação geral", opcoes_sit,
+            format_func=lambda x: f"{x} · {br_num(contagens_sit.get(x, 0))}",
+            default="Todas", key="sup_geral") or "Todas"
+        status_opts = sorted({s for s in itens["STATUS"] if s})
+        sel_status = st.multiselect("Status do item", status_opts, key="sup_status")
+        busca = st.text_input("Buscar TAG", key="sup_busca", placeholder="Digite a TAG…")
+        so_estoque = st.checkbox("Só com registro no almoxarifado", key="sup_so_estoque")
+
+    linhas_df = pd.DataFrame(
+        [{"CHAVE": k, **v} for k, v in universo.items()],
+        columns=["CHAVE", "n_itens", "recebidos", "atrasados", "cancelados", "geral",
+                "tem_tag", "eh_gplan"])
+    if sit_escolhida != "Todas":
+        linhas_df = linhas_df[linhas_df["geral"] == sit_escolhida]
     if busca.strip():
         alvo = busca.strip().upper()
-        vista = vista[vista["TAG"].str.upper().str.contains(alvo, na=False)
-                     | vista["DESCRICAO_MATERIAL"].str.upper().str.contains(alvo, na=False)]
+        linhas_df = linhas_df[linhas_df["CHAVE"].str.upper().str.contains(alvo, na=False)]
     if sel_status:
-        vista = vista[vista["STATUS"].isin(sel_status)]
-    if sel_situacao:
-        vista = vista[vista["_situacao"].isin(sel_situacao)]
+        chaves_com_status = set(chave_serie[itens["STATUS"].isin(sel_status)])
+        linhas_df = linhas_df[linhas_df["CHAVE"].isin(chaves_com_status)]
+    if so_estoque:
+        linhas_df = linhas_df[linhas_df["CHAVE"].isin(estoque_por_chave.keys())]
+    linhas_df = linhas_df.assign(_ordem=linhas_df["geral"].map(SUP_GERAL_ORDEM).fillna(9))
+    linhas_df = linhas_df.sort_values(["_ordem", "CHAVE"])
 
-    # ----------------------------------------------------------- tabela
-    vista_pag = paginate(vista, "suprimentos", f"{busca}|{sel_status}|{sel_situacao}")
-    linhas = ""
-    for _, r in vista_pag.iterrows():
-        rotulo, tom = r["_situacao"], {"Recebido": "ok", "Atrasado": "crit",
-                                       "Cancelado": "andamento", "Sem status": "mudo",
-                                       "Em andamento": "warn"}[r["_situacao"]]
-        linhas += (
-            f'<tr><td>{tag_link(r["TAG"]) if r["TAG"] else "<span class=\"gtbl-muted\">—</span>"}</td>'
-            f'<td class="gt-corta">{esc(r["DESCRICAO_MATERIAL"][:60].replace(chr(10), " "))}</td>'
-            f'<td class="gtbl-muted gt-corta">{esc(r["FORNECEDOR"] or "—")}</td>'
-            f'<td>{sup_status_pill(r["STATUS"])}</td>'
-            f'<td><span class="gtbl-badge {tom}">{esc(rotulo)}</span></td>'
-            f'<td class="gtbl-num">{br_pct(r["TOTAL_PROGRESSO"])}</td></tr>')
-    render_html(
-        '<div class="gplan-panel">'
-        + html_table(["Tag", "Material", "Fornecedor", "Status", "Situação", "#Progresso"],
-                     linhas, "Nenhum item de suprimento encontrado para esses filtros.")
-        + "</div>")
+    with main_col:
+        assinatura = f"{sit_escolhida}|{busca}|{sel_status}|{so_estoque}|{mostrar_fora}"
+        linhas_pag = paginate(linhas_df, "suprimentos_tag", assinatura)
+        corpo = "".join(
+            sup_linha_mestre(
+                row["CHAVE"], row.to_dict(),
+                itens[chave_serie == row["CHAVE"]],
+                estoque_por_chave.get(row["CHAVE"]), hoje)
+            for _, row in linhas_pag.iterrows())
+        cabecalho = (
+            '<div class="sup-mestre-cab"><span></span><span>Tag</span>'
+            '<span class="gt-num">Itens</span><span class="gt-num">Recebidos</span>'
+            '<span class="gt-num">Atrasados</span><span>Situação geral</span></div>')
+        render_html(
+            f'<div class="gplan-panel sup-mestre">{cabecalho}'
+            + (corpo or '<div class="gtbl-empty">Nenhuma TAG encontrada para esses filtros.</div>')
+            + "</div>")
 
-    # ---------------------------------------------------------- ficha de tag
-    tags_mostradas = [t for t in dict.fromkeys(vista_pag["TAG"]) if t]
+    chaves_mostradas = [c for c in linhas_pag["CHAVE"] if universo[c]["eh_gplan"]]
     fichas = ""
-    for tag in tags_mostradas:
-        itens_tag = itens[itens["TAG"] == tag]
-        fichas += (f'<div class="fmodal" id="{ficha_anchor(tag)}">'
+    for chave in chaves_mostradas:
+        itens_tag = itens[itens["TAG"] == chave]
+        fichas += (f'<div class="fmodal" id="{ficha_anchor(chave)}">'
                   '<a class="fmodal-bg" href="#fechado" aria-label="Fechar"></a>'
                   '<div class="fmodal-box">'
                   '<a class="fmodal-x" href="#fechado" aria-label="Fechar">&times;</a>'
-                  f'{sup_ficha_tag_html(tag, itens_tag, resumo_tags[tag], hoje, movimentacoes)}'
+                  f'{sup_ficha_tag_html(chave, itens_tag, resumo_tags[chave], hoje, movimentacoes)}'
                   "</div></div>")
     render_html(fichas)
+
+    # --------------------------------------------------------------- estoque
+    if estoque.empty:
+        return
+    render_html('<h3 class="sup-sec-titulo">Estoque (almoxarifado)</h3>')
+    contagem_conf = estoque["Status"].value_counts() if "Status" in estoque.columns else pd.Series(dtype=int)
+    render_html(
+        '<div class="sup-estoque-resumo">'
+        f'<span><b>{br_num(len(estoque))}</b> registros no almoxarifado</span>'
+        f'<span class="gtbl-badge ok">{br_num(int(contagem_conf.get("CONFORME", 0)))} conforme</span>'
+        f'<span class="gtbl-badge crit">{br_num(int(contagem_conf.get("CEDIDO-UCR", 0)))} cedido-UCR</span>'
+        '</div>')
+
+    busca_est = st.text_input("Buscar material ou código Consag", key="sup_est_busca",
+                              placeholder="Digite a descrição ou código…")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        almox_opts = sorted({a for a in estoque.get("Almoxarifado", pd.Series(dtype=str))
+                             .dropna().astype(str) if a})
+        sel_almox = st.multiselect("Almoxarifado", almox_opts, key="sup_est_almox")
+    with col_b:
+        sel_conf = st.multiselect("Conformidade", sorted(contagem_conf.index.tolist()), key="sup_est_conf")
+
+    vista_est = estoque.copy()
+    if busca_est.strip():
+        alvo = busca_est.strip().upper()
+        campos_busca = [c for c in ("Descrição Curta", "Descrição Longa", "Codigo Consag", "Tag Number")
+                        if c in vista_est.columns]
+        mascara = pd.Series(False, index=vista_est.index)
+        for c in campos_busca:
+            mascara = mascara | vista_est[c].astype(str).str.upper().str.contains(alvo, na=False)
+        vista_est = vista_est[mascara]
+    if sel_almox:
+        vista_est = vista_est[vista_est["Almoxarifado"].isin(sel_almox)]
+    if sel_conf:
+        vista_est = vista_est[vista_est["Status"].isin(sel_conf)]
+
+    vista_est_pag = paginate(vista_est, "suprimentos_estoque", f"{busca_est}|{sel_almox}|{sel_conf}")
+    linhas_est = ""
+    for _, r in vista_est_pag.iterrows():
+        tagn = _sup_texto(r.get("Tag Number"))
+        tag_cell = (tag_link(tagn) if tagn and tagn in tags_gplan else
+                   (f'<span class="mono gtbl-muted">{esc(tagn)}</span>' if tagn
+                    else '<span class="gtbl-muted">—</span>'))
+        conf = str(_sup_cel(r, "Status", ""))
+        tom_conf = "ok" if conf == "CONFORME" else "crit"
+        linhas_est += (
+            f'<tr><td>{tag_cell}</td>'
+            f'<td class="gt-corta">{esc(str(_sup_cel(r, "Descrição Curta", ""))[:60].replace(chr(10), " "))}</td>'
+            f'<td class="gtbl-muted gt-corta">{esc(_sup_cel(r, "Almoxarifado"))} · '
+            f'{esc(_sup_cel(r, "Localização"))}</td>'
+            f'<td class="gtbl-num">{br_num(_sup_num0(r.get("Quantidade Recebida")))}</td>'
+            f'<td class="gtbl-num">{br_num(_sup_num0(r.get("Quantidade Estoque")))}</td>'
+            f'<td class="gtbl-num">{br_num(_sup_num0(r.get("Quantidade Reservada")))}</td>'
+            f'<td><span class="gtbl-badge {tom_conf}">{esc(sentence_case(conf) if conf else "—")}</span></td></tr>')
+    render_html(
+        '<div class="gplan-panel">'
+        + html_table(["Tag", "Material", "Local", "#Recebida", "#Estoque", "#Reservada", "Conformidade"],
+                     linhas_est, "Nenhum registro de estoque encontrado para esses filtros.")
+        + "</div>")
 
 
 def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.DataFrame,
