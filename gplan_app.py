@@ -4373,23 +4373,6 @@ def sup_sec_titulo(texto: str) -> str:
     return f'<div class="sup-eyebrow">{esc(texto)}</div>'
 
 
-def consume_sup_url_filters() -> None:
-    """Aplica ?sup_geral= vindo de um clique num KPI da própria Suprimentos,
-    uma única vez -- mesmo mecanismo do consume_url_filters (Dashboard ->
-    Relatórios): token no próprio query string pra não reaplicar a cada
-    rerun e sobrescrever o que o usuário escolher manualmente depois de
-    chegar pelo link. Pedido do Daniel, 2026-09-07 ("clicar em TAGs com
-    atraso devia levar direto pro filtro")."""
-    geral = st.query_params.get("sup_geral")
-    if geral is None or geral not in (["Todas"] + SUP_GERAL_ROTULOS):
-        return
-    token = f"sup_geral:{geral}"
-    if st.session_state.get("_sup_flt_token") == token:
-        return
-    st.session_state["_sup_flt_token"] = token
-    st.session_state["sup_geral"] = geral
-
-
 def sup_por_tag(itens: pd.DataFrame, hoje: pd.Timestamp,
                 tags_gplan: set[str] | None = None) -> dict[str, dict]:
     """Consolida os itens por TAG -- ou pelo codigo do item quando a linha
@@ -4713,7 +4696,6 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
         render_estoque_geral(estoque, tags_gplan)
         return
 
-    consume_sup_url_filters()
     hoje = pd.Timestamp.now(tz=BR_TZ).tz_localize(None).normalize()
     resumo_tags = sup_por_tag(itens, hoje, tags_gplan)
     # So os que batem com 01_BASE_TAGS -- os KPIs tem que contar a mesma
@@ -4728,25 +4710,18 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
     atrasadas = sum(1 for r in resumo_gplan.values() if r["atrasados"] > 0)
     pct_atendimento = (recebidas / com_sup * 100) if com_sup else 0.0
 
-    # KPIs clicaveis -- pedido do Daniel, 2026-09-07: "Com suprimento",
-    # "100% recebidas" e "com atraso" levam direto pro filtro "Situação
-    # geral" ja aplicado (ver consume_sup_url_filters). "Total de TAGs" e
-    # "Sem suprimento identificado" ficam sem link -- nao tem filtro
-    # equivalente aqui, ja que a tabela so mostra quem TEM suprimento.
     kpis = (
         du_kpi("Total de TAGs", br_num(total_tags), "", 1.0, "#5b8def", "shield")
         + du_kpi("Com suprimento identificado", br_num(com_sup),
                  f"{br_pct(com_sup / total_tags * 100) if total_tags else '—'} do total",
-                 (com_sup / total_tags) if total_tags else 0, "#9d6bff", "documento",
-                 href="/suprimentos?sup_geral=Todas")
+                 (com_sup / total_tags) if total_tags else 0, "#9d6bff", "documento")
         + du_kpi("Sem suprimento identificado", br_num(total_tags - com_sup), "",
                  (1 - com_sup / total_tags) if total_tags else 0, "#7c8aa8", "pasta")
         + du_kpi("TAGs 100% recebidas", br_num(recebidas),
                  f"{br_pct(pct_atendimento)} de atendimento",
-                 (recebidas / com_sup) if com_sup else 0, "#34d399", "check",
-                 href="/suprimentos?sup_geral=" + quote("100% recebido"))
+                 (recebidas / com_sup) if com_sup else 0, "#34d399", "check")
         + du_kpi("TAGs com atraso", br_num(atrasadas), "", (atrasadas / com_sup) if com_sup else 0,
-                 "#f87171", "clock", href="/suprimentos?sup_geral=" + quote("Atrasado"))
+                 "#f87171", "clock")
     )
     render_html(f'<section class="du-kpis">{kpis}</section>')
 
