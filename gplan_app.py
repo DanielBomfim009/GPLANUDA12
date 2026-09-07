@@ -2464,9 +2464,14 @@ def inject_css():
           font-size:13px !important; padding:10px 20px !important; }
 
         /* Suprimentos -- resumo visual (donut + distribuicao) lado a lado */
-        .sup-row2 { display:grid; grid-template-columns:1fr 1.3fr; gap:16px; margin-bottom:20px;
+        /* 2 donuts lado a lado (situacao + fornecimento contratada), barras
+           de status numa linha propria embaixo -- pedido do Daniel,
+           2026-09-07, pra nao esticar um card pequeno pra bater a altura
+           de um vizinho bem mais alto (achado no visual 2.0). */
+        .sup-row2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;
           align-items:stretch; }
         @media (max-width:900px) { .sup-row2 { grid-template-columns:1fr; } }
+        .sup-row3 { margin-bottom:20px; }
         .sup-donut-panel { display:flex; flex-direction:column; }
         .sup-donut-row { display:flex; align-items:center; gap:22px; flex-wrap:wrap; }
         .sup-donut-row .fx-leg { flex:1; min-width:170px; }
@@ -4693,8 +4698,39 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
     contagem_geral = collections.Counter(r["geral"] for r in resumo_gplan.values())
     fatias_geral = [(rot, contagem_geral[rot], SUP_GERAL_COR[rot]) for rot in SUP_GERAL_ROTULOS
                     if contagem_geral[rot]]
-    donut_html = sup_donut(fatias_geral, com_sup, "tags",
-                           rodape=("Taxa de atendimento", br_pct(pct_atendimento)))
+    donut_situacao = sup_donut(fatias_geral, com_sup, "tags",
+                               rodape=("Taxa de atendimento", br_pct(pct_atendimento)))
+
+    # "Fornecimento da Contratada" -- pedido do Daniel, 2026-09-07: TAGs cujo
+    # STATUS_FINAL diz que a compra e obrigacao da Contratada (ON DEMAND ou
+    # EM COMPRA) TEM que ter rastro na base de suprimentos. Este card mede a
+    # cobertura -- quantas ja aparecem la (e em que situacao) e quantas ainda
+    # faltam aparecer. Nao inclui EM REPARO de proposito: e outro motivo de
+    # a TAG cair na base (reprovou em calibracao/inspecao, precisa so de
+    # componente novo, nao e fornecimento contratual) -- confundir os dois
+    # inflaria a cobertura sem essa distincao valer nada.
+    contratada_tags = set(tags.loc[tags["STATUS_FINAL"].isin(["ON DEMAND", "EM COMPRA"]),
+                                   "TAG"].astype(str))
+    contagem_contratada = collections.Counter(
+        resumo_gplan[t]["geral"] if t in resumo_gplan else "Fora da base de suprimentos"
+        for t in contratada_tags)
+    total_contratada = len(contratada_tags)
+    fora_base = contagem_contratada["Fora da base de suprimentos"]
+    cobertura = ((total_contratada - fora_base) / total_contratada * 100) if total_contratada else 0.0
+    fatias_contratada = [(rot, contagem_contratada[rot], SUP_GERAL_COR[rot])
+                         for rot in SUP_GERAL_ROTULOS if contagem_contratada[rot]]
+    if fora_base:
+        fatias_contratada.append(("Fora da base de suprimentos", fora_base, "#7c8aa8"))
+    donut_contratada = sup_donut(fatias_contratada, total_contratada, "tags",
+                                 rodape=("Cobertura na base de suprimentos", br_pct(cobertura)))
+
+    render_html(
+        '<div class="sup-row2">'
+        f'<div class="gplan-panel sup-donut-panel"><div class="gplan-panel-title">'
+        f'Situação das {br_num(com_sup)} TAGs com suprimento</div>{donut_situacao}</div>'
+        f'<div class="gplan-panel sup-donut-panel"><div class="gplan-panel-title">'
+        f'Fornecimento da Contratada ({br_num(total_contratada)})</div>{donut_contratada}</div>'
+        '</div>')
 
     contagem_status = itens["STATUS"].apply(lambda s: s or "Sem status").value_counts()
     maior = int(contagem_status.max()) if len(contagem_status) else 1
@@ -4705,12 +4741,8 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
         f'<div class="gr-track"><div class="gr-fill" style="width:{qtd/maior*100:.1f}%;"></div></div></div>'
         for status, qtd in contagem_status.items())
     render_html(
-        '<div class="sup-row2">'
-        f'<div class="gplan-panel sup-donut-panel"><div class="gplan-panel-title">'
-        f'Situação das {br_num(com_sup)} TAGs com suprimento</div>{donut_html}</div>'
-        f'<div class="gplan-panel gr-panel"><div class="gplan-panel-title">'
-        f'Status dos itens na planilha de suprimentos</div>{linhas_status}</div>'
-        '</div>')
+        f'<div class="gplan-panel gr-panel sup-row3"><div class="gplan-panel-title">'
+        f'Status dos itens na planilha de suprimentos</div>{linhas_status}</div>')
 
     # ------------------------------------------------------ trilho + tabela
     render_html(sup_sec_titulo("TAGs com suprimento"))
