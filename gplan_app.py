@@ -4701,16 +4701,19 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
     donut_situacao = sup_donut(fatias_geral, com_sup, "tags",
                                rodape=("Taxa de atendimento", br_pct(pct_atendimento)))
 
-    # "Fornecimento da Contratada" -- pedido do Daniel, 2026-09-07: TAGs cujo
-    # STATUS_FINAL diz que a compra e obrigacao da Contratada (ON DEMAND ou
-    # EM COMPRA) TEM que ter rastro na base de suprimentos. Este card mede a
-    # cobertura -- quantas ja aparecem la (e em que situacao) e quantas ainda
-    # faltam aparecer. Nao inclui EM REPARO de proposito: e outro motivo de
-    # a TAG cair na base (reprovou em calibracao/inspecao, precisa so de
-    # componente novo, nao e fornecimento contratual) -- confundir os dois
-    # inflaria a cobertura sem essa distincao valer nada.
-    contratada_tags = set(tags.loc[tags["STATUS_FINAL"].isin(["ON DEMAND", "EM COMPRA"]),
-                                   "TAG"].astype(str))
+    # "Fornecimento da Contratada" -- pedido do Daniel, 2026-09-07: a
+    # obrigacao de quem fornece cada TAG vem da propria coluna FORNECIMENTO
+    # da 01_BASE_TAGS ("Contratada"/"Petrobras"/"Fora do Anexo I Apêndice
+    # 3"), preenchida uma vez por TAG -- nao de STATUS_FINAL (tentativa
+    # errada: ON DEMAND/EM COMPRA e o estado ATUAL da compra, nao quem tem a
+    # obrigacao de fornecer -- o Daniel corrigiu). FORNECIMENTO nunca tinha
+    # entrado no pipeline antes (so FORNECIMENTO2, a data antiga e
+    # descontinuada); adicionada a TAG_EXTRA_COLUMNS em
+    # update_current_workbook_from_bases.py nesta mesma rodada. Este card
+    # mede a cobertura -- quantas das TAGs "Contratada" ja aparecem na base
+    # de suprimentos (e em que situacao) e quantas ainda faltam aparecer.
+    contratada_tags = (set(tags.loc[tags["FORNECIMENTO"] == "Contratada", "TAG"].astype(str))
+                       if "FORNECIMENTO" in tags.columns else set())
     contagem_contratada = collections.Counter(
         resumo_gplan[t]["geral"] if t in resumo_gplan else "Fora da base de suprimentos"
         for t in contratada_tags)
