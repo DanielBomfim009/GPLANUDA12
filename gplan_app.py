@@ -4357,6 +4357,23 @@ def sup_sec_titulo(texto: str) -> str:
     return f'<div class="sup-eyebrow">{esc(texto)}</div>'
 
 
+def consume_sup_url_filters() -> None:
+    """Aplica ?sup_geral= vindo de um clique num KPI da própria Suprimentos,
+    uma única vez -- mesmo mecanismo do consume_url_filters (Dashboard ->
+    Relatórios): token no próprio query string pra não reaplicar a cada
+    rerun e sobrescrever o que o usuário escolher manualmente depois de
+    chegar pelo link. Pedido do Daniel, 2026-09-07 ("clicar em TAGs com
+    atraso devia levar direto pro filtro")."""
+    geral = st.query_params.get("sup_geral")
+    if geral is None or geral not in (["Todas"] + SUP_GERAL_ROTULOS):
+        return
+    token = f"sup_geral:{geral}"
+    if st.session_state.get("_sup_flt_token") == token:
+        return
+    st.session_state["_sup_flt_token"] = token
+    st.session_state["sup_geral"] = geral
+
+
 def sup_por_tag(itens: pd.DataFrame, hoje: pd.Timestamp,
                 tags_gplan: set[str] | None = None) -> dict[str, dict]:
     """Consolida os itens por TAG -- ou pelo codigo do item quando a linha
@@ -4597,6 +4614,21 @@ def render_estoque_geral(estoque: pd.DataFrame, tags_gplan: set[str]) -> None:
     if sel_conf:
         vista_est = vista_est[vista_est["Status"].isin(sel_conf)]
 
+    # Exportar -- pedido do Daniel, 2026-09-07: baixa o filtrado inteiro,
+    # mesmo padrao de export do resto do app.
+    col_info, col_export = st.columns([5, 1], vertical_alignment="center")
+    with col_info:
+        st.caption(f"{br_num(len(vista_est))} registros encontrados para esses filtros.")
+    with col_export:
+        cols_export_est = [c for c in ("Tag Number", "Descrição Curta", "Almoxarifado", "Localização",
+                                       "Quantidade Recebida", "Quantidade Estoque",
+                                       "Quantidade Reservada", "Status") if c in vista_est.columns]
+        exportar_est = vista_est[cols_export_est]
+        st.download_button(
+            "Exportar", exportar_est.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+            file_name="estoque_geral.csv", mime="text/csv", key="sup_est_export_download",
+            icon=":material/download:", type="tertiary", use_container_width=True)
+
     vista_est_pag = paginate(vista_est, "suprimentos_estoque", f"{busca_est}|{sel_almox}|{sel_conf}")
     linhas_est = ""
     for _, r in vista_est_pag.iterrows():
@@ -4664,6 +4696,7 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
         render_estoque_geral(estoque, tags_gplan)
         return
 
+    consume_sup_url_filters()
     hoje = pd.Timestamp.now(tz=BR_TZ).tz_localize(None).normalize()
     resumo_tags = sup_por_tag(itens, hoje, tags_gplan)
     # So os que batem com 01_BASE_TAGS -- os KPIs tem que contar a mesma
@@ -4678,18 +4711,25 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
     atrasadas = sum(1 for r in resumo_gplan.values() if r["atrasados"] > 0)
     pct_atendimento = (recebidas / com_sup * 100) if com_sup else 0.0
 
+    # KPIs clicaveis -- pedido do Daniel, 2026-09-07: "Com suprimento",
+    # "100% recebidas" e "com atraso" levam direto pro filtro "Situação
+    # geral" ja aplicado (ver consume_sup_url_filters). "Total de TAGs" e
+    # "Sem suprimento identificado" ficam sem link -- nao tem filtro
+    # equivalente aqui, ja que a tabela so mostra quem TEM suprimento.
     kpis = (
         du_kpi("Total de TAGs", br_num(total_tags), "", 1.0, "#5b8def", "shield")
         + du_kpi("Com suprimento identificado", br_num(com_sup),
                  f"{br_pct(com_sup / total_tags * 100) if total_tags else '—'} do total",
-                 (com_sup / total_tags) if total_tags else 0, "#9d6bff", "documento")
+                 (com_sup / total_tags) if total_tags else 0, "#9d6bff", "documento",
+                 href="/suprimentos?sup_geral=Todas")
         + du_kpi("Sem suprimento identificado", br_num(total_tags - com_sup), "",
                  (1 - com_sup / total_tags) if total_tags else 0, "#7c8aa8", "pasta")
         + du_kpi("TAGs 100% recebidas", br_num(recebidas),
                  f"{br_pct(pct_atendimento)} de atendimento",
-                 (recebidas / com_sup) if com_sup else 0, "#34d399", "check")
+                 (recebidas / com_sup) if com_sup else 0, "#34d399", "check",
+                 href="/suprimentos?sup_geral=" + quote("100% recebido"))
         + du_kpi("TAGs com atraso", br_num(atrasadas), "", (atrasadas / com_sup) if com_sup else 0,
-                 "#f87171", "clock")
+                 "#f87171", "clock", href="/suprimentos?sup_geral=" + quote("Atrasado"))
     )
     render_html(f'<section class="du-kpis">{kpis}</section>')
 
@@ -4804,7 +4844,8 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
             status_opts = sorted({s for s in itens["STATUS"] if s})
             sel_status = st.multiselect("Status do item", status_opts, key="sup_status")
         with col_busca:
-            busca = st.text_input("Buscar TAG", key="sup_busca", placeholder="Digite a TAG…")
+            busca = st.text_input("Buscar TAG ou material", key="sup_busca",
+                                  placeholder="Digite a TAG ou parte da descrição do material…")
         with col_check:
             so_estoque = st.checkbox("Só com estoque", key="sup_so_estoque")
 
@@ -4818,8 +4859,18 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
         chaves_forn = {t for t, v in forn_por_tag.items() if v == sel_forn}
         linhas_df = linhas_df[linhas_df["CHAVE"].isin(chaves_forn)]
     if busca.strip():
+        # Busca por TAG (a chave em si) OU por descricao de algum item do
+        # grupo -- pedido do Daniel, 2026-09-07: a tabela por item tinha as
+        # duas buscas, a por TAG virou a unica quando a tela passou a ser
+        # por TAG (master-detail). Junta as descricoes de cada chave numa
+        # string so pra comparar (poucas centenas de grupos, custo baixo).
         alvo = busca.strip().upper()
-        linhas_df = linhas_df[linhas_df["CHAVE"].str.upper().str.contains(alvo, na=False)]
+        bate_tag = linhas_df["CHAVE"].str.upper().str.contains(alvo, na=False)
+        desc_por_chave = itens.groupby(chave_serie)["DESCRICAO_MATERIAL"].apply(
+            lambda s: " ".join(s).upper())
+        chaves_com_desc = set(desc_por_chave[desc_por_chave.str.contains(alvo, na=False)].index)
+        bate_desc = linhas_df["CHAVE"].isin(chaves_com_desc)
+        linhas_df = linhas_df[bate_tag | bate_desc]
     if sel_status:
         chaves_com_status = set(chave_serie[itens["STATUS"].isin(sel_status)])
         linhas_df = linhas_df[linhas_df["CHAVE"].isin(chaves_com_status)]
@@ -4827,6 +4878,22 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
         linhas_df = linhas_df[linhas_df["CHAVE"].isin(estoque_por_chave.keys())]
     linhas_df = linhas_df.assign(_ordem=linhas_df["geral"].map(SUP_GERAL_ORDEM).fillna(9))
     linhas_df = linhas_df.sort_values(["_ordem", "CHAVE"])
+
+    # Exportar -- pedido do Daniel, 2026-09-07: baixa o filtrado inteiro
+    # (nao so a pagina na tela), mesmo padrao de sep=";"/decimal=","/
+    # utf-8-sig usado nos outros exports do app (Previsão Medição etc.).
+    col_info, col_export = st.columns([5, 1], vertical_alignment="center")
+    with col_info:
+        st.caption(f"{br_num(len(linhas_df))} TAGs encontradas para esses filtros.")
+    with col_export:
+        exportar_sup = linhas_df.rename(columns={
+            "CHAVE": "TAG", "n_itens": "ITENS", "recebidos": "RECEBIDOS",
+            "atrasados": "ATRASADOS", "geral": "SITUACAO_GERAL"})[
+            ["TAG", "ITENS", "RECEBIDOS", "ATRASADOS", "SITUACAO_GERAL"]]
+        st.download_button(
+            "Exportar", exportar_sup.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+            file_name="suprimentos_por_tag.csv", mime="text/csv", key="sup_export_download",
+            icon=":material/download:", type="tertiary", use_container_width=True)
 
     assinatura = f"{sit_escolhida}|{sel_forn}|{busca}|{sel_status}|{so_estoque}|{mostrar_fora}"
     linhas_pag = paginate(linhas_df, "suprimentos_tag", assinatura)
