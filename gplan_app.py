@@ -6,6 +6,7 @@ import math
 import os
 import re
 import time
+import unicodedata
 from contextlib import contextmanager
 from datetime import date, timedelta
 from urllib.parse import quote
@@ -365,6 +366,21 @@ def _sup_cel(r: pd.Series, col: str, default: str = "—") -> object:
     NaN e truthy em Python)."""
     v = r.get(col)
     return default if pd.isna(v) else v
+
+
+def _sem_acento(texto: str) -> str:
+    """Tira acento de uma string solta (o termo digitado na busca) -- achado
+    testando a busca por material, 2026-09-07: "oleo" nao achava "Óleo"
+    porque .str.contains e comparacao literal. NFKD separa a letra do
+    acento (ex.: 'ó' -> 'o' + acento combinante); o encode/decode ascii
+    descarta o que sobrou combinante, sem acento."""
+    return unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+
+
+def _sem_acento_serie(s: pd.Series) -> pd.Series:
+    """Mesma coisa que _sem_acento, vetorizado pra uma coluna inteira --
+    bem mais rapido que .apply(_sem_acento) nas 21 mil linhas do estoque."""
+    return s.str.normalize("NFKD").str.encode("ascii", "ignore").str.decode("ascii")
 
 
 def _sup_num0(v) -> int:
@@ -4602,12 +4618,13 @@ def render_estoque_geral(estoque: pd.DataFrame, tags_gplan: set[str]) -> None:
 
     vista_est = estoque.copy()
     if busca_est.strip():
-        alvo = busca_est.strip().upper()
+        alvo = _sem_acento(busca_est.strip().upper())
         campos_busca = [c for c in ("Descrição Curta", "Descrição Longa", "Codigo Consag", "Tag Number")
                         if c in vista_est.columns]
         mascara = pd.Series(False, index=vista_est.index)
         for c in campos_busca:
-            mascara = mascara | vista_est[c].astype(str).str.upper().str.contains(alvo, na=False)
+            mascara = mascara | _sem_acento_serie(
+                vista_est[c].astype(str).str.upper()).str.contains(alvo, na=False)
         vista_est = vista_est[mascara]
     if sel_almox:
         vista_est = vista_est[vista_est["Almoxarifado"].isin(sel_almox)]
@@ -4864,10 +4881,11 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
         # duas buscas, a por TAG virou a unica quando a tela passou a ser
         # por TAG (master-detail). Junta as descricoes de cada chave numa
         # string so pra comparar (poucas centenas de grupos, custo baixo).
-        alvo = busca.strip().upper()
-        bate_tag = linhas_df["CHAVE"].str.upper().str.contains(alvo, na=False)
+        alvo = _sem_acento(busca.strip().upper())
+        bate_tag = _sem_acento_serie(linhas_df["CHAVE"].str.upper()).str.contains(alvo, na=False)
         desc_por_chave = itens.groupby(chave_serie)["DESCRICAO_MATERIAL"].apply(
             lambda s: " ".join(s).upper())
+        desc_por_chave = _sem_acento_serie(desc_por_chave)
         chaves_com_desc = set(desc_por_chave[desc_por_chave.str.contains(alvo, na=False)].index)
         bate_desc = linhas_df["CHAVE"].isin(chaves_com_desc)
         linhas_df = linhas_df[bate_tag | bate_desc]
