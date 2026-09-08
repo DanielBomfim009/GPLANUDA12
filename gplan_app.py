@@ -2636,7 +2636,18 @@ def inject_css():
            ficha com mais de 5.000px de altura -- "saindo pra fora da
            ficha", relato do Daniel). Cada linha e um <details> com so
            numero, titulo e %; abre pra ver requisição, fornecedor,
-           quantidade, progresso e a timeline inteira daquele item. */
+           quantidade, progresso e a timeline inteira daquele item.
+
+           .sup-rel-secao agrupa o eyebrow + a lista num unico filho de
+           .fx -- sem isso os dois viravam filhos SEPARADOS do flex
+           (gap:14px), e o .sup-eyebrow (feito pro espaçamento solto da
+           pagina principal, margin:30px 0 14px) somava com esse gap: 44px
+           antes da seção e 28px depois do titulo, bem maior que os 14px
+           usados em todo o resto da ficha. Achado do Daniel, 2026-09-08:
+           "espaçamento e alinhamento" feio. Zera a margem do eyebrow aqui
+           dentro pra ficar no mesmo ritmo do resto. */
+        .sup-rel-secao { display:flex; flex-direction:column; gap:14px; }
+        .sup-rel-secao .sup-eyebrow { margin:0; }
         .sup-rel-lista { display:flex; flex-direction:column; gap:7px; }
         .sup-rel-row { background:var(--dark-card-2); border:1px solid var(--border-color);
           border-radius:10px; overflow:hidden; }
@@ -4617,26 +4628,14 @@ def sup_historico_html(tag: str, movs: pd.DataFrame) -> str:
     return f'<div class="sup-tl">{linhas}</div>'
 
 
-def sup_lateral_html(resumo_tag: dict, itens_tag: pd.DataFrame,
-                     n_relacionados: int) -> str:
+def sup_lateral_html(resumo_tag: dict, n_relacionados: int,
+                     previsao_fornecimento: tuple | None, hoje: pd.Timestamp) -> str:
     """Coluna lateral da ficha completa -- so o resumo rapido da TAG (situação,
-    itens diretos, relacionados, próximo prazo). Os itens relacionados em si
-    NAO ficam aqui -- ver .sup-rel-lista em sup_ficha_tag_html: tentativa
-    anterior de listar eles nesta coluna de 288px foi relatada pelo Daniel
-    como "pequeno no canto, sem detalhamento" (2026-09-08)."""
-    # Proximo prazo -- o mais cedo entre as fases atuais pendentes dos itens
-    # diretos (pode ter mais de um item por TAG). Sem nenhuma data pendente
-    # (tudo recebido, ou sem fase com data ainda), fica "—".
-    prazos = []
-    for _, r in itens_tag.iterrows():
-        atual = sup_fase_atual(r["_fases"])
-        if atual is not None:
-            fase, _desde = atual
-            d = fase["reprogramado"] or fase["previsto"]
-            if d is not None:
-                prazos.append(d)
-    prazo_txt = f"{min(prazos):%d/%m/%Y}" if prazos else "—"
-
+    itens diretos, relacionados, previsão de fornecimento). Os itens
+    relacionados em si NAO ficam aqui -- ver .sup-rel-lista em
+    sup_ficha_tag_html: tentativa anterior de listar eles nesta coluna de
+    288px foi relatada pelo Daniel como "pequeno no canto, sem
+    detalhamento" (2026-09-08)."""
     cor_geral = {"ok": "var(--accent-teal)", "andamento": "var(--accent-blue)",
                 "crit": "var(--accent-red)", "warn": "var(--accent-amber)",
                 "mudo": "var(--text-2)"}.get(SUP_GERAL_TOM.get(resumo_tag["geral"], "mudo"), "var(--text-1)")
@@ -4648,14 +4647,37 @@ def sup_lateral_html(resumo_tag: dict, itens_tag: pd.DataFrame,
     if n_relacionados:
         stats += (f'<div class="sup-lat-stat"><span>Relacionados</span>'
                   f'<b>{br_num(n_relacionados)}</b></div>')
-    stats += f'<div class="sup-lat-stat"><span>Próximo prazo</span><b>{prazo_txt}</b></div>'
+
+    # Previsão de fornecimento -- MESMA regra da ficha da TAG
+    # (painel_previsao_fornecimento): STATUS_FORNECIMENTO/PREVISAO_FORNECIMENTO
+    # da 01_BASE_TAGS, calculados no pipeline a partir das colunas de entrega
+    # da 09_BASE_SUPRIMENTOS (Base Line/Previsto OC/Reprog. OC/Real, o pior
+    # caso entre as linhas de compra) -- NAO a fase atual dos itens desta TAG.
+    # Pedido do Daniel, 2026-09-08: "o prazo de fornecimento tem a mesma
+    # regra que utilizo pra ficha dos tag's". É uma pergunta DIFERENTE de
+    # "Situação geral" acima (aquela olha fase a fase de cada item da
+    # planilha de suprimentos) -- de propósito os dois não batem 1:1, ver
+    # sup_fornecimento_status.
+    if previsao_fornecimento is not None:
+        data_prev, status_forn = previsao_fornecimento
+        rotulo_forn = sup_fornecimento_status(status_forn, data_prev, hoje)
+        cor_forn = {"Recebido": "var(--accent-teal)", "No prazo": "var(--accent-teal)",
+                   "Atrasado": "var(--accent-red)",
+                   "Sem previsão": "var(--text-2)"}.get(rotulo_forn, "var(--text-1)")
+        d = pd.to_datetime(data_prev, dayfirst=True, errors="coerce")
+        data_txt = f"{d:%d/%m/%Y}" if not pd.isna(d) else "—"
+        stats += (
+            f'<div class="sup-lat-stat"><span>Fornecimento</span>'
+            f'<b style="color:{cor_forn}">{esc(rotulo_forn)}</b></div>'
+            f'<div class="sup-lat-stat"><span>Previsão de fornecimento</span><b>{data_txt}</b></div>')
 
     return f'<div class="sup-lateral"><h4>Resumo da TAG</h4>{stats}</div>'
 
 
 def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
                        hoje: pd.Timestamp, movimentacoes: pd.DataFrame,
-                       itens_relacionados: pd.DataFrame | None = None) -> str:
+                       itens_relacionados: pd.DataFrame | None = None,
+                       previsao_fornecimento: tuple | None = None) -> str:
     tiles = (
         fx_tile("Itens de suprimento", br_num(resumo_tag["n_itens"]), "caixa", "#5b8def")
         + fx_tile("Recebidos", br_num(resumo_tag["recebidos"]), "ok", "#34d399")
@@ -4697,8 +4719,8 @@ def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
                        sup_historico_html(tag, movimentacoes))
 
     tem_relacionados = itens_relacionados is not None and not itens_relacionados.empty
-    lateral = sup_lateral_html(resumo_tag, itens_tag,
-                               len(itens_relacionados) if tem_relacionados else 0)
+    lateral = sup_lateral_html(resumo_tag, len(itens_relacionados) if tem_relacionados else 0,
+                               previsao_fornecimento, hoje)
 
     def _linha_relacionado(indice: int, r: pd.Series) -> str:
         # Fecha por padrao -- so numero, titulo e %. Uma TAG com muitos
@@ -4729,12 +4751,13 @@ def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
     relacionados_html = ""
     if tem_relacionados:
         relacionados_html = (
+            '<div class="sup-rel-secao">'
             f'<div class="sup-eyebrow">Itens relacionados'
             f'<span class="conta">{br_num(len(itens_relacionados))}</span></div>'
             '<div class="sup-rel-lista">'
             + "".join(_linha_relacionado(i, r) for i, (_, r)
                       in enumerate(itens_relacionados.iterrows(), 1))
-            + "</div>")
+            + "</div></div>")
 
     return (f'<div class="fx"><div class="fx-cab"><span class="marca">{fx_svg("tag")}</span>'
             f'<div><h2>{esc(tag)}</h2><p>Rastreabilidade de suprimento</p></div></div>'
@@ -5112,11 +5135,73 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
                                                r.get("PREVISAO_FORNECIMENTO"), hoje)
         for _, r in tags_com_sup_df.iterrows()
     }
+    # (data, status) crus pra ficha completa mostrar a previsão de
+    # fornecimento -- mesmo par de cima, sem passar pelo sup_fornecimento_status
+    # ainda (a ficha decide o rotulo/cor na hora, ver sup_lateral_html).
+    previsao_por_tag: dict[str, tuple] = {
+        str(r["TAG"]): (r.get("PREVISAO_FORNECIMENTO"), r.get("STATUS_FORNECIMENTO"))
+        for _, r in tags_com_sup_df.iterrows()
+    }
+
+    linhas_base = pd.DataFrame(
+        [{"CHAVE": k, **v} for k, v in universo.items()],
+        columns=["CHAVE", "n_itens", "recebidos", "atrasados", "cancelados", "geral",
+                "tem_tag", "eh_gplan"])
+
+    # Estado atual de cada filtro, lido do session_state ANTES de desenhar
+    # os widgets -- assim cada filtro pode mostrar contagem considerando os
+    # OUTROS ja aplicados (facetado), em vez de ficar preso no total geral.
+    # Achado do Daniel, 2026-09-08: "os filtros nao estao se conversando ou
+    # se reajustando a pagina" -- confirmado (escolher "Atrasado" em
+    # Situação geral nao mudava a contagem de Responsável/Fornecimento, que
+    # continuavam mostrando "Todas · 2.077" mesmo com só 672 na tela).
+    sit_atual = st.session_state.get("sup_geral", "Todas") or "Todas"
+    resp_atual = st.session_state.get("sup_resp", "Todas")
+    forn_atual = st.session_state.get("sup_forn", "Todas")
+    status_atual = st.session_state.get("sup_status", [])
+    busca_atual = st.session_state.get("sup_busca", "")
+    estoque_atual = st.session_state.get("sup_so_estoque", False)
+
+    def _aplica_filtro(df: pd.DataFrame, nome: str) -> pd.DataFrame:
+        if nome == "sit" and sit_atual != "Todas":
+            return df[df["geral"] == sit_atual]
+        if nome == "resp" and resp_atual != "Todas":
+            chaves = {t for t, v in resp_por_tag.items() if v == resp_atual}
+            return df[df["CHAVE"].isin(chaves)]
+        if nome == "forn" and forn_atual != "Todas":
+            chaves = {t for t, v in forn_por_tag.items() if v == forn_atual}
+            return df[df["CHAVE"].isin(chaves)]
+        if nome == "busca" and busca_atual.strip():
+            # Busca por TAG (a chave em si) OU por descricao de algum item
+            # do grupo -- pedido do Daniel, 2026-09-07.
+            alvo = _sem_acento(busca_atual.strip().upper())
+            bate_tag = _sem_acento_serie(df["CHAVE"].str.upper()).str.contains(alvo, na=False)
+            desc_por_chave = itens.groupby(chave_serie)["DESCRICAO_MATERIAL"].apply(
+                lambda s: " ".join(s).upper())
+            desc_por_chave = _sem_acento_serie(desc_por_chave)
+            chaves_com_desc = set(desc_por_chave[desc_por_chave.str.contains(alvo, na=False)].index)
+            return df[bate_tag | df["CHAVE"].isin(chaves_com_desc)]
+        if nome == "status" and status_atual:
+            chaves = set(chave_serie[itens["STATUS"].isin(status_atual)])
+            return df[df["CHAVE"].isin(chaves)]
+        if nome == "estoque" and estoque_atual:
+            return df[df["CHAVE"].isin(estoque_por_chave.keys())]
+        return df
+
+    FILTROS_SUP = ("sit", "resp", "forn", "busca", "status", "estoque")
+
+    def _filtrado_exceto(exceto: str | None) -> pd.DataFrame:
+        out = linhas_base
+        for nome in FILTROS_SUP:
+            if nome != exceto:
+                out = _aplica_filtro(out, nome)
+        return out
 
     with st.container(border=True, key="sup_toolbar"):
-        contagem_sit = collections.Counter(r["geral"] for r in universo.values())
+        base_sit = _filtrado_exceto("sit")
+        contagem_sit = collections.Counter(base_sit["geral"])
         opcoes_sit = ["Todas"] + [r for r in SUP_GERAL_ROTULOS if contagem_sit[r]]
-        contagens_sit = {"Todas": len(universo), **contagem_sit}
+        contagens_sit = {"Todas": len(base_sit), **contagem_sit}
         sit_escolhida = st.segmented_control(
             "Situação geral", opcoes_sit,
             format_func=lambda x: f"{x} · {br_num(contagens_sit.get(x, 0))}",
@@ -5125,31 +5210,38 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
         col_resp, col_forn, col_status, col_busca, col_check = st.columns(
             [1, 1, 1.2, 1.3, 0.9], vertical_alignment="bottom")
         with col_resp:
-            contagem_resp = collections.Counter(resp_por_tag.get(t, "") for t in universo)
+            base_resp = _filtrado_exceto("resp")
+            contagem_resp = collections.Counter(
+                resp_por_tag.get(t, "") for t in base_resp["CHAVE"])
             resp_ordem = ["Contratada", "Petrobras", "Fora do Anexo I Apêndice 3"]
             opcoes_resp = ["Todas"] + [r for r in resp_ordem if contagem_resp[r]]
             sel_resp = st.selectbox(
                 "Responsável", opcoes_resp,
-                format_func=lambda x: (f"Todas · {br_num(sum(contagem_resp.values()))}" if x == "Todas"
+                format_func=lambda x: (f"Todas · {br_num(len(base_resp))}" if x == "Todas"
                                        else f"{x} · {br_num(contagem_resp[x])}"),
                 key="sup_resp",
                 help="Quem tem a obrigação contratual de fornecer o material (coluna FORNECIMENTO "
                      "da 01_BASE_TAGS) -- diferente de \"Situação geral\"/\"Fornecimento\", que "
-                     "falam do andamento da compra, não de quem deve comprar.")
+                     "falam do andamento da compra, não de quem deve comprar. Contagem já considera "
+                     "os outros filtros aplicados.")
         with col_forn:
-            contagem_forn = collections.Counter(forn_por_tag.values())
+            base_forn = _filtrado_exceto("forn")
+            contagem_forn = collections.Counter(
+                forn_por_tag.get(t, "") for t in base_forn["CHAVE"])
             opcoes_forn = ["Todas"] + [r for r in SUP_FORN_ROTULOS if contagem_forn[r]]
             sel_forn = st.selectbox(
                 "Fornecimento", opcoes_forn,
-                format_func=lambda x: (f"Todas · {br_num(sum(contagem_forn.values()))}" if x == "Todas"
+                format_func=lambda x: (f"Todas · {br_num(len(base_forn))}" if x == "Todas"
                                        else f"{x} · {br_num(contagem_forn[x])}"),
                 key="sup_forn",
                 help="Cálculo simples por TAG, vindo da 01_BASE_TAGS (STATUS_FORNECIMENTO/"
                      "PREVISAO_FORNECIMENTO -- o mesmo da ficha da TAG, card \"Previsão de "
                      "fornecimento\"). É diferente de \"Situação geral\" acima, que olha fase a "
-                     "fase de cada item da planilha de suprimentos: os números podem não bater 1:1.")
+                     "fase de cada item da planilha de suprimentos: os números podem não bater 1:1. "
+                     "Contagem já considera os outros filtros aplicados.")
         with col_status:
-            status_opts = sorted({s for s in itens["STATUS"] if s})
+            base_status = _filtrado_exceto("status")
+            status_opts = sorted({s for s in itens[chave_serie.isin(base_status["CHAVE"])]["STATUS"] if s})
             sel_status = st.multiselect("Status do item", status_opts, key="sup_status")
         with col_busca:
             busca = st.text_input("Buscar TAG ou material", key="sup_busca",
@@ -5157,37 +5249,7 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
         with col_check:
             so_estoque = st.checkbox("Só com estoque", key="sup_so_estoque")
 
-    linhas_df = pd.DataFrame(
-        [{"CHAVE": k, **v} for k, v in universo.items()],
-        columns=["CHAVE", "n_itens", "recebidos", "atrasados", "cancelados", "geral",
-                "tem_tag", "eh_gplan"])
-    if sit_escolhida != "Todas":
-        linhas_df = linhas_df[linhas_df["geral"] == sit_escolhida]
-    if sel_resp != "Todas":
-        chaves_resp = {t for t, v in resp_por_tag.items() if v == sel_resp}
-        linhas_df = linhas_df[linhas_df["CHAVE"].isin(chaves_resp)]
-    if sel_forn != "Todas":
-        chaves_forn = {t for t, v in forn_por_tag.items() if v == sel_forn}
-        linhas_df = linhas_df[linhas_df["CHAVE"].isin(chaves_forn)]
-    if busca.strip():
-        # Busca por TAG (a chave em si) OU por descricao de algum item do
-        # grupo -- pedido do Daniel, 2026-09-07: a tabela por item tinha as
-        # duas buscas, a por TAG virou a unica quando a tela passou a ser
-        # por TAG (master-detail). Junta as descricoes de cada chave numa
-        # string so pra comparar (poucas centenas de grupos, custo baixo).
-        alvo = _sem_acento(busca.strip().upper())
-        bate_tag = _sem_acento_serie(linhas_df["CHAVE"].str.upper()).str.contains(alvo, na=False)
-        desc_por_chave = itens.groupby(chave_serie)["DESCRICAO_MATERIAL"].apply(
-            lambda s: " ".join(s).upper())
-        desc_por_chave = _sem_acento_serie(desc_por_chave)
-        chaves_com_desc = set(desc_por_chave[desc_por_chave.str.contains(alvo, na=False)].index)
-        bate_desc = linhas_df["CHAVE"].isin(chaves_com_desc)
-        linhas_df = linhas_df[bate_tag | bate_desc]
-    if sel_status:
-        chaves_com_status = set(chave_serie[itens["STATUS"].isin(sel_status)])
-        linhas_df = linhas_df[linhas_df["CHAVE"].isin(chaves_com_status)]
-    if so_estoque:
-        linhas_df = linhas_df[linhas_df["CHAVE"].isin(estoque_por_chave.keys())]
+    linhas_df = _filtrado_exceto(None)
     linhas_df = linhas_df.assign(_ordem=linhas_df["geral"].map(SUP_GERAL_ORDEM).fillna(9))
     linhas_df = linhas_df.sort_values(["_ordem", "CHAVE"])
 
@@ -5236,7 +5298,7 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
                   '<a class="fmodal-bg" href="#fechado" aria-label="Fechar"></a>'
                   '<div class="fmodal-box">'
                   '<a class="fmodal-x" href="#fechado" aria-label="Fechar">&times;</a>'
-                  f'{sup_ficha_tag_html(chave, itens_tag, universo[chave], hoje, movimentacoes, itens_relacionados)}'
+                  f'{sup_ficha_tag_html(chave, itens_tag, universo[chave], hoje, movimentacoes, itens_relacionados, previsao_por_tag.get(chave))}'
                   "</div></div>")
     render_html(fichas)
 
@@ -14183,10 +14245,36 @@ def main():
     # <section data-testid="stSidebar"> some do DOM). O icone de cada secao
     # sai por CSS (nth-of-type, ver .stSidebarNav header abaixo) -- o titulo
     # aqui fica so texto puro.
-    secoes: dict[str, list] = {
-        "Visão geral": [dashboard_page, suprimentos_page, progresso_page, pesquisa_page],
-        "Documentação": [relatorios_page, sigem_page, atualizacao_page],
-    }
+    # Cada aba tem a propria permissao "ver_<aba>" agora (pedido do Daniel,
+    # 2026-09-08, pra dar pra montar um login de apresentacao que esconde as
+    # abas ainda em desenvolvimento -- Suprimentos, Avanço Físico, Previsão
+    # Medição, Curva S -- sem abrir mao de "administrar", que continua so
+    # pra quem pode criar/editar login). Antes, Visão geral/Documentação
+    # apareciam pra QUALQUER login ativo sem checagem nenhuma.
+    visao_geral = []
+    if pode("ver_dashboard"):
+        visao_geral.append(dashboard_page)
+    if pode("ver_suprimentos"):
+        visao_geral.append(suprimentos_page)
+    if pode("ver_progresso"):
+        visao_geral.append(progresso_page)
+    if pode("ver_pesquisa"):
+        visao_geral.append(pesquisa_page)
+
+    documentacao = []
+    if pode("ver_relatorios"):
+        documentacao.append(relatorios_page)
+    if pode("ver_sigem"):
+        documentacao.append(sigem_page)
+    if pode("ver_atualizacao"):
+        documentacao.append(atualizacao_page)
+
+    secoes: dict[str, list] = {}
+    if visao_geral:
+        secoes["Visão geral"] = visao_geral
+    if documentacao:
+        secoes["Documentação"] = documentacao
+
     avanco = []
     if pode("ver_gitec"):
         avanco.append(gitec_page)
@@ -14194,15 +14282,25 @@ def main():
         avanco.append(planta_page)
     if pode("ver_certificacao"):
         avanco.append(certificacao_page)
-    # Mesma audiencia da Previsao Medicao (dado bruto de prontidao fisica,
-    # so sem os valores em R$) -- "administrar" de proposito, nao um dos
-    # tres de cima, pra nao abrir pra papel que hoje nao ve essa base.
-    if pode("administrar"):
+    if pode("ver_avanco_fisico"):
         avanco.append(avanco_fisico_page)
     if avanco:
         secoes["Avanço"] = avanco
+
+    administracao = []
+    if pode("ver_previsao_medicao"):
+        administracao.append(medicao_page)
+    if pode("ver_curva_s"):
+        administracao.append(curva_s_page)
     if pode("administrar"):
-        secoes["Administração"] = [medicao_page, curva_s_page, admin_page]
+        administracao.append(admin_page)
+    if administracao:
+        secoes["Administração"] = administracao
+
+    if not secoes:
+        st.error("Este login não tem nenhuma aba liberada. Fale com um "
+                 "administrador em Acessos.")
+        st.stop()
 
     nav = st.navigation(secoes, position="sidebar")
     expandir_menu_lateral()

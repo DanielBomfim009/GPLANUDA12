@@ -28,11 +28,32 @@ TABELA = "perfis"
 
 # O catálogo é o contrato: a tela pergunta por estes nomes e a administração
 # oferece exatamente estes. Permissão que não está aqui não existe.
+#
+# As "ver_<aba>" de baixo (Dashboard até Curva S) foram acrescentadas em
+# 2026-09-08 -- pedido do Daniel, às pressas por causa de uma apresentação:
+# "preciso limitar algumas aba para apresentação, principalmente as abas que
+# não estão prontas... tipo Suprimentos, Curva S, Previsão Medição". Antes
+# dessas abas apareciam pra QUALQUER login ativo, sem checagem nenhuma (só
+# Gitec/Certificação/Planta tinham permissão própria) -- Avanço Físico,
+# Previsão Medição e Curva S ficavam atrás de "administrar" (tudo ou nada,
+# junto com criar/editar login). Ver acesso.pode(): quem tem "administrar"
+# passa em qualquer permissão nova sem precisar editar o perfil -- login já
+# existente não perde acesso só porque uma chave nova entrou no catálogo.
 PERMISSOES = {
-    "ver_valores": "Ver valores em reais",
+    "ver_dashboard": "Ver a aba Dashboard",
+    "ver_suprimentos": "Ver a aba Suprimentos",
+    "ver_progresso": "Ver a aba Progresso",
+    "ver_pesquisa": "Ver a aba Pesquisa tag",
+    "ver_relatorios": "Ver a aba Relatórios",
+    "ver_sigem": "Ver a aba Base SIGEM",
+    "ver_atualizacao": "Ver a aba Última atualização",
     "ver_gitec": "Ver a aba Gitec (medição de campo)",
     "ver_certificacao": "Ver a aba Certificação",
     "ver_planta": "Ver a aba Planta",
+    "ver_avanco_fisico": "Ver a aba Avanço Físico",
+    "ver_previsao_medicao": "Ver a aba Previsão Medição",
+    "ver_curva_s": "Ver a aba Curva S",
+    "ver_valores": "Ver valores em reais",
     "administrar": "Criar, editar e remover logins",
 }
 TODAS = list(PERMISSOES)
@@ -40,11 +61,20 @@ TODAS = list(PERMISSOES)
 # O papel é o atalho: escolhe um e as permissões vêm prontas. Depois disso
 # elas continuam editáveis uma a uma -- o papel é o ponto de partida e o
 # rótulo que aparece na tela, não uma jaula.
+_PAGINAS_GERAIS = ["ver_dashboard", "ver_suprimentos", "ver_progresso",
+                   "ver_pesquisa", "ver_relatorios", "ver_sigem", "ver_atualizacao"]
 PAPEIS = {
     "Administrador": TODAS,
-    "Colaborador": ["ver_valores", "ver_gitec", "ver_certificacao", "ver_planta"],
-    "Visualizador": ["ver_valores", "ver_certificacao", "ver_planta"],
-    "Apresentador": ["ver_certificacao", "ver_planta"],
+    "Colaborador": _PAGINAS_GERAIS + ["ver_valores", "ver_gitec",
+                                      "ver_certificacao", "ver_planta"],
+    "Visualizador": _PAGINAS_GERAIS + ["ver_valores", "ver_certificacao", "ver_planta"],
+    # Pensado pra apresentação/demo: mostra o que já está pronto, esconde o
+    # que ainda está em desenvolvimento (Suprimentos, Avanço Físico, Previsão
+    # Medição, Curva S) e o que é operacional demais pra plateia (Gitec,
+    # valores em R$).
+    "Apresentador": ["ver_dashboard", "ver_progresso", "ver_pesquisa",
+                     "ver_relatorios", "ver_sigem", "ver_atualizacao",
+                     "ver_certificacao", "ver_planta"],
 }
 PAPEL_PADRAO = "Colaborador"
 COR_PAPEL = {"Administrador": "roxo", "Colaborador": "teal",
@@ -149,7 +179,13 @@ def iniciais(nome: str, email: str = "") -> str:
 def pode(usuario: dict | None, permissao: str) -> bool:
     if not usuario or not usuario.get("ativo", True):
         return False
-    return permissao in (usuario.get("permissoes") or [])
+    perms = usuario.get("permissoes") or []
+    # "administrar" sempre passa em qualquer permissão -- sem isso, toda vez
+    # que uma chave nova entra em PERMISSOES (ver comentário lá), quem já é
+    # Administrador perderia acesso até alguém reabrir o perfil dele e
+    # salvar de novo, porque a lista gravada no perfis é de antes da chave
+    # existir. Achado ao adicionar as "ver_<aba>" em 2026-09-08.
+    return permissao in perms or "administrar" in perms
 
 
 # ===================================================================== #
