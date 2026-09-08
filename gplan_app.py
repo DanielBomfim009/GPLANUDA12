@@ -5207,38 +5207,42 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
             format_func=lambda x: f"{x} · {br_num(contagens_sit.get(x, 0))}",
             default="Todas", key="sup_geral") or "Todas"
 
-        col_resp, col_forn, col_status, col_busca, col_check = st.columns(
-            [1, 1, 1.2, 1.3, 0.9], vertical_alignment="bottom")
-        with col_resp:
-            base_resp = _filtrado_exceto("resp")
-            contagem_resp = collections.Counter(
-                resp_por_tag.get(t, "") for t in base_resp["CHAVE"])
-            resp_ordem = ["Contratada", "Petrobras", "Fora do Anexo I Apêndice 3"]
-            opcoes_resp = ["Todas"] + [r for r in resp_ordem if contagem_resp[r]]
-            sel_resp = st.selectbox(
-                "Responsável", opcoes_resp,
-                format_func=lambda x: (f"Todas · {br_num(len(base_resp))}" if x == "Todas"
-                                       else f"{x} · {br_num(contagem_resp[x])}"),
-                key="sup_resp",
-                help="Quem tem a obrigação contratual de fornecer o material (coluna FORNECIMENTO "
-                     "da 01_BASE_TAGS) -- diferente de \"Situação geral\"/\"Fornecimento\", que "
-                     "falam do andamento da compra, não de quem deve comprar. Contagem já considera "
-                     "os outros filtros aplicados.")
-        with col_forn:
-            base_forn = _filtrado_exceto("forn")
-            contagem_forn = collections.Counter(
-                forn_por_tag.get(t, "") for t in base_forn["CHAVE"])
-            opcoes_forn = ["Todas"] + [r for r in SUP_FORN_ROTULOS if contagem_forn[r]]
-            sel_forn = st.selectbox(
-                "Fornecimento", opcoes_forn,
-                format_func=lambda x: (f"Todas · {br_num(len(base_forn))}" if x == "Todas"
-                                       else f"{x} · {br_num(contagem_forn[x])}"),
-                key="sup_forn",
-                help="Cálculo simples por TAG, vindo da 01_BASE_TAGS (STATUS_FORNECIMENTO/"
-                     "PREVISAO_FORNECIMENTO -- o mesmo da ficha da TAG, card \"Previsão de "
-                     "fornecimento\"). É diferente de \"Situação geral\" acima, que olha fase a "
-                     "fase de cada item da planilha de suprimentos: os números podem não bater 1:1. "
-                     "Contagem já considera os outros filtros aplicados.")
+        # Responsável/Fornecimento eram st.selectbox (dropdown) -- trocados
+        # pra segmented_control (Opção "faz igual a Situação geral", pedido
+        # do Daniel, 2026-09-08): o dropdown fechado só atualizava o número
+        # exibido quando a própria seleção mudava de valor (particularidade
+        # do widget), enquanto o segmented_control mostra a contagem certa
+        # sempre, com todas as pilhas visíveis o tempo todo.
+        base_resp = _filtrado_exceto("resp")
+        contagem_resp = collections.Counter(
+            resp_por_tag.get(t, "") for t in base_resp["CHAVE"])
+        resp_ordem = ["Contratada", "Petrobras", "Fora do Anexo I Apêndice 3"]
+        opcoes_resp = ["Todas"] + [r for r in resp_ordem if contagem_resp[r]]
+        contagens_resp = {"Todas": len(base_resp), **contagem_resp}
+        sel_resp = st.segmented_control(
+            "Responsável", opcoes_resp,
+            format_func=lambda x: f"{x} · {br_num(contagens_resp.get(x, 0))}",
+            default="Todas", key="sup_resp",
+            help="Quem tem a obrigação contratual de fornecer o material (coluna FORNECIMENTO "
+                 "da 01_BASE_TAGS) -- diferente de \"Situação geral\"/\"Fornecimento\", que "
+                 "falam do andamento da compra, não de quem deve comprar.") or "Todas"
+
+        base_forn = _filtrado_exceto("forn")
+        contagem_forn = collections.Counter(
+            forn_por_tag.get(t, "") for t in base_forn["CHAVE"])
+        opcoes_forn = ["Todas"] + [r for r in SUP_FORN_ROTULOS if contagem_forn[r]]
+        contagens_forn = {"Todas": len(base_forn), **contagem_forn}
+        sel_forn = st.segmented_control(
+            "Fornecimento", opcoes_forn,
+            format_func=lambda x: f"{x} · {br_num(contagens_forn.get(x, 0))}",
+            default="Todas", key="sup_forn",
+            help="Cálculo simples por TAG, vindo da 01_BASE_TAGS (STATUS_FORNECIMENTO/"
+                 "PREVISAO_FORNECIMENTO -- o mesmo da ficha da TAG, card \"Previsão de "
+                 "fornecimento\"). É diferente de \"Situação geral\" acima, que olha fase a "
+                 "fase de cada item da planilha de suprimentos: os números podem não bater 1:1.") or "Todas"
+
+        col_status, col_busca, col_check = st.columns(
+            [1.2, 1.3, 0.9], vertical_alignment="bottom")
         with col_status:
             base_status = _filtrado_exceto("status")
             status_opts = sorted({s for s in itens[chave_serie.isin(base_status["CHAVE"])]["STATUS"] if s})
