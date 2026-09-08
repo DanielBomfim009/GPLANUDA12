@@ -2528,8 +2528,16 @@ def inject_css():
         .sup-mestre-linha summary { list-style:none; cursor:pointer; padding:11px 10px; font-size:12.5px; }
         .sup-mestre-linha summary::-webkit-details-marker { display:none; }
         .sup-mestre-linha summary:hover { background:rgba(var(--rgb-tinta),.025); }
-        .sup-mestre-linha .chev { color:var(--text-3); font-size:10px; transition:transform .12s; }
-        .sup-mestre-linha[open] .chev { transform:rotate(90deg); }
+        /* Seta de expandir -- pedido do Daniel, 2026-09-08: a original (10px,
+           --text-3) quase nao aparecia. Vira uma pilula pequena com fundo
+           proprio, fica claramente clicavel e muda de cor no hover/aberto. */
+        .sup-mestre-linha .chev { display:inline-flex; align-items:center; justify-content:center;
+          width:18px; height:18px; border-radius:6px; background:rgba(var(--rgb-tinta),.06);
+          color:var(--text-2); font-size:11px; font-weight:800; flex:none;
+          transition:transform .12s, background .12s, color .12s; }
+        .sup-mestre-linha summary:hover .chev { background:rgba(var(--rgb-azul),.14); color:var(--accent-blue); }
+        .sup-mestre-linha[open] .chev { transform:rotate(90deg); background:rgba(var(--rgb-azul),.16);
+          color:var(--accent-blue); }
         .sup-mestre-linha .mono { font-family:ui-monospace,Consolas,monospace; font-weight:700;
           color:var(--text-1); }
         .sup-mestre-corpo { background:var(--dark-card-2); border-top:1px solid var(--border-color);
@@ -2547,6 +2555,11 @@ def inject_css():
            mestre e ficha completa, mesmo selo nos dois lugares. */
         .sup-fase-atual { font-size:10.5px; color:var(--text-3); margin:2px 0 8px; }
         .sup-fase-atual b { color:var(--text-2); font-weight:700; }
+        /* Nota "os itens abaixo nao tem a TAG na propria coluna..." antes
+           do bloco de itens relacionados, na ficha completa. */
+        .sup-relacionados-nota { font-size:11px; color:var(--text-3); line-height:1.5;
+          padding:12px 2px; border-top:1px dashed var(--border-color); margin-top:4px; }
+        .sup-relacionados-nota b { color:var(--text-2); }
 
         /* rosca */
         .fx-rosca { position:relative; width:112px; aspect-ratio:1; }
@@ -4315,9 +4328,10 @@ def sup_status_pill(status: str) -> str:
     return f'<span class="gtbl-badge {tom}">{esc(sentence_case(status))}</span>'
 
 
-def sup_fase_atual(fases: list) -> tuple[str, object] | None:
-    """A fase em que o item esta parado agora, e desde quando -- a data REAL
-    da ultima fase concluida antes dela (foi quando ele "entrou" na fase
+def sup_fase_atual(fases: list) -> tuple[dict, object] | None:
+    """A fase em que o item esta parado agora (o proprio dict de `fases`,
+    com previsto/reprogramado/real), e desde quando -- a data REAL da
+    ultima fase concluida antes dela (foi quando ele "entrou" na fase
     atual; a fase em si so tem previsto/reprogramado, nao tem "entrada").
     Sem nenhuma fase concluida ainda, o "desde" fica None (a primeira fase
     da lista e a propria parada). None de volta quando todas as fases estao
@@ -4327,21 +4341,29 @@ def sup_fase_atual(fases: list) -> tuple[str, object] | None:
     desde = None
     for f in fases:
         if not f["concluida"]:
-            return f["fase"], desde
+            return f, desde
         desde = f["real"]
     return None
 
 
 def sup_fase_atual_html(fases: list) -> str:
-    """Selo compacto "Fase atual: X · desde DD/MM/AAAA" pra usar tanto na
-    linha expandida da tabela mestre quanto na ficha -- mesma pergunta, dois
-    lugares."""
+    """Selo compacto "Fase atual: X · desde DD/MM · previsto/reprogramado
+    para DD/MM" pra usar tanto na linha expandida da tabela mestre quanto
+    na ficha -- mesma pergunta, dois lugares. O prazo só entra quando a
+    fase atual tiver alguma data (pedido do Daniel, 2026-09-08: "insira o
+    prazo de fornecimento dos que tiver data")."""
     atual = sup_fase_atual(fases)
     if atual is None:
         return ""
     fase, desde = atual
-    desde_txt = f" · nesta fase desde {desde:%d/%m/%Y}" if desde is not None else ""
-    return f'<div class="sup-fase-atual">Fase atual: <b>{esc(fase)}</b>{desde_txt}</div>'
+    partes = [f'Fase atual: <b>{esc(fase["fase"])}</b>']
+    if desde is not None:
+        partes.append(f"nesta fase desde {desde:%d/%m/%Y}")
+    prazo = fase["reprogramado"] or fase["previsto"]
+    if prazo is not None:
+        rotulo_prazo = "reprogramado" if fase["reprogramado"] else "previsto"
+        partes.append(f"{rotulo_prazo} para {prazo:%d/%m/%Y}")
+    return f'<div class="sup-fase-atual">{" · ".join(partes)}</div>'
 
 
 def sup_timeline_html(fases: list) -> str:
@@ -4448,6 +4470,36 @@ def sup_por_tag(itens: pd.DataFrame, hoje: pd.Timestamp,
     return por_tag
 
 
+# TAG-shaped: letras-hifen-digitos, com uma letra final opcional (FV-120058B,
+# AE-127004...). \b dos dois lados evita casar "FG-120953" dentro de
+# "FG-120953B" -- testado em 2026-09-08: 3 e B sao os dois "\w", entao \b
+# so bate incluindo o B, nao no meio do codigo.
+SUP_TAG_TOKEN_RE = re.compile(r"\b[A-Z]{1,5}-\d{5,7}[A-Z]?\b")
+
+
+def sup_indice_titulo(itens: pd.DataFrame, tags_gplan: set[str]) -> dict[str, list]:
+    """Indice reverso TAG-do-Gplan -> indices de linhas de `itens` cujo
+    TITULO cita essa TAG explicitamente -- e assim que kit/acessorio
+    amarrado a uma TAG real se identifica (ex. "VÁLVULA DE CONTROLE –
+    INTERNOS (FV-120058B / PV-120008)"). Achado confirmado pelo Daniel,
+    2026-09-08: a ficha de FV-120058B só mostrava 1 item, mas existem 18
+    linhas citando essa TAG no título (16 KITs de peça interna + os 2 itens
+    base) -- o groupby por TAG exata (sup_por_tag) so pega 1 porque os
+    outros 17 tem "KIT6_FV120058B" etc. na propria coluna TAG, nao
+    "FV-120058B". So titulo, nao descricao -- descricao e texto tecnico
+    livre, mais risco de citar a TAG por acaso sem ser peça daquele
+    instrumento.
+    """
+    indice: dict[str, list] = {}
+    for idx, titulo in itens["TITULO"].items():
+        if not titulo:
+            continue
+        achados = set(SUP_TAG_TOKEN_RE.findall(titulo.upper())) & tags_gplan
+        for t in achados:
+            indice.setdefault(t, []).append(idx)
+    return indice
+
+
 def sup_historico_html(tag: str, movs: pd.DataFrame) -> str:
     """Historico de mudanca de status desta TAG, direto de 14_MOVIMENTACOES
     (tipo "suprimento") -- Fase 2: o pipeline grava aqui a cada atualização,
@@ -4471,18 +4523,19 @@ def sup_historico_html(tag: str, movs: pd.DataFrame) -> str:
 
 
 def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
-                       hoje: pd.Timestamp, movimentacoes: pd.DataFrame) -> str:
+                       hoje: pd.Timestamp, movimentacoes: pd.DataFrame,
+                       itens_relacionados: pd.DataFrame | None = None) -> str:
     tiles = (
         fx_tile("Itens de suprimento", br_num(resumo_tag["n_itens"]), "caixa", "#5b8def")
         + fx_tile("Recebidos", br_num(resumo_tag["recebidos"]), "ok", "#34d399")
         + fx_tile("Atrasados", br_num(resumo_tag["atrasados"]), "alerta", "#f87171")
         + fx_tile("Situação geral", resumo_tag["geral"], "seta", "#9d6bff")
     )
-    corpo = ""
-    for _, r in itens_tag.iterrows():
+
+    def _painel_item(r: pd.Series) -> str:
         rotulo, tom = sup_situacao(r, hoje)
         fase_html = sup_fase_atual_html(r["_fases"]) if rotulo not in ("Recebido", "Cancelado") else ""
-        corpo += fx_painel(
+        return fx_painel(
             r["DESCRICAO_MATERIAL"][:70].replace("\n", " "), "cabo",
             f'<span class="gtbl-badge {tom}" style="margin-bottom:10px;display:inline-block;">'
             f'{esc(rotulo)}</span>{fase_html}'
@@ -4494,11 +4547,26 @@ def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
             + fx_dado("Progresso total", br_pct(r["TOTAL_PROGRESSO"]))
             + "</div>"
             + sup_timeline_html(r["_fases"]))
+
+    corpo = "".join(_painel_item(r) for _, r in itens_tag.iterrows())
     if itens_tag.empty:
         corpo += fx_painel("Itens de suprimento", "caixa",
                            '<p class="fx-nota">Nenhum item de suprimento cadastrado ainda pra '
                            "esta TAG -- ela é obrigação da Contratada fornecer, mas ainda não "
                            "apareceu nenhuma linha na planilha de suprimentos.</p>")
+
+    # Itens relacionados -- kit/acessorio cujo TITULO cita esta TAG, mas a
+    # propria linha tem outro codigo na coluna TAG (ex. "KIT6_FV120058B"
+    # pra quem esta vendo a ficha de "FV-120058B"). Achado pedido pelo
+    # Daniel, 2026-09-08: a ficha so mostrava o item "direto" e escondia os
+    # kits de peca interna amarrados aquela TAG.
+    if itens_relacionados is not None and not itens_relacionados.empty:
+        corpo += (
+            '<div class="sup-relacionados-nota">Os itens abaixo não têm esta TAG na própria '
+            "coluna (são kit/acessório com código próprio), mas o título deles cita "
+            f"<b>{esc(tag)}</b> -- por isso aparecem aqui, à parte da contagem acima.</div>")
+        corpo += "".join(_painel_item(r) for _, r in itens_relacionados.iterrows())
+
     corpo += fx_painel("Histórico de mudanças de status", "relogio",
                        sup_historico_html(tag, movimentacoes))
     return (f'<div class="fx"><div class="fx-cab"><span class="marca">{fx_svg("tag")}</span>'
@@ -4542,7 +4610,8 @@ def sup_donut(fatias: list[tuple[str, int, str]], total: int, rotulo_centro: str
 
 
 def sup_linha_mestre(chave: str, info: dict, itens_grupo: pd.DataFrame,
-                     estoque_grupo: pd.DataFrame | None, hoje: pd.Timestamp) -> str:
+                     estoque_grupo: pd.DataFrame | None, hoje: pd.Timestamp,
+                     n_relacionados: int = 0) -> str:
     """Uma linha da tabela mestre por TAG (Opção C) -- um <details>, não uma
     <tr>: precisa expandir/recolher por linha sem JS e sem rerun do
     Streamlit, e <tr> não aceita <details> por dentro de forma confiável
@@ -4569,6 +4638,14 @@ def sup_linha_mestre(chave: str, info: dict, itens_grupo: pd.DataFrame,
     if not itens_html:
         itens_html = ('<div class="exp-item gtbl-muted">Nenhum item de suprimento cadastrado '
                      "ainda para esta TAG.</div>")
+    if n_relacionados and info["eh_gplan"]:
+        # Kit/acessorio com codigo proprio (ex. "KIT6_FV120058B") cujo TITULO
+        # cita esta TAG -- so a contagem aqui, pra nao inchar a linha
+        # expandida; o detalhe de cada um mora na ficha completa.
+        itens_html += (
+            f'<div class="exp-item gtbl-muted">+ {br_num(n_relacionados)} '
+            f'{"item citado" if n_relacionados == 1 else "itens citados"} no título '
+            "(kit/acessório) -- ver ficha completa.</div>")
 
     if estoque_grupo is not None and not estoque_grupo.empty:
         estoque_html = "".join(
@@ -4941,6 +5018,12 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
         universo[t] = {"n_itens": 0, "recebidos": 0, "atrasados": 0, "cancelados": 0,
                        "geral": "Fora da base de suprimentos", "tem_tag": True, "eh_gplan": True}
     chave_serie = itens["TAG"].where(itens["TAG"] != "", itens["IDENT_CODE"])
+    # Kit/acessorio com codigo proprio cujo TITULO cita esta TAG (ex.
+    # "KIT6_FV120058B" pra "FV-120058B") -- pedido do Daniel, 2026-09-08: a
+    # ficha de FV-120058B so mostrava 1 item, mas existem 18 linhas citando
+    # essa TAG no titulo. So entra pra quem eh_gplan (kit/generico nao
+    # precisa citar a si mesmo).
+    indice_titulo = sup_indice_titulo(itens, tags_gplan)
 
     estoque_por_chave: dict[str, pd.DataFrame] = {}
     if not estoque.empty and "Tag Number" in estoque.columns:
@@ -5060,7 +5143,9 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
         sup_linha_mestre(
             row["CHAVE"], row.to_dict(),
             itens[chave_serie == row["CHAVE"]],
-            estoque_por_chave.get(row["CHAVE"]), hoje)
+            estoque_por_chave.get(row["CHAVE"]), hoje,
+            n_relacionados=len(set(indice_titulo.get(row["CHAVE"], []))
+                               - set(itens.index[chave_serie == row["CHAVE"]])))
         for _, row in linhas_pag.iterrows())
     cabecalho = (
         '<div class="sup-mestre-cab"><span></span><span>Tag</span>'
@@ -5075,11 +5160,13 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
     fichas = ""
     for chave in chaves_mostradas:
         itens_tag = itens[itens["TAG"] == chave]
+        idx_relacionados = set(indice_titulo.get(chave, [])) - set(itens_tag.index)
+        itens_relacionados = itens.loc[sorted(idx_relacionados)]
         fichas += (f'<div class="fmodal" id="{ficha_anchor(chave)}">'
                   '<a class="fmodal-bg" href="#fechado" aria-label="Fechar"></a>'
                   '<div class="fmodal-box">'
                   '<a class="fmodal-x" href="#fechado" aria-label="Fechar">&times;</a>'
-                  f'{sup_ficha_tag_html(chave, itens_tag, universo[chave], hoje, movimentacoes)}'
+                  f'{sup_ficha_tag_html(chave, itens_tag, universo[chave], hoje, movimentacoes, itens_relacionados)}'
                   "</div></div>")
     render_html(fichas)
 
