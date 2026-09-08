@@ -4778,110 +4778,6 @@ def render_estoque_geral(estoque: pd.DataFrame, tags_gplan: set[str]) -> None:
         + "</div>")
 
 
-def render_sup_acessorios(resumo_tags: dict, itens: pd.DataFrame, hoje: pd.Timestamp) -> None:
-    """Aba "Acessórios" -- os códigos da 09_SUPRIMENTOS_ITENS que NÃO são TAG
-    do Gplan: kits/acessórios amarrados a uma TAG real (ex. "KIT6_FV120058B",
-    "VE-120994B_AD" -- o título costuma citar a TAG real) ou material
-    genérico de requisição em lote, sem TAG por natureza (ex.:
-    "INS-UDAPL-101", plaquetas de identificação). Pedido do Daniel,
-    2026-09-07: "pros demais se for compra de acessórios mostrar em outra
-    aba também" -- antes era um checkbox escondido dentro da tabela
-    principal de Suprimentos.
-
-    Não tenta adivinhar a TAG-mãe por regex: testado em 2026-09-07, só
-    ~13-15% dos códigos têm um jeito confiável de recuperar isso (sufixo
-    _AD/_CX ou a TAG citada explicitamente no título) -- mostrar uma
-    TAG-mãe errada seria pior do que não mostrar nenhuma. Em vez disso, o
-    título e a descrição completos ficam visíveis pra quem olha reconhecer
-    a TAG de cabeça.
-    """
-    fora = {k: v for k, v in resumo_tags.items() if not v["eh_gplan"]}
-    chave_serie = itens["TAG"].where(itens["TAG"] != "", itens["IDENT_CODE"])
-
-    total = len(fora)
-    com_tag = sum(1 for v in fora.values() if v["tem_tag"])
-    sem_tag = total - com_tag
-    recebidos = sum(1 for v in fora.values() if v["geral"] == "100% recebido")
-
-    kpis = (
-        du_kpi("Códigos fora da base de TAGs", br_num(total), "", 1.0, "#7c8aa8", "pasta")
-        + du_kpi("Kit/acessório (código citado na requisição)", br_num(com_tag),
-                 f"{br_pct(com_tag / total * 100) if total else '—'} do total",
-                 (com_tag / total) if total else 0, "#9d6bff", "documento")
-        + du_kpi("Material genérico (sem TAG na linha)", br_num(sem_tag), "",
-                 (sem_tag / total) if total else 0, "#5b8def", "caixa")
-        + du_kpi("Já recebidos", br_num(recebidos), "", (recebidos / total) if total else 0,
-                 "#34d399", "check")
-    )
-    render_html(f'<section class="du-kpis">{kpis}</section>')
-    render_html(
-        '<div class="gplan-panel" style="margin:20px 0 24px; padding:16px 20px;">'
-        '<p class="fx-nota" style="text-align:left; margin:0;">A maioria não é uma TAG '
-        "individual -- é o código da própria requisição no lugar da TAG, porque a linha é um "
-        "kit/acessório amarrado a uma TAG real (o título geralmente cita qual) ou material "
-        "genérico de requisição em lote, sem TAG por natureza. Não tentamos adivinhar a "
-        "TAG-mãe automaticamente -- leia o título/descrição pra reconhecer.</p></div>")
-
-    if not fora:
-        render_html('<div class="gplan-panel"><div class="gtbl-empty">'
-                    "Nenhum código fora da base de TAGs encontrado.</div></div>")
-        return
-
-    vista = itens[chave_serie.isin(fora.keys())].copy()
-    vista["_chave"] = chave_serie[chave_serie.isin(fora.keys())]
-    vista["_situacao"] = vista.apply(lambda r: sup_situacao(r, hoje)[0], axis=1)
-
-    with st.container(border=True, key="sup_acess_toolbar"):
-        col_busca, col_status = st.columns([2, 1], vertical_alignment="bottom")
-        with col_busca:
-            busca = st.text_input(
-                "Buscar código, TAG citada no título ou material", key="sup_acess_busca",
-                placeholder="Digite o código, a TAG citada no título ou a descrição do material…")
-        with col_status:
-            status_opts = sorted({s for s in vista["STATUS"] if s})
-            sel_status = st.multiselect("Status do item", status_opts, key="sup_acess_status")
-
-    if busca.strip():
-        alvo = _sem_acento(busca.strip().upper())
-        mascara = pd.Series(False, index=vista.index)
-        for c in ("_chave", "TITULO", "DESCRICAO_MATERIAL"):
-            mascara = mascara | _sem_acento_serie(vista[c].astype(str).str.upper()).str.contains(
-                alvo, na=False)
-        vista = vista[mascara]
-    if sel_status:
-        vista = vista[vista["STATUS"].isin(sel_status)]
-
-    col_info, col_export = st.columns([5, 1], vertical_alignment="center")
-    with col_info:
-        st.caption(f"{br_num(len(vista))} itens encontrados para esses filtros.")
-    with col_export:
-        exportar = vista.rename(columns={"_chave": "CODIGO"})[
-            ["CODIGO", "TITULO", "DESCRICAO_MATERIAL", "FORNECEDOR", "STATUS",
-             "_situacao", "TOTAL_PROGRESSO"]]
-        st.download_button(
-            "Exportar", exportar.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
-            file_name="suprimentos_acessorios.csv", mime="text/csv", key="sup_acess_export",
-            icon=":material/download:", type="tertiary", use_container_width=True)
-
-    vista_pag = paginate(vista, "sup_acessorios", f"{busca}|{sel_status}")
-    tom_sit = {"Recebido": "ok", "Atrasado": "crit", "Cancelado": "andamento",
-              "Sem status": "mudo", "Em andamento": "warn"}
-    linhas = "".join(
-        f'<tr><td class="mono gtbl-muted">{esc(r["_chave"])}</td>'
-        f'<td class="gt-corta">{esc(str(r["TITULO"] or "—")[:45])}</td>'
-        f'<td class="gt-corta">{esc(r["DESCRICAO_MATERIAL"][:50].replace(chr(10), " "))}</td>'
-        f'<td class="gtbl-muted gt-corta">{esc(r["FORNECEDOR"] or "—")}</td>'
-        f'<td>{sup_status_pill(r["STATUS"])}</td>'
-        f'<td><span class="gtbl-badge {tom_sit[r["_situacao"]]}">{esc(r["_situacao"])}</span></td>'
-        f'<td class="gtbl-num">{br_pct(r["TOTAL_PROGRESSO"])}</td></tr>'
-        for _, r in vista_pag.iterrows())
-    render_html(
-        '<div class="gplan-panel">'
-        + html_table(["Código", "Título", "Material", "Fornecedor", "Status", "Situação", "#Progresso"],
-                     linhas, "Nenhum item encontrado para esses filtros.")
-        + "</div>")
-
-
 def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
                        tags: pd.DataFrame, movimentacoes: pd.DataFrame,
                        cache_key: str = ""):
@@ -4915,25 +4811,17 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
                "do pedido à entrega na obra.</p>")
     tags_gplan = set(tags["TAG"].astype(str))
     hoje = pd.Timestamp.now(tz=BR_TZ).tz_localize(None).normalize()
-    resumo_tags_todos = sup_por_tag(itens, hoje, tags_gplan)
-    n_acessorios = sum(1 for v in resumo_tags_todos.values() if not v["eh_gplan"])
     modo = st.segmented_control(
-        "Ver", ["Suprimentos", "Acessórios", "Estoque Geral"],
-        format_func=lambda x: {
-            "Suprimentos": f"🛡 {x}",
-            "Acessórios": f"🔧 {x} · {br_num(n_acessorios)}",
-            "Estoque Geral": f"📦 {x} · {br_num(len(estoque))}",
-        }[x],
+        "Ver", ["Suprimentos", "Estoque Geral"],
+        format_func=lambda x: (f"🛡 {x}" if x == "Suprimentos"
+                               else f"📦 {x} · {br_num(len(estoque))}"),
         default="Suprimentos", key="sup_modo", label_visibility="collapsed") or "Suprimentos"
 
     if modo == "Estoque Geral":
         render_estoque_geral(estoque, tags_gplan)
         return
-    if modo == "Acessórios":
-        render_sup_acessorios(resumo_tags_todos, itens, hoje)
-        return
 
-    resumo_tags = resumo_tags_todos
+    resumo_tags = sup_por_tag(itens, hoje, tags_gplan)
     # So os que batem com 01_BASE_TAGS -- os KPIs tem que contar a mesma
     # populacao que "Com suprimento identificado", senao "100% recebidas"
     # inclui codigo de kit/material generico que nunca foi TAG (achado de
@@ -5009,10 +4897,12 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
 
     # ------------------------------------------------------ trilho + tabela
     render_html(sup_sec_titulo("TAGs com suprimento"))
-    # O universo agora e sempre so Gplan -- navegar os codigos de kit/
-    # acessorio/material generico virou aba propria ("Acessórios"), em vez
-    # de um checkbox escondido aqui dentro. Ganha as TAGs "Contratada" sem
-    # nenhuma linha ainda na base, como linha vazia navegavel.
+    # O universo e sempre so Gplan -- kit/acessorio com codigo proprio
+    # aparece dentro da propria linha da TAG-mae, via indice_titulo mais
+    # abaixo (nao como TAG a parte: tentativa anterior de aba "Acessórios"
+    # foi mal-entendido do pedido, revertida em 2026-09-08). Ganha as TAGs
+    # "Contratada" sem nenhuma linha ainda na base, como linha vazia
+    # navegavel.
     universo = dict(resumo_gplan)
     for t in fora_base_tags:
         universo[t] = {"n_itens": 0, "recebidos": 0, "atrasados": 0, "cancelados": 0,
