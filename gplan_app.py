@@ -3492,6 +3492,26 @@ def inject_css():
         .ac-resumo span { font-size:10px; color:var(--txt-teal);
                           background:rgba(var(--rgb-teal),.12); border-radius:5px;
                           padding:2px 8px; }
+        /* Bloco de permissao por pasta (Novo/Editar login) -- pedido do
+           Daniel, 2026-09-08: "definir pasta por pasta o que pode
+           visualizar o login". Cada pasta e o mesmo agrupamento do menu
+           lateral (main()), com o contador e o "marcar toda a pasta". */
+        .pf-conta { font-size:10px; font-weight:700; color:var(--text-3);
+                    background:rgba(var(--rgb-tinta),.07); border-radius:99px;
+                    padding:1px 8px; vertical-align:1px; }
+        /* container key leva o prefixo (nv_/ed<uid>_) na frente, por isso
+           o seletor e por substring, nao pelo nome inteiro. O gap padrao
+           do Streamlit (16px) se repete em 3 niveis aninhados aqui dentro
+           (entre pastas, entre cabecalho/grade de cada pasta, entre
+           checkbox empilhado numa coluna) -- os tres juntos que deixavam
+           "muito espaçamento sem necessidade" (achado do Daniel,
+           2026-09-08). Aperta os tres de uma vez, escopado so pra essa
+           area (nao mexe no resto do app). */
+        div[class*="_pf_pastas"] [data-testid="stCheckbox"] label p { font-size:12.5px; }
+        div[class*="_pf_pastas"] [data-testid="stVerticalBlock"] { gap:6px !important; }
+        div[class*="_pf_pastas"] [data-testid="stHorizontalBlock"] { gap:10px !important; }
+        div[class*="_pf_pastas"] [class*="_bloco"] { padding:10px 14px !important; }
+        div[class*="_pf_pastas"] [data-testid="stElementContainer"] { margin-bottom:0 !important; }
 
         /* o selo do papel: mesma familia de cor nos dois lugares onde aparece */
         .sb-papel, .pf-papel { font-size:9.5px; font-weight:800; letter-spacing:.5px;
@@ -13930,12 +13950,63 @@ def render_perfil_lateral():
             dialogo_perfil()
 
 
+def _marcar_pasta_toggle(chaves: list[str], prefixo_secao: str) -> None:
+    """on_change do "Marcar toda a pasta" -- liga/desliga todo mundo da
+    pasta de uma vez. Roda ANTES do script recomeçar do topo, então gravar
+    aqui no session_state é o que faz os checkboxes de item nascerem já
+    no valor certo na renderização seguinte."""
+    ligar = st.session_state[f"{prefixo_secao}__todas"]
+    for chave in chaves:
+        st.session_state[f"{prefixo_secao}_{chave}"] = ligar
+
+
+def _bloco_pasta(prefixo: str, nome: str, chaves: list[str], marcadas: list[str],
+                 forcar_reset: bool) -> list[str]:
+    """Uma pasta (mesmo agrupamento do menu lateral) com suas abas, um
+    checkbox por aba e um "marcar toda a pasta" que liga/desliga as dela de
+    uma vez -- pedido do Daniel, 2026-09-08: "definir pasta por pasta o que
+    pode visualizar o login".
+
+    forcar_reset=True quando o tipo de usuário acabou de mudar: os
+    checkboxes desta pasta pulam pro que aquele papel prevê, mesmo que a
+    pessoa já tivesse mexido neles antes.
+    """
+    prefixo_secao = f"{prefixo}_{nome}"
+    for chave in chaves:
+        chave_item = f"{prefixo_secao}_{chave}"
+        if forcar_reset or chave_item not in st.session_state:
+            st.session_state[chave_item] = chave in marcadas
+    marcadas_agora = [c for c in chaves if st.session_state[f"{prefixo_secao}_{c}"]]
+    # Reafirma o valor do toggle a cada rodada -- sem isso ele só refletiria
+    # o próprio último clique, e ficaria "errado" quando a pessoa marca os
+    # itens um a um em vez de usar o toggle.
+    st.session_state[f"{prefixo_secao}__todas"] = len(marcadas_agora) == len(chaves)
+
+    with st.container(border=True, key=f"{prefixo_secao}_bloco"):
+        col_nome, col_toggle = st.columns([3, 2], vertical_alignment="center")
+        with col_nome:
+            st.markdown(f"**{esc(nome)}** &nbsp;"
+                       f'<span class="pf-conta">{len(marcadas_agora)}/{len(chaves)}</span>',
+                       unsafe_allow_html=True)
+        with col_toggle:
+            st.checkbox("Marcar toda a pasta", key=f"{prefixo_secao}__todas",
+                       on_change=_marcar_pasta_toggle, args=(chaves, prefixo_secao))
+        cols = st.columns(2)
+        for i, chave in enumerate(chaves):
+            with cols[i % 2]:
+                st.checkbox(acesso.PERMISSOES[chave].replace("Ver a aba ", ""),
+                           key=f"{prefixo_secao}_{chave}")
+    return [c for c in chaves if st.session_state[f"{prefixo_secao}_{c}"]]
+
+
 def campos_do_papel(prefixo: str, papel_inicial: str, marcadas: list[str]):
     """A caixa que define o usuário, e as permissões que vêm com ela.
 
-    O papel é a escolha que a pessoa faz; a permissão é o detalhe que quase
-    nunca se mexe. Por isso o papel vem primeiro e em destaque, e as
-    permissões ficam recolhidas -- abrir só quem precisa fugir do padrão.
+    O papel é a escolha que a pessoa faz e o ponto de partida; as pastas
+    abaixo (mesmo agrupamento do menu lateral) mostram TODAS as abas de
+    cara, prontas pra ligar/desligar aba por aba -- pedido do Daniel,
+    2026-09-08, junto com uma apresentação: precisava montar um login
+    restrito rápido e sem caçar cada opção numa lista só.
     """
     papel = st.selectbox(
         "Tipo de usuário", list(acesso.PAPEIS),
@@ -13946,15 +14017,25 @@ def campos_do_papel(prefixo: str, papel_inicial: str, marcadas: list[str]):
                   for p in acesso.PAPEIS[papel])
         + "</div>")
     trocou = papel != papel_inicial
-    with st.expander("Ajustar permissões uma a uma"):
-        if trocou:
-            st.caption(f"Ao salvar, valem as permissões de {papel}. "
-                       "Mexer aqui só faz efeito se você mantiver o tipo.")
-        perms = st.multiselect(
-            "Permissões", acesso.TODAS,
-            default=list(acesso.PAPEIS[papel]) if trocou else marcadas,
-            format_func=lambda p: acesso.PERMISSOES[p], key=f"{prefixo}_perms")
-    return papel, (list(acesso.PAPEIS[papel]) if trocou else perms)
+    base = list(acesso.PAPEIS[papel]) if trocou else marcadas
+
+    st.caption("Abas liberadas")
+    with st.container(key=f"{prefixo}_pf_pastas"):
+        todas_marcadas: list[str] = []
+        for nome, chaves in acesso.SECOES_PERMISSAO:
+            todas_marcadas += _bloco_pasta(prefixo, nome, chaves, base, trocou)
+
+    if acesso.PERMISSOES_AVULSAS:
+        st.caption("Outras permissões")
+        for p in acesso.PERMISSOES_AVULSAS:
+            chave_item = f"{prefixo}_{p}"
+            if trocou or chave_item not in st.session_state:
+                st.session_state[chave_item] = p in base
+            st.checkbox(acesso.PERMISSOES[p], key=chave_item)
+            if st.session_state[chave_item]:
+                todas_marcadas.append(p)
+
+    return papel, todas_marcadas
 
 
 @st.dialog("Novo login", width="large")

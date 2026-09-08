@@ -80,6 +80,22 @@ PAPEL_PADRAO = "Colaborador"
 COR_PAPEL = {"Administrador": "roxo", "Colaborador": "teal",
              "Visualizador": "azul", "Apresentador": "ambar"}
 
+# As mesmas 4 pastas do menu lateral (gplan_app.main(), onde as paginas
+# viram st.Page de verdade) -- aqui so os nomes, pra tela de Acessos deixar
+# marcar aba por aba agrupada por pasta em vez de uma lista só (pedido do
+# Daniel, 2026-09-08: "definir pasta por pasta o que pode visualizar o
+# login"). Se main() ganhar/perder uma aba, atualizar aqui junto -- são só
+# 4 grupos, e nao vale a pena montar isso dinamico a partir dos st.Page.
+SECOES_PERMISSAO = [
+    ("Visão geral", ["ver_dashboard", "ver_suprimentos", "ver_progresso", "ver_pesquisa"]),
+    ("Documentação", ["ver_relatorios", "ver_sigem", "ver_atualizacao"]),
+    ("Avanço", ["ver_gitec", "ver_planta", "ver_certificacao", "ver_avanco_fisico"]),
+    ("Administração", ["ver_previsao_medicao", "ver_curva_s", "administrar"]),
+]
+# Nao e aba nenhuma -- e um detalhe DENTRO das paginas (mostrar R$ ou nao),
+# por isso fica de fora das pastas.
+PERMISSOES_AVULSAS = ["ver_valores"]
+
 ESPECIAIS = "!@#$%¨&*()-_=+[]{}^~/\\|;:,.<>?'\"`´"
 REGRA_SENHA = ("Mínimo de 8 caracteres, com letra maiúscula, letra minúscula "
                "e caractere especial.")
