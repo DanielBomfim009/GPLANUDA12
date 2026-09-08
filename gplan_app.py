@@ -2564,6 +2564,36 @@ def inject_css():
         .sup-mestre-corpo .exp-item { display:flex; justify-content:space-between; gap:10px;
           font-size:12px; padding:6px 0; border-bottom:1px dashed var(--border-color); color:var(--text-2); }
         .sup-mestre-corpo .exp-item:last-child { border-bottom:none; }
+        /* Card do material de suprimento (linha expandida da tabela mestre)
+           -- rotulo + codigo da requisicao junto do nome, pra nunca
+           confundir com a descrição da própria TAG (achado do Daniel,
+           2026-09-08: "nao consigo entender se o item direto que apareceu
+           e realmente o material ou a descrição do TAG"). */
+        .exp-material { display:flex; justify-content:space-between; align-items:flex-start; gap:10px;
+          padding:8px 0; border-bottom:1px dashed var(--border-color); }
+        .exp-material:last-of-type { border-bottom:none; }
+        .exp-material-txt { min-width:0; }
+        .exp-material-rot { font-size:9px; text-transform:uppercase; letter-spacing:.5px;
+          color:var(--text-3); font-weight:700; }
+        .exp-material-tit { font-size:12.5px; font-weight:700; color:var(--text-1); margin-top:2px; }
+        .exp-material-sub { font-size:10.5px; color:var(--text-3); margin-top:2px;
+          font-family:ui-monospace,Consolas,monospace; }
+        /* Aviso de itens relacionados -- virou bloco com fundo (Opção 2,
+           escolhida pelo Daniel em 2026-09-08) em vez de uma linha de texto
+           discreta, pra nao passar batido de quem esta so olhando a busca. */
+        .exp-relacionados-cta { display:flex; align-items:center; gap:10px; margin-top:10px;
+          background:rgba(var(--rgb-azul),.08); border:1px solid rgba(var(--rgb-azul),.25);
+          border-radius:10px; padding:10px 12px; text-decoration:none !important; }
+        .exp-relacionados-cta:hover { border-color:rgba(var(--rgb-azul),.45);
+          background:rgba(var(--rgb-azul),.12); }
+        .exp-relacionados-cta .ic { width:28px; height:28px; border-radius:8px; flex:none;
+          background:rgba(var(--rgb-azul),.18); color:var(--accent-blue);
+          display:flex; align-items:center; justify-content:center; padding:6px; }
+        .exp-relacionados-cta .ic .fxi { width:100%; height:100%; }
+        .exp-relacionados-cta .txt { flex:1; min-width:0; }
+        .exp-relacionados-cta .txt b { display:block; color:var(--text-1); font-size:12px; font-weight:700; }
+        .exp-relacionados-cta .txt small { display:block; color:var(--text-3); font-size:10.5px; margin-top:1px; }
+        .exp-relacionados-cta .seta { color:var(--accent-blue); font-size:16px; flex:none; }
         .sup-mestre-ficha { display:block; text-align:right; padding:0 20px 14px 0; font-size:11.5px;
           font-weight:700; color:var(--accent-blue); text-decoration:none; }
         .sup-mestre-ficha:hover { text-decoration:underline; }
@@ -2574,7 +2604,7 @@ def inject_css():
         /* Coluna lateral da ficha completa -- so o resumo rapido da TAG
            (situacao, itens diretos, relacionados, proximo prazo). Sticky pra
            acompanhar a rolagem do modal (.fmodal-box) sem sumir. Itens
-           relacionados NAO ficam aqui (ver .sup-item-principal/.sup-rel-grid
+           relacionados NAO ficam aqui (ver .sup-item-principal/.sup-rel-lista
            abaixo) -- tentativa anterior de espremer eles numa lista dentro
            dos 288px foi relatada pelo Daniel como "pequeno no canto, sem
            detalhamento" e revertida em 2026-09-08. */
@@ -2600,20 +2630,31 @@ def inject_css():
           background:rgba(var(--rgb-azul),.14); border:1px solid rgba(var(--rgb-azul),.3);
           border-radius:99px; padding:3px 9px; white-space:nowrap; }
 
-        /* Itens relacionados (kit/acessorio citado no titulo) -- grade de 2
-           colunas em largura total (Opção B, escolhida pelo Daniel em
-           2026-09-08: mesmo detalhe do item principal, timeline inteira
-           incluida, so que em grade pra nao dobrar a altura da ficha).
-           Numerados via CSS counter -- cada card se distingue do outro so de
-           bater o olho, sem precisar ler o titulo inteiro. */
-        .sup-rel-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px;
-          counter-reset:sup-relitem; }
-        @media (max-width:820px) { .sup-rel-grid { grid-template-columns:1fr; } }
-        .sup-rel-grid .fx-pn { counter-increment:sup-relitem; }
-        .sup-rel-grid .fx-pn-t::before { content:counter(sup-relitem); flex:none;
-          display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px;
-          border-radius:50%; background:rgba(var(--rgb-tinta),.08); color:var(--text-2);
-          font-size:10px; font-weight:800; }
+        /* Itens relacionados (kit/acessorio citado no titulo) -- lista de
+           linhas que fecham por padrão (Opção B revisada, 2026-09-08: a
+           versão com timeline sempre aberta pra ate 17 itens deixava a
+           ficha com mais de 5.000px de altura -- "saindo pra fora da
+           ficha", relato do Daniel). Cada linha e um <details> com so
+           numero, titulo e %; abre pra ver requisição, fornecedor,
+           quantidade, progresso e a timeline inteira daquele item. */
+        .sup-rel-lista { display:flex; flex-direction:column; gap:7px; }
+        .sup-rel-row { background:var(--dark-card-2); border:1px solid var(--border-color);
+          border-radius:10px; overflow:hidden; }
+        .sup-rel-row summary { list-style:none; cursor:pointer; padding:9px 12px;
+          display:flex; align-items:center; gap:9px; }
+        .sup-rel-row summary::-webkit-details-marker { display:none; }
+        .sup-rel-row summary:hover { background:rgba(var(--rgb-tinta),.025); }
+        .sup-rel-row .num { width:18px; height:18px; border-radius:50%; flex:none;
+          background:rgba(var(--rgb-tinta),.08); color:var(--text-2); font-size:10px; font-weight:800;
+          display:inline-flex; align-items:center; justify-content:center; }
+        .sup-rel-row .chev-mini { width:13px; height:13px; flex:none; color:var(--text-3);
+          font-size:9px; transition:transform .12s, color .12s;
+          display:inline-flex; align-items:center; justify-content:center; }
+        .sup-rel-row[open] .chev-mini { transform:rotate(90deg); color:var(--accent-blue); }
+        .sup-rel-row .tit { flex:1; min-width:0; font-size:12px; font-weight:600; color:var(--text-1);
+          overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .sup-rel-row .pc { flex:none; font-size:10.5px; color:var(--text-3); font-variant-numeric:tabular-nums; }
+        .sup-rel-row .corpo { padding:2px 14px 14px 39px; border-top:1px solid var(--border-color); margin-top:2px; }
 
         /* rosca */
         .fx-rosca { position:relative; width:112px; aspect-ratio:1; }
@@ -4580,7 +4621,7 @@ def sup_lateral_html(resumo_tag: dict, itens_tag: pd.DataFrame,
                      n_relacionados: int) -> str:
     """Coluna lateral da ficha completa -- so o resumo rapido da TAG (situação,
     itens diretos, relacionados, próximo prazo). Os itens relacionados em si
-    NAO ficam aqui -- ver .sup-rel-grid em sup_ficha_tag_html: tentativa
+    NAO ficam aqui -- ver .sup-rel-lista em sup_ficha_tag_html: tentativa
     anterior de listar eles nesta coluna de 288px foi relatada pelo Daniel
     como "pequeno no canto, sem detalhamento" (2026-09-08)."""
     # Proximo prazo -- o mais cedo entre as fases atuais pendentes dos itens
@@ -4622,7 +4663,11 @@ def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
         + fx_tile("Situação geral", resumo_tag["geral"], "seta", "#9d6bff")
     )
 
-    def _painel_item(r: pd.Series, principal: bool = False) -> str:
+    def _painel_item(r: pd.Series) -> str:
+        # Item(ns) direto(s) da TAG -- sempre com detalhe completo (fase
+        # atual, dados e timeline), borda + selo pra nunca se confundir com
+        # os relacionados logo abaixo (achado do Daniel, 2026-09-08: "nao
+        # consigo distinguir cada item, inclusive o principal").
         rotulo, tom = sup_situacao(r, hoje)
         fase_html = sup_fase_atual_html(r["_fases"]) if rotulo not in ("Recebido", "Cancelado") else ""
         corpo = (
@@ -4637,17 +4682,12 @@ def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
             + "</div>"
             + sup_timeline_html(r["_fases"]))
         titulo = _sup_titulo_curto(r["DESCRICAO_MATERIAL"])
-        if not principal:
-            return fx_painel(titulo, "cabo", corpo)
-        # Item(ns) direto(s) da TAG -- borda + selo pra nunca se confundir
-        # com os relacionados logo abaixo (achado do Daniel, 2026-09-08:
-        # "nao consigo distinguir cada item, inclusive o principal").
         return (f'<div class="fx-pn sup-item-principal"><div class="fx-pn-t">'
                 f'<span class="ic">{fx_svg("cabo")}</span>{esc(titulo)}'
                 f'<span class="sup-principal-selo">Item principal</span></div>'
                 f'<div class="fx-pn-c">{corpo}</div></div>')
 
-    corpo = "".join(_painel_item(r, principal=True) for _, r in itens_tag.iterrows())
+    corpo = "".join(_painel_item(r) for _, r in itens_tag.iterrows())
     if itens_tag.empty:
         corpo += fx_painel("Itens de suprimento", "caixa",
                            '<p class="fx-nota">Nenhum item de suprimento cadastrado ainda pra '
@@ -4660,19 +4700,40 @@ def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
     lateral = sup_lateral_html(resumo_tag, itens_tag,
                                len(itens_relacionados) if tem_relacionados else 0)
 
-    # Itens relacionados (kit/acessorio cujo TITULO cita esta TAG) -- mesmo
-    # nivel de detalhe do item principal (timeline inteira incluida), em
-    # grade de 2 colunas de largura total: pedido do Daniel, 2026-09-08,
-    # "quanto mais detalhamento pra suprimentos melhor" -- a versao anterior
-    # (chips compactos na coluna lateral) foi revertida por falta de espaço
-    # e de distincao entre os itens.
+    def _linha_relacionado(indice: int, r: pd.Series) -> str:
+        # Fecha por padrao -- so numero, titulo e %. Uma TAG com muitos
+        # relacionados (ex. 17) com timeline inteira sempre aberta deixava a
+        # ficha com mais de 5.000px de altura ("saindo pra fora da ficha",
+        # relato do Daniel, 2026-09-08); abre por item pra ver requisição,
+        # fornecedor, quantidade, progresso e a timeline completa.
+        rotulo, _tom = sup_situacao(r, hoje)
+        fase_html = sup_fase_atual_html(r["_fases"]) if rotulo not in ("Recebido", "Cancelado") else ""
+        corpo = (
+            fase_html
+            + '<div class="fx-dados">'
+            + fx_dado("Requisição", r["REQUISICAO"] or "—", quebra=True)
+            + fx_dado("Fornecedor", r["FORNECEDOR"] or "—")
+            + fx_dado("Quantidade", f'{br_num(int(r["QTDE"]))} {r["UNIDADE"] or ""}'
+                      if r["QTDE"] else "—")
+            + fx_dado("Progresso total", br_pct(r["TOTAL_PROGRESSO"]))
+            + "</div>"
+            + sup_timeline_html(r["_fases"]))
+        titulo = _sup_titulo_curto(r["DESCRICAO_MATERIAL"])
+        return (f'<details class="sup-rel-row"><summary><span class="num">{indice}</span>'
+                f'<span class="chev-mini">▸</span><span class="tit">{esc(titulo)}</span>'
+                f'<span class="pc">{br_pct(r["TOTAL_PROGRESSO"])} · {esc(rotulo)}</span></summary>'
+                f'<div class="corpo">{corpo}</div></details>')
+
+    # Itens relacionados (kit/acessorio cujo TITULO cita esta TAG) -- lista
+    # de linhas colapsaveis (ver _linha_relacionado acima).
     relacionados_html = ""
     if tem_relacionados:
         relacionados_html = (
             f'<div class="sup-eyebrow">Itens relacionados'
             f'<span class="conta">{br_num(len(itens_relacionados))}</span></div>'
-            '<div class="sup-rel-grid">'
-            + "".join(_painel_item(r) for _, r in itens_relacionados.iterrows())
+            '<div class="sup-rel-lista">'
+            + "".join(_linha_relacionado(i, r) for i, (_, r)
+                      in enumerate(itens_relacionados.iterrows(), 1))
             + "</div>")
 
     return (f'<div class="fx"><div class="fx-cab"><span class="marca">{fx_svg("tag")}</span>'
@@ -4737,8 +4798,16 @@ def sup_linha_mestre(chave: str, info: dict, itens_grupo: pd.DataFrame,
         # Fase atual + desde quando -- so faz sentido pra quem ainda esta na
         # fila (recebido/cancelado ja terminaram a jornada).
         fase_html = sup_fase_atual_html(r["_fases"]) if rotulo not in ("Recebido", "Cancelado") else ""
-        return (f'<div class="exp-item"><span>{esc(_sup_titulo_curto(r["DESCRICAO_MATERIAL"], 55))}</span>'
-               f'<span class="gtbl-badge {tom_item}">{esc(rotulo)}</span></div>{fase_html}')
+        # Rotulo "Material de suprimento" + codigo da requisicao junto do
+        # nome -- pra nunca confundir com a descrição da própria TAG (achado
+        # do Daniel, 2026-09-08: "nao consigo entender se o item direto que
+        # apareceu e realmente o material ou a descrição do TAG").
+        return (
+            '<div class="exp-material"><div class="exp-material-txt">'
+            '<div class="exp-material-rot">Material de suprimento</div>'
+            f'<div class="exp-material-tit">{esc(_sup_titulo_curto(r["DESCRICAO_MATERIAL"], 70))}</div>'
+            + (f'<div class="exp-material-sub">{esc(r["REQUISICAO"])}</div>' if r["REQUISICAO"] else "")
+            + f'</div><span class="gtbl-badge {tom_item}">{esc(rotulo)}</span></div>{fase_html}')
 
     itens_html = "".join(_item_bloco(r) for _, r in itens_grupo.iterrows())
     if not itens_html:
@@ -4747,11 +4816,16 @@ def sup_linha_mestre(chave: str, info: dict, itens_grupo: pd.DataFrame,
     if n_relacionados and info["eh_gplan"]:
         # Kit/acessorio com codigo proprio (ex. "KIT6_FV120058B") cujo TITULO
         # cita esta TAG -- so a contagem aqui, pra nao inchar a linha
-        # expandida; o detalhe de cada um mora na ficha completa.
+        # expandida; o detalhe de cada um mora na ficha completa. Vira um
+        # bloco com fundo (Opção 2, 2026-09-08) em vez de uma linha de texto
+        # discreta, pra nao passar batido de quem esta so olhando a busca.
         itens_html += (
-            f'<div class="exp-item gtbl-muted">+ {br_num(n_relacionados)} '
-            f'{"item citado" if n_relacionados == 1 else "itens citados"} no título '
-            "(kit/acessório) -- ver ficha completa.</div>")
+            f'<a class="exp-relacionados-cta" href="#{ficha_anchor(chave)}">'
+            f'<span class="ic">{fx_svg("caixa")}</span>'
+            f'<span class="txt"><b>{br_num(n_relacionados)} '
+            f'{"item relacionado" if n_relacionados == 1 else "itens relacionados"}</b>'
+            "<small>kit/acessório citado no título — ver na ficha completa</small></span>"
+            '<span class="seta">→</span></a>')
 
     if estoque_grupo is not None and not estoque_grupo.empty:
         estoque_html = "".join(
