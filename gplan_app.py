@@ -2487,7 +2487,6 @@ def inject_css():
         .sup-row2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;
           align-items:stretch; }
         @media (max-width:900px) { .sup-row2 { grid-template-columns:1fr; } }
-        .sup-row3 { margin-bottom:20px; }
         .sup-donut-panel { display:flex; flex-direction:column; }
         .sup-donut-row { display:flex; align-items:center; gap:22px; flex-wrap:wrap; }
         .sup-donut-row .fx-leg { flex:1; min-width:170px; }
@@ -2544,6 +2543,10 @@ def inject_css():
         .sup-mestre-ficha { display:block; text-align:right; padding:0 20px 14px 0; font-size:11.5px;
           font-weight:700; color:var(--accent-blue); text-decoration:none; }
         .sup-mestre-ficha:hover { text-decoration:underline; }
+        /* Selo "Fase atual: X - desde DD/MM" -- linha expandida da tabela
+           mestre e ficha completa, mesmo selo nos dois lugares. */
+        .sup-fase-atual { font-size:10.5px; color:var(--text-3); margin:2px 0 8px; }
+        .sup-fase-atual b { color:var(--text-2); font-weight:700; }
 
         /* rosca */
         .fx-rosca { position:relative; width:112px; aspect-ratio:1; }
@@ -4312,6 +4315,35 @@ def sup_status_pill(status: str) -> str:
     return f'<span class="gtbl-badge {tom}">{esc(sentence_case(status))}</span>'
 
 
+def sup_fase_atual(fases: list) -> tuple[str, object] | None:
+    """A fase em que o item esta parado agora, e desde quando -- a data REAL
+    da ultima fase concluida antes dela (foi quando ele "entrou" na fase
+    atual; a fase em si so tem previsto/reprogramado, nao tem "entrada").
+    Sem nenhuma fase concluida ainda, o "desde" fica None (a primeira fase
+    da lista e a propria parada). None de volta quando todas as fases estao
+    concluidas -- nao tem "fase atual" nesse caso. Pedido do Daniel,
+    2026-09-07: "quero saber em qual fase esta o tag que nao chegou, quando
+    foi que entrou naquela etapa"."""
+    desde = None
+    for f in fases:
+        if not f["concluida"]:
+            return f["fase"], desde
+        desde = f["real"]
+    return None
+
+
+def sup_fase_atual_html(fases: list) -> str:
+    """Selo compacto "Fase atual: X · desde DD/MM/AAAA" pra usar tanto na
+    linha expandida da tabela mestre quanto na ficha -- mesma pergunta, dois
+    lugares."""
+    atual = sup_fase_atual(fases)
+    if atual is None:
+        return ""
+    fase, desde = atual
+    desde_txt = f" · nesta fase desde {desde:%d/%m/%Y}" if desde is not None else ""
+    return f'<div class="sup-fase-atual">Fase atual: <b>{esc(fase)}</b>{desde_txt}</div>'
+
+
 def sup_timeline_html(fases: list) -> str:
     """A cadeia de fases de um item, na ordem em que acontecem -- concluída
     (data real) ou prevista (previsto/reprogramado), sem inventar as que
@@ -4337,17 +4369,18 @@ def sup_timeline_html(fases: list) -> str:
 SUP_GERAL_COR = {
     "100% recebido": "#2dd4bf", "Em fornecimento": "#5b8def", "Atrasado": "#f87171",
     "Parcialmente recebido": "#fbbf24", "Cancelado": "#3a4a68",
+    "Fora da base de suprimentos": "#7c8aa8",
 }
 SUP_GERAL_TOM = {
     "100% recebido": "ok", "Em fornecimento": "andamento", "Atrasado": "crit",
-    "Parcialmente recebido": "warn", "Cancelado": "mudo",
+    "Parcialmente recebido": "warn", "Cancelado": "mudo", "Fora da base de suprimentos": "mudo",
 }
 # Ordem de urgencia (tabela mestre): atrasado primeiro. A ordem de EXIBICAO
 # dos chips/fatias do donut e outra (ver SUP_GERAL_ROTULOS), de proposito.
-SUP_GERAL_ORDEM = {"Atrasado": 0, "Parcialmente recebido": 1, "Em fornecimento": 2,
-                   "100% recebido": 3, "Cancelado": 4}
+SUP_GERAL_ORDEM = {"Atrasado": 0, "Fora da base de suprimentos": 1, "Parcialmente recebido": 2,
+                   "Em fornecimento": 3, "100% recebido": 4, "Cancelado": 5}
 SUP_GERAL_ROTULOS = ["100% recebido", "Em fornecimento", "Atrasado",
-                     "Parcialmente recebido", "Cancelado"]
+                     "Parcialmente recebido", "Cancelado", "Fora da base de suprimentos"]
 
 SUP_FORN_ROTULOS = ["Recebido", "No prazo", "Atrasado", "Sem previsão"]
 
@@ -4448,10 +4481,11 @@ def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
     corpo = ""
     for _, r in itens_tag.iterrows():
         rotulo, tom = sup_situacao(r, hoje)
+        fase_html = sup_fase_atual_html(r["_fases"]) if rotulo not in ("Recebido", "Cancelado") else ""
         corpo += fx_painel(
             r["DESCRICAO_MATERIAL"][:70].replace("\n", " "), "cabo",
             f'<span class="gtbl-badge {tom}" style="margin-bottom:10px;display:inline-block;">'
-            f'{esc(rotulo)}</span>'
+            f'{esc(rotulo)}</span>{fase_html}'
             '<div class="fx-dados">'
             + fx_dado("Requisição", r["REQUISICAO"] or "—")
             + fx_dado("Fornecedor", r["FORNECEDOR"] or "—")
@@ -4460,6 +4494,11 @@ def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
             + fx_dado("Progresso total", br_pct(r["TOTAL_PROGRESSO"]))
             + "</div>"
             + sup_timeline_html(r["_fases"]))
+    if itens_tag.empty:
+        corpo += fx_painel("Itens de suprimento", "caixa",
+                           '<p class="fx-nota">Nenhum item de suprimento cadastrado ainda pra '
+                           "esta TAG -- ela é obrigação da Contratada fornecer, mas ainda não "
+                           "apareceu nenhuma linha na planilha de suprimentos.</p>")
     corpo += fx_painel("Histórico de mudanças de status", "relogio",
                        sup_historico_html(tag, movimentacoes))
     return (f'<div class="fx"><div class="fx-cab"><span class="marca">{fx_svg("tag")}</span>'
@@ -4518,10 +4557,18 @@ def sup_linha_mestre(chave: str, info: dict, itens_grupo: pd.DataFrame,
         tag_html = (f'<span class="mono gtbl-muted">{esc(chave)}</span> '
                    f'<span class="gtbl-badge mudo">{rotulo_extra}</span>')
 
-    itens_html = "".join(
-        f'<div class="exp-item"><span>{esc(r["DESCRICAO_MATERIAL"][:55].replace(chr(10), " "))}</span>'
-        f'<span class="gtbl-badge {sup_situacao(r, hoje)[1]}">{esc(sup_situacao(r, hoje)[0])}</span></div>'
-        for _, r in itens_grupo.iterrows()) or '<div class="exp-item gtbl-muted">Sem itens.</div>'
+    def _item_bloco(r: pd.Series) -> str:
+        rotulo, tom_item = sup_situacao(r, hoje)
+        # Fase atual + desde quando -- so faz sentido pra quem ainda esta na
+        # fila (recebido/cancelado ja terminaram a jornada).
+        fase_html = sup_fase_atual_html(r["_fases"]) if rotulo not in ("Recebido", "Cancelado") else ""
+        return (f'<div class="exp-item"><span>{esc(r["DESCRICAO_MATERIAL"][:55].replace(chr(10), " "))}</span>'
+               f'<span class="gtbl-badge {tom_item}">{esc(rotulo)}</span></div>{fase_html}')
+
+    itens_html = "".join(_item_bloco(r) for _, r in itens_grupo.iterrows())
+    if not itens_html:
+        itens_html = ('<div class="exp-item gtbl-muted">Nenhum item de suprimento cadastrado '
+                     "ainda para esta TAG.</div>")
 
     if estoque_grupo is not None and not estoque_grupo.empty:
         estoque_html = "".join(
@@ -4654,6 +4701,110 @@ def render_estoque_geral(estoque: pd.DataFrame, tags_gplan: set[str]) -> None:
         + "</div>")
 
 
+def render_sup_acessorios(resumo_tags: dict, itens: pd.DataFrame, hoje: pd.Timestamp) -> None:
+    """Aba "Acessórios" -- os códigos da 09_SUPRIMENTOS_ITENS que NÃO são TAG
+    do Gplan: kits/acessórios amarrados a uma TAG real (ex. "KIT6_FV120058B",
+    "VE-120994B_AD" -- o título costuma citar a TAG real) ou material
+    genérico de requisição em lote, sem TAG por natureza (ex.:
+    "INS-UDAPL-101", plaquetas de identificação). Pedido do Daniel,
+    2026-09-07: "pros demais se for compra de acessórios mostrar em outra
+    aba também" -- antes era um checkbox escondido dentro da tabela
+    principal de Suprimentos.
+
+    Não tenta adivinhar a TAG-mãe por regex: testado em 2026-09-07, só
+    ~13-15% dos códigos têm um jeito confiável de recuperar isso (sufixo
+    _AD/_CX ou a TAG citada explicitamente no título) -- mostrar uma
+    TAG-mãe errada seria pior do que não mostrar nenhuma. Em vez disso, o
+    título e a descrição completos ficam visíveis pra quem olha reconhecer
+    a TAG de cabeça.
+    """
+    fora = {k: v for k, v in resumo_tags.items() if not v["eh_gplan"]}
+    chave_serie = itens["TAG"].where(itens["TAG"] != "", itens["IDENT_CODE"])
+
+    total = len(fora)
+    com_tag = sum(1 for v in fora.values() if v["tem_tag"])
+    sem_tag = total - com_tag
+    recebidos = sum(1 for v in fora.values() if v["geral"] == "100% recebido")
+
+    kpis = (
+        du_kpi("Códigos fora da base de TAGs", br_num(total), "", 1.0, "#7c8aa8", "pasta")
+        + du_kpi("Kit/acessório (código citado na requisição)", br_num(com_tag),
+                 f"{br_pct(com_tag / total * 100) if total else '—'} do total",
+                 (com_tag / total) if total else 0, "#9d6bff", "documento")
+        + du_kpi("Material genérico (sem TAG na linha)", br_num(sem_tag), "",
+                 (sem_tag / total) if total else 0, "#5b8def", "caixa")
+        + du_kpi("Já recebidos", br_num(recebidos), "", (recebidos / total) if total else 0,
+                 "#34d399", "check")
+    )
+    render_html(f'<section class="du-kpis">{kpis}</section>')
+    render_html(
+        '<div class="gplan-panel" style="margin:20px 0 24px; padding:16px 20px;">'
+        '<p class="fx-nota" style="text-align:left; margin:0;">A maioria não é uma TAG '
+        "individual -- é o código da própria requisição no lugar da TAG, porque a linha é um "
+        "kit/acessório amarrado a uma TAG real (o título geralmente cita qual) ou material "
+        "genérico de requisição em lote, sem TAG por natureza. Não tentamos adivinhar a "
+        "TAG-mãe automaticamente -- leia o título/descrição pra reconhecer.</p></div>")
+
+    if not fora:
+        render_html('<div class="gplan-panel"><div class="gtbl-empty">'
+                    "Nenhum código fora da base de TAGs encontrado.</div></div>")
+        return
+
+    vista = itens[chave_serie.isin(fora.keys())].copy()
+    vista["_chave"] = chave_serie[chave_serie.isin(fora.keys())]
+    vista["_situacao"] = vista.apply(lambda r: sup_situacao(r, hoje)[0], axis=1)
+
+    with st.container(border=True, key="sup_acess_toolbar"):
+        col_busca, col_status = st.columns([2, 1], vertical_alignment="bottom")
+        with col_busca:
+            busca = st.text_input(
+                "Buscar código, TAG citada no título ou material", key="sup_acess_busca",
+                placeholder="Digite o código, a TAG citada no título ou a descrição do material…")
+        with col_status:
+            status_opts = sorted({s for s in vista["STATUS"] if s})
+            sel_status = st.multiselect("Status do item", status_opts, key="sup_acess_status")
+
+    if busca.strip():
+        alvo = _sem_acento(busca.strip().upper())
+        mascara = pd.Series(False, index=vista.index)
+        for c in ("_chave", "TITULO", "DESCRICAO_MATERIAL"):
+            mascara = mascara | _sem_acento_serie(vista[c].astype(str).str.upper()).str.contains(
+                alvo, na=False)
+        vista = vista[mascara]
+    if sel_status:
+        vista = vista[vista["STATUS"].isin(sel_status)]
+
+    col_info, col_export = st.columns([5, 1], vertical_alignment="center")
+    with col_info:
+        st.caption(f"{br_num(len(vista))} itens encontrados para esses filtros.")
+    with col_export:
+        exportar = vista.rename(columns={"_chave": "CODIGO"})[
+            ["CODIGO", "TITULO", "DESCRICAO_MATERIAL", "FORNECEDOR", "STATUS",
+             "_situacao", "TOTAL_PROGRESSO"]]
+        st.download_button(
+            "Exportar", exportar.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+            file_name="suprimentos_acessorios.csv", mime="text/csv", key="sup_acess_export",
+            icon=":material/download:", type="tertiary", use_container_width=True)
+
+    vista_pag = paginate(vista, "sup_acessorios", f"{busca}|{sel_status}")
+    tom_sit = {"Recebido": "ok", "Atrasado": "crit", "Cancelado": "andamento",
+              "Sem status": "mudo", "Em andamento": "warn"}
+    linhas = "".join(
+        f'<tr><td class="mono gtbl-muted">{esc(r["_chave"])}</td>'
+        f'<td class="gt-corta">{esc(str(r["TITULO"] or "—")[:45])}</td>'
+        f'<td class="gt-corta">{esc(r["DESCRICAO_MATERIAL"][:50].replace(chr(10), " "))}</td>'
+        f'<td class="gtbl-muted gt-corta">{esc(r["FORNECEDOR"] or "—")}</td>'
+        f'<td>{sup_status_pill(r["STATUS"])}</td>'
+        f'<td><span class="gtbl-badge {tom_sit[r["_situacao"]]}">{esc(r["_situacao"])}</span></td>'
+        f'<td class="gtbl-num">{br_pct(r["TOTAL_PROGRESSO"])}</td></tr>'
+        for _, r in vista_pag.iterrows())
+    render_html(
+        '<div class="gplan-panel">'
+        + html_table(["Código", "Título", "Material", "Fornecedor", "Status", "Situação", "#Progresso"],
+                     linhas, "Nenhum item encontrado para esses filtros.")
+        + "</div>")
+
+
 def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
                        tags: pd.DataFrame, movimentacoes: pd.DataFrame,
                        cache_key: str = ""):
@@ -4686,18 +4837,26 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
     render_html('<p class="sup-subtitulo">Rastreabilidade de material por TAG, '
                "do pedido à entrega na obra.</p>")
     tags_gplan = set(tags["TAG"].astype(str))
+    hoje = pd.Timestamp.now(tz=BR_TZ).tz_localize(None).normalize()
+    resumo_tags_todos = sup_por_tag(itens, hoje, tags_gplan)
+    n_acessorios = sum(1 for v in resumo_tags_todos.values() if not v["eh_gplan"])
     modo = st.segmented_control(
-        "Ver", ["Suprimentos", "Estoque Geral"],
-        format_func=lambda x: (f"🛡 {x}" if x == "Suprimentos"
-                               else f"📦 {x} · {br_num(len(estoque))}"),
+        "Ver", ["Suprimentos", "Acessórios", "Estoque Geral"],
+        format_func=lambda x: {
+            "Suprimentos": f"🛡 {x}",
+            "Acessórios": f"🔧 {x} · {br_num(n_acessorios)}",
+            "Estoque Geral": f"📦 {x} · {br_num(len(estoque))}",
+        }[x],
         default="Suprimentos", key="sup_modo", label_visibility="collapsed") or "Suprimentos"
 
     if modo == "Estoque Geral":
         render_estoque_geral(estoque, tags_gplan)
         return
+    if modo == "Acessórios":
+        render_sup_acessorios(resumo_tags_todos, itens, hoje)
+        return
 
-    hoje = pd.Timestamp.now(tz=BR_TZ).tz_localize(None).normalize()
-    resumo_tags = sup_por_tag(itens, hoje, tags_gplan)
+    resumo_tags = resumo_tags_todos
     # So os que batem com 01_BASE_TAGS -- os KPIs tem que contar a mesma
     # populacao que "Com suprimento identificado", senao "100% recebidas"
     # inclui codigo de kit/material generico que nunca foi TAG (achado de
@@ -4744,18 +4903,22 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
     # update_current_workbook_from_bases.py nesta mesma rodada. Este card
     # mede a cobertura -- quantas das TAGs "Contratada" ja aparecem na base
     # de suprimentos (e em que situacao) e quantas ainda faltam aparecer.
-    contratada_tags = (set(tags.loc[tags["FORNECIMENTO"] == "Contratada", "TAG"].astype(str))
-                       if "FORNECIMENTO" in tags.columns else set())
+    resp_por_tag = (dict(zip(tags["TAG"].astype(str), tags["FORNECIMENTO"]))
+                    if "FORNECIMENTO" in tags.columns else {})
+    contratada_tags = {t for t, v in resp_por_tag.items() if v == "Contratada"}
     contagem_contratada = collections.Counter(
         resumo_gplan[t]["geral"] if t in resumo_gplan else "Fora da base de suprimentos"
         for t in contratada_tags)
     total_contratada = len(contratada_tags)
-    fora_base = contagem_contratada["Fora da base de suprimentos"]
+    # As TAGs "Contratada" que ainda nao tem NENHUMA linha na base de
+    # suprimentos -- viram linha navegavel na tabela mais abaixo em vez de
+    # so um numero no donut (pedido do Daniel: "quero saber... quais nao
+    # esta na base de suprimentos ainda").
+    fora_base_tags = contratada_tags - set(resumo_gplan.keys())
+    fora_base = len(fora_base_tags)
     cobertura = ((total_contratada - fora_base) / total_contratada * 100) if total_contratada else 0.0
     fatias_contratada = [(rot, contagem_contratada[rot], SUP_GERAL_COR[rot])
                          for rot in SUP_GERAL_ROTULOS if contagem_contratada[rot]]
-    if fora_base:
-        fatias_contratada.append(("Fora da base de suprimentos", fora_base, "#7c8aa8"))
     donut_contratada = sup_donut(fatias_contratada, total_contratada, "tags",
                                  rodape=("Cobertura na base de suprimentos", br_pct(cobertura)))
 
@@ -4767,28 +4930,16 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
         f'Fornecimento da Contratada ({br_num(total_contratada)})</div>{donut_contratada}</div>'
         '</div>')
 
-    contagem_status = itens["STATUS"].apply(lambda s: s or "Sem status").value_counts()
-    maior = int(contagem_status.max()) if len(contagem_status) else 1
-    linhas_status = "".join(
-        f'<div class="gr-row"><div class="gr-top"><span class="gr-nome">'
-        f'{esc(sentence_case(status) if status != "Sem status" else status)}</span>'
-        f'<span class="gr-pct">{br_num(int(qtd))}</span></div>'
-        f'<div class="gr-track"><div class="gr-fill" style="width:{qtd/maior*100:.1f}%;"></div></div></div>'
-        for status, qtd in contagem_status.items())
-    render_html(
-        f'<div class="gplan-panel gr-panel sup-row3"><div class="gplan-panel-title">'
-        f'Status dos itens na planilha de suprimentos</div>{linhas_status}</div>')
-
     # ------------------------------------------------------ trilho + tabela
     render_html(sup_sec_titulo("TAGs com suprimento"))
-    mostrar_fora = st.checkbox(
-        "Mostrar também códigos fora da base de TAGs (kits, acessórios, material genérico)",
-        key="sup_fora_gplan",
-        help='A maioria não é uma TAG individual: é o código da própria requisição no lugar da '
-             'TAG, porque a linha é um kit/acessório amarrado a uma TAG real (ex.: "KIT6_FV120058B", '
-             '"VE-120994B_AD") ou material genérico de requisição em lote, sem TAG por natureza '
-             '(ex.: "INS-UDAPL-101", plaquetas de identificação). Ative para ver também esses.')
-    universo = resumo_tags if mostrar_fora else resumo_gplan
+    # O universo agora e sempre so Gplan -- navegar os codigos de kit/
+    # acessorio/material generico virou aba propria ("Acessórios"), em vez
+    # de um checkbox escondido aqui dentro. Ganha as TAGs "Contratada" sem
+    # nenhuma linha ainda na base, como linha vazia navegavel.
+    universo = dict(resumo_gplan)
+    for t in fora_base_tags:
+        universo[t] = {"n_itens": 0, "recebidos": 0, "atrasados": 0, "cancelados": 0,
+                       "geral": "Fora da base de suprimentos", "tem_tag": True, "eh_gplan": True}
     chave_serie = itens["TAG"].where(itens["TAG"] != "", itens["IDENT_CODE"])
 
     estoque_por_chave: dict[str, pd.DataFrame] = {}
@@ -4818,8 +4969,20 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
             format_func=lambda x: f"{x} · {br_num(contagens_sit.get(x, 0))}",
             default="Todas", key="sup_geral") or "Todas"
 
-        col_forn, col_status, col_busca, col_check = st.columns(
-            [1.1, 1.3, 1.4, 1], vertical_alignment="bottom")
+        col_resp, col_forn, col_status, col_busca, col_check = st.columns(
+            [1, 1, 1.2, 1.3, 0.9], vertical_alignment="bottom")
+        with col_resp:
+            contagem_resp = collections.Counter(resp_por_tag.get(t, "") for t in universo)
+            resp_ordem = ["Contratada", "Petrobras", "Fora do Anexo I Apêndice 3"]
+            opcoes_resp = ["Todas"] + [r for r in resp_ordem if contagem_resp[r]]
+            sel_resp = st.selectbox(
+                "Responsável", opcoes_resp,
+                format_func=lambda x: (f"Todas · {br_num(sum(contagem_resp.values()))}" if x == "Todas"
+                                       else f"{x} · {br_num(contagem_resp[x])}"),
+                key="sup_resp",
+                help="Quem tem a obrigação contratual de fornecer o material (coluna FORNECIMENTO "
+                     "da 01_BASE_TAGS) -- diferente de \"Situação geral\"/\"Fornecimento\", que "
+                     "falam do andamento da compra, não de quem deve comprar.")
         with col_forn:
             contagem_forn = collections.Counter(forn_por_tag.values())
             opcoes_forn = ["Todas"] + [r for r in SUP_FORN_ROTULOS if contagem_forn[r]]
@@ -4847,6 +5010,9 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
                 "tem_tag", "eh_gplan"])
     if sit_escolhida != "Todas":
         linhas_df = linhas_df[linhas_df["geral"] == sit_escolhida]
+    if sel_resp != "Todas":
+        chaves_resp = {t for t, v in resp_por_tag.items() if v == sel_resp}
+        linhas_df = linhas_df[linhas_df["CHAVE"].isin(chaves_resp)]
     if sel_forn != "Todas":
         chaves_forn = {t for t, v in forn_por_tag.items() if v == sel_forn}
         linhas_df = linhas_df[linhas_df["CHAVE"].isin(chaves_forn)]
@@ -4888,7 +5054,7 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
             file_name="suprimentos_por_tag.csv", mime="text/csv", key="sup_export_download",
             icon=":material/download:", type="tertiary", use_container_width=True)
 
-    assinatura = f"{sit_escolhida}|{sel_forn}|{busca}|{sel_status}|{so_estoque}|{mostrar_fora}"
+    assinatura = f"{sit_escolhida}|{sel_resp}|{sel_forn}|{busca}|{sel_status}|{so_estoque}"
     linhas_pag = paginate(linhas_df, "suprimentos_tag", assinatura)
     corpo = "".join(
         sup_linha_mestre(
@@ -4913,7 +5079,7 @@ def render_suprimentos(itens: pd.DataFrame, estoque: pd.DataFrame,
                   '<a class="fmodal-bg" href="#fechado" aria-label="Fechar"></a>'
                   '<div class="fmodal-box">'
                   '<a class="fmodal-x" href="#fechado" aria-label="Fechar">&times;</a>'
-                  f'{sup_ficha_tag_html(chave, itens_tag, resumo_tags[chave], hoje, movimentacoes)}'
+                  f'{sup_ficha_tag_html(chave, itens_tag, universo[chave], hoje, movimentacoes)}'
                   "</div></div>")
     render_html(fichas)
 
