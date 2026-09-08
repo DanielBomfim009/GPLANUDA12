@@ -2488,6 +2488,8 @@ def inject_css():
           color:var(--text-3); font-weight:700; margin:30px 0 14px; display:flex;
           align-items:center; gap:10px; }
         .sup-eyebrow::after { content:""; flex:1; height:1px; background:var(--border-color); }
+        .sup-eyebrow .conta { color:var(--txt-azul); font-weight:800; background:rgba(var(--rgb-azul),.12);
+          border-radius:99px; padding:1px 9px; letter-spacing:0; text-transform:none; font-size:10.5px; }
         /* Segmented control do modo Suprimentos/Estoque Geral -- maior que um
            filtro comum, pra ler como troca de tela e nao como mais um chip. */
         .st-key-sup_modo [data-testid="stSegmentedControl"] label {
@@ -2569,48 +2571,49 @@ def inject_css():
            mestre e ficha completa, mesmo selo nos dois lugares. */
         .sup-fase-atual { font-size:10.5px; color:var(--text-3); margin:2px 0 8px; }
         .sup-fase-atual b { color:var(--text-2); font-weight:700; }
-        /* Coluna lateral da ficha completa (Opção C, escolhida em
-           2026-09-08): resumo da TAG + itens relacionados (kit/acessório
-           citado no titulo) como lista compacta -- ocupa o 288px que a
-           2a coluna de .fx-corpo ja reservava e ficava vazio (achado na
-           auditoria visual do Daniel, "está tudo fora de pixels"). Sticky
-           pra acompanhar a rolagem do modal (.fmodal-box) sem sumir. */
+        /* Coluna lateral da ficha completa -- so o resumo rapido da TAG
+           (situacao, itens diretos, relacionados, proximo prazo). Sticky pra
+           acompanhar a rolagem do modal (.fmodal-box) sem sumir. Itens
+           relacionados NAO ficam aqui (ver .sup-item-principal/.sup-rel-grid
+           abaixo) -- tentativa anterior de espremer eles numa lista dentro
+           dos 288px foi relatada pelo Daniel como "pequeno no canto, sem
+           detalhamento" e revertida em 2026-09-08. */
         .sup-lateral { background:var(--dark-card-2); border:1px solid var(--border-color);
           border-radius:13px; padding:14px 15px; display:flex; flex-direction:column;
           gap:10px; position:sticky; top:14px; }
         .sup-lateral h4 { font-size:10px; text-transform:uppercase; letter-spacing:.5px;
-          color:var(--text-3); font-weight:700; margin:4px 0 0; }
-        .sup-lateral h4:first-child { margin-top:0; }
-        .sup-lateral h4 .conta { color:var(--txt-azul); font-weight:800;
-          background:rgba(var(--rgb-azul),.12); border-radius:99px; padding:1px 8px;
-          margin-left:6px; font-size:10px; }
+          color:var(--text-3); font-weight:700; margin:0; }
         .sup-lat-stat { display:flex; justify-content:space-between; align-items:baseline;
           gap:8px; font-size:12px; color:var(--text-2); padding:6px 0;
           border-bottom:1px solid rgba(var(--rgb-tinta),.05); }
         .sup-lat-stat:last-of-type { border-bottom:none; }
         .sup-lat-stat b { color:var(--text-1); font-weight:700; font-size:12.5px; text-align:right; }
-        /* Nota "os itens abaixo nao tem a TAG na propria coluna..." acima da
-           lista de relacionados. */
-        .sup-lat-nota { font-size:10.5px; color:var(--text-3); line-height:1.5; margin:-2px 0 0; }
-        .sup-lat-lista { display:flex; flex-direction:column; gap:6px; max-height:280px;
-          overflow-y:auto; padding-right:2px; margin-top:2px; }
-        .sup-lat-lista::-webkit-scrollbar { width: 7px; }
-        .sup-lat-lista::-webkit-scrollbar-thumb { background: rgba(var(--rgb-tinta),.13);
-          border-radius: 99px; }
-        .sup-lat-chip { display:flex; align-items:center; gap:8px; background:var(--dark-card);
-          border:1px solid var(--border-color); border-radius:9px; padding:7px 9px;
-          font-size:11px; color:var(--text-2); }
-        .sup-lat-chip .dot { width:7px; height:7px; border-radius:50%; flex:none; }
-        .sup-lat-chip .dot.ok { background:var(--accent-teal); }
-        .sup-lat-chip .dot.andamento { background:var(--accent-blue); }
-        .sup-lat-chip .dot.crit { background:var(--accent-red); }
-        .sup-lat-chip .dot.warn { background:var(--accent-amber); }
-        .sup-lat-chip .dot.mudo { background:var(--text-3); }
-        .sup-lat-chip .tx { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;
-          white-space:nowrap; }
-        .sup-lat-chip .pc { flex:none; color:var(--text-3); font-variant-numeric:tabular-nums;
-          font-size:10.5px; }
         @media (max-width:900px) { .sup-lateral { position:static; } }
+
+        /* Item(ns) diretos da TAG na ficha completa -- borda + selo azul pra
+           nunca se confundir com os itens relacionados logo abaixo (achado
+           do Daniel, 2026-09-08: "nao consigo distinguir cada item, inclusive
+           o principal"). */
+        .sup-item-principal { border-left:3px solid var(--accent-blue); }
+        .sup-principal-selo { margin-left:auto; font-size:9.5px; font-weight:800;
+          letter-spacing:.4px; text-transform:uppercase; color:var(--txt-azul);
+          background:rgba(var(--rgb-azul),.14); border:1px solid rgba(var(--rgb-azul),.3);
+          border-radius:99px; padding:3px 9px; white-space:nowrap; }
+
+        /* Itens relacionados (kit/acessorio citado no titulo) -- grade de 2
+           colunas em largura total (Opção B, escolhida pelo Daniel em
+           2026-09-08: mesmo detalhe do item principal, timeline inteira
+           incluida, so que em grade pra nao dobrar a altura da ficha).
+           Numerados via CSS counter -- cada card se distingue do outro so de
+           bater o olho, sem precisar ler o titulo inteiro. */
+        .sup-rel-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px;
+          counter-reset:sup-relitem; }
+        @media (max-width:820px) { .sup-rel-grid { grid-template-columns:1fr; } }
+        .sup-rel-grid .fx-pn { counter-increment:sup-relitem; }
+        .sup-rel-grid .fx-pn-t::before { content:counter(sup-relitem); flex:none;
+          display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px;
+          border-radius:50%; background:rgba(var(--rgb-tinta),.08); color:var(--text-2);
+          font-size:10px; font-weight:800; }
 
         /* rosca */
         .fx-rosca { position:relative; width:112px; aspect-ratio:1; }
@@ -4574,15 +4577,12 @@ def sup_historico_html(tag: str, movs: pd.DataFrame) -> str:
 
 
 def sup_lateral_html(resumo_tag: dict, itens_tag: pd.DataFrame,
-                     itens_relacionados: pd.DataFrame | None, hoje: pd.Timestamp) -> str:
-    """Coluna lateral da ficha completa (Opção C, escolhida pelo Daniel em
-    2026-09-08) -- resumo rapido da TAG + itens relacionados (kit/acessorio
-    citado no titulo) como lista compacta, em vez de repetir cada um como
-    painel inteiro com timeline: com ate 17 relacionados numa TAG so, isso
-    virava uma ficha gigante e ainda deixava os 288px da 2a coluna vazios
-    (achado na auditoria visual, "está tudo fora de pixels")."""
-    tem_relacionados = itens_relacionados is not None and not itens_relacionados.empty
-
+                     n_relacionados: int) -> str:
+    """Coluna lateral da ficha completa -- so o resumo rapido da TAG (situação,
+    itens diretos, relacionados, próximo prazo). Os itens relacionados em si
+    NAO ficam aqui -- ver .sup-rel-grid em sup_ficha_tag_html: tentativa
+    anterior de listar eles nesta coluna de 288px foi relatada pelo Daniel
+    como "pequeno no canto, sem detalhamento" (2026-09-08)."""
     # Proximo prazo -- o mais cedo entre as fases atuais pendentes dos itens
     # diretos (pode ter mais de um item por TAG). Sem nenhuma data pendente
     # (tudo recebido, ou sem fase com data ainda), fica "—".
@@ -4604,26 +4604,12 @@ def sup_lateral_html(resumo_tag: dict, itens_tag: pd.DataFrame,
         f'<div class="sup-lat-stat"><span>Situação geral</span>'
         f'<b style="color:{cor_geral}">{esc(resumo_tag["geral"])}</b></div>'
         f'<div class="sup-lat-stat"><span>Itens diretos</span><b>{br_num(resumo_tag["n_itens"])}</b></div>')
-    if tem_relacionados:
+    if n_relacionados:
         stats += (f'<div class="sup-lat-stat"><span>Relacionados</span>'
-                  f'<b>{br_num(len(itens_relacionados))}</b></div>')
+                  f'<b>{br_num(n_relacionados)}</b></div>')
     stats += f'<div class="sup-lat-stat"><span>Próximo prazo</span><b>{prazo_txt}</b></div>'
 
-    secao_relacionados = ""
-    if tem_relacionados:
-        chips = "".join(
-            f'<div class="sup-lat-chip" title="{esc(_sup_titulo_curto(r["DESCRICAO_MATERIAL"], 200))}">'
-            f'<span class="dot {sup_situacao(r, hoje)[1]}"></span>'
-            f'<span class="tx">{esc(_sup_titulo_curto(r["DESCRICAO_MATERIAL"]))}</span>'
-            f'<span class="pc">{br_pct(r["TOTAL_PROGRESSO"])}</span></div>'
-            for _, r in itens_relacionados.iterrows())
-        secao_relacionados = (
-            f'<h4>Itens relacionados<span class="conta">{br_num(len(itens_relacionados))}</span></h4>'
-            '<p class="sup-lat-nota">Kit/acessório com código próprio, citado no título desta TAG '
-            "-- não entram na contagem de itens diretos.</p>"
-            f'<div class="sup-lat-lista">{chips}</div>')
-
-    return f'<div class="sup-lateral"><h4>Resumo da TAG</h4>{stats}{secao_relacionados}</div>'
+    return f'<div class="sup-lateral"><h4>Resumo da TAG</h4>{stats}</div>'
 
 
 def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
@@ -4636,11 +4622,10 @@ def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
         + fx_tile("Situação geral", resumo_tag["geral"], "seta", "#9d6bff")
     )
 
-    def _painel_item(r: pd.Series) -> str:
+    def _painel_item(r: pd.Series, principal: bool = False) -> str:
         rotulo, tom = sup_situacao(r, hoje)
         fase_html = sup_fase_atual_html(r["_fases"]) if rotulo not in ("Recebido", "Cancelado") else ""
-        return fx_painel(
-            _sup_titulo_curto(r["DESCRICAO_MATERIAL"]), "cabo",
+        corpo = (
             f'<span class="gtbl-badge {tom}" style="margin-bottom:10px;display:inline-block;">'
             f'{esc(rotulo)}</span>{fase_html}'
             '<div class="fx-dados">'
@@ -4651,8 +4636,18 @@ def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
             + fx_dado("Progresso total", br_pct(r["TOTAL_PROGRESSO"]))
             + "</div>"
             + sup_timeline_html(r["_fases"]))
+        titulo = _sup_titulo_curto(r["DESCRICAO_MATERIAL"])
+        if not principal:
+            return fx_painel(titulo, "cabo", corpo)
+        # Item(ns) direto(s) da TAG -- borda + selo pra nunca se confundir
+        # com os relacionados logo abaixo (achado do Daniel, 2026-09-08:
+        # "nao consigo distinguir cada item, inclusive o principal").
+        return (f'<div class="fx-pn sup-item-principal"><div class="fx-pn-t">'
+                f'<span class="ic">{fx_svg("cabo")}</span>{esc(titulo)}'
+                f'<span class="sup-principal-selo">Item principal</span></div>'
+                f'<div class="fx-pn-c">{corpo}</div></div>')
 
-    corpo = "".join(_painel_item(r) for _, r in itens_tag.iterrows())
+    corpo = "".join(_painel_item(r, principal=True) for _, r in itens_tag.iterrows())
     if itens_tag.empty:
         corpo += fx_painel("Itens de suprimento", "caixa",
                            '<p class="fx-nota">Nenhum item de suprimento cadastrado ainda pra '
@@ -4661,11 +4656,30 @@ def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
     corpo += fx_painel("Histórico de mudanças de status", "relogio",
                        sup_historico_html(tag, movimentacoes))
 
-    lateral = sup_lateral_html(resumo_tag, itens_tag, itens_relacionados, hoje)
+    tem_relacionados = itens_relacionados is not None and not itens_relacionados.empty
+    lateral = sup_lateral_html(resumo_tag, itens_tag,
+                               len(itens_relacionados) if tem_relacionados else 0)
+
+    # Itens relacionados (kit/acessorio cujo TITULO cita esta TAG) -- mesmo
+    # nivel de detalhe do item principal (timeline inteira incluida), em
+    # grade de 2 colunas de largura total: pedido do Daniel, 2026-09-08,
+    # "quanto mais detalhamento pra suprimentos melhor" -- a versao anterior
+    # (chips compactos na coluna lateral) foi revertida por falta de espaço
+    # e de distincao entre os itens.
+    relacionados_html = ""
+    if tem_relacionados:
+        relacionados_html = (
+            f'<div class="sup-eyebrow">Itens relacionados'
+            f'<span class="conta">{br_num(len(itens_relacionados))}</span></div>'
+            '<div class="sup-rel-grid">'
+            + "".join(_painel_item(r) for _, r in itens_relacionados.iterrows())
+            + "</div>")
+
     return (f'<div class="fx"><div class="fx-cab"><span class="marca">{fx_svg("tag")}</span>'
             f'<div><h2>{esc(tag)}</h2><p>Rastreabilidade de suprimento</p></div></div>'
             f'<div class="fx-tiles">{tiles}</div>'
-            f'<div class="fx-corpo"><div class="fx-col">{corpo}</div>{lateral}</div></div>')
+            f'<div class="fx-corpo"><div class="fx-col">{corpo}</div>{lateral}</div>'
+            f'{relacionados_html}</div>')
 
 
 def sup_donut(fatias: list[tuple[str, int, str]], total: int, rotulo_centro: str,
