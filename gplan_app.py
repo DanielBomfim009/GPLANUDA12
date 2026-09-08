@@ -368,6 +368,15 @@ def _sup_cel(r: pd.Series, col: str, default: str = "—") -> object:
     return default if pd.isna(v) else v
 
 
+def _sup_titulo_curto(desc: str, tam: int = 70) -> str:
+    """Titulo/descricao do item pra exibicao -- colapsa quebra de linha e
+    tira "-" pendurado no final (a base as vezes tem "DESCRICAO - " com o
+    complemento vazio; achado na auditoria visual, 2026-09-08: "Valvula de
+    Controle de Vazão -" sem nada depois do traço)."""
+    t = re.sub(r"\s+", " ", str(desc or "")).strip().rstrip("-").strip()
+    return t[:tam]
+
+
 def _sem_acento(texto: str) -> str:
     """Tira acento de uma string solta (o termo digitado na busca) -- achado
     testando a busca por material, 2026-09-07: "oleo" nao achava "Óleo"
@@ -2445,6 +2454,11 @@ def inject_css():
                         color:var(--text-3); font-weight:700; }
         .fx-dado .val { font-size:14px; font-weight:700; color:var(--text-1); margin-top:4px;
                         overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        /* fx_dado(..., quebra=True) -- pra valor que nao pode perder
+           informacao cortando com reticencias (ex. codigo de requisicao,
+           achado no visual da ficha de Suprimentos, 2026-09-08). */
+        .fx-dado .val.quebra { white-space:normal; overflow:visible; text-overflow:clip;
+                                overflow-wrap:anywhere; font-size:12.5px; line-height:1.35; }
 
         /* timeline de fases do suprimento (ficha de TAG, aba Suprimentos) */
         .sup-tl { display:flex; flex-direction:column; margin-top:10px; }
@@ -2555,11 +2569,48 @@ def inject_css():
            mestre e ficha completa, mesmo selo nos dois lugares. */
         .sup-fase-atual { font-size:10.5px; color:var(--text-3); margin:2px 0 8px; }
         .sup-fase-atual b { color:var(--text-2); font-weight:700; }
-        /* Nota "os itens abaixo nao tem a TAG na propria coluna..." antes
-           do bloco de itens relacionados, na ficha completa. */
-        .sup-relacionados-nota { font-size:11px; color:var(--text-3); line-height:1.5;
-          padding:12px 2px; border-top:1px dashed var(--border-color); margin-top:4px; }
-        .sup-relacionados-nota b { color:var(--text-2); }
+        /* Coluna lateral da ficha completa (Opção C, escolhida em
+           2026-09-08): resumo da TAG + itens relacionados (kit/acessório
+           citado no titulo) como lista compacta -- ocupa o 288px que a
+           2a coluna de .fx-corpo ja reservava e ficava vazio (achado na
+           auditoria visual do Daniel, "está tudo fora de pixels"). Sticky
+           pra acompanhar a rolagem do modal (.fmodal-box) sem sumir. */
+        .sup-lateral { background:var(--dark-card-2); border:1px solid var(--border-color);
+          border-radius:13px; padding:14px 15px; display:flex; flex-direction:column;
+          gap:10px; position:sticky; top:14px; }
+        .sup-lateral h4 { font-size:10px; text-transform:uppercase; letter-spacing:.5px;
+          color:var(--text-3); font-weight:700; margin:4px 0 0; }
+        .sup-lateral h4:first-child { margin-top:0; }
+        .sup-lateral h4 .conta { color:var(--txt-azul); font-weight:800;
+          background:rgba(var(--rgb-azul),.12); border-radius:99px; padding:1px 8px;
+          margin-left:6px; font-size:10px; }
+        .sup-lat-stat { display:flex; justify-content:space-between; align-items:baseline;
+          gap:8px; font-size:12px; color:var(--text-2); padding:6px 0;
+          border-bottom:1px solid rgba(var(--rgb-tinta),.05); }
+        .sup-lat-stat:last-of-type { border-bottom:none; }
+        .sup-lat-stat b { color:var(--text-1); font-weight:700; font-size:12.5px; text-align:right; }
+        /* Nota "os itens abaixo nao tem a TAG na propria coluna..." acima da
+           lista de relacionados. */
+        .sup-lat-nota { font-size:10.5px; color:var(--text-3); line-height:1.5; margin:-2px 0 0; }
+        .sup-lat-lista { display:flex; flex-direction:column; gap:6px; max-height:280px;
+          overflow-y:auto; padding-right:2px; margin-top:2px; }
+        .sup-lat-lista::-webkit-scrollbar { width: 7px; }
+        .sup-lat-lista::-webkit-scrollbar-thumb { background: rgba(var(--rgb-tinta),.13);
+          border-radius: 99px; }
+        .sup-lat-chip { display:flex; align-items:center; gap:8px; background:var(--dark-card);
+          border:1px solid var(--border-color); border-radius:9px; padding:7px 9px;
+          font-size:11px; color:var(--text-2); }
+        .sup-lat-chip .dot { width:7px; height:7px; border-radius:50%; flex:none; }
+        .sup-lat-chip .dot.ok { background:var(--accent-teal); }
+        .sup-lat-chip .dot.andamento { background:var(--accent-blue); }
+        .sup-lat-chip .dot.crit { background:var(--accent-red); }
+        .sup-lat-chip .dot.warn { background:var(--accent-amber); }
+        .sup-lat-chip .dot.mudo { background:var(--text-3); }
+        .sup-lat-chip .tx { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;
+          white-space:nowrap; }
+        .sup-lat-chip .pc { flex:none; color:var(--text-3); font-variant-numeric:tabular-nums;
+          font-size:10.5px; }
+        @media (max-width:900px) { .sup-lateral { position:static; } }
 
         /* rosca */
         .fx-rosca { position:relative; width:112px; aspect-ratio:1; }
@@ -4522,6 +4573,59 @@ def sup_historico_html(tag: str, movs: pd.DataFrame) -> str:
     return f'<div class="sup-tl">{linhas}</div>'
 
 
+def sup_lateral_html(resumo_tag: dict, itens_tag: pd.DataFrame,
+                     itens_relacionados: pd.DataFrame | None, hoje: pd.Timestamp) -> str:
+    """Coluna lateral da ficha completa (Opção C, escolhida pelo Daniel em
+    2026-09-08) -- resumo rapido da TAG + itens relacionados (kit/acessorio
+    citado no titulo) como lista compacta, em vez de repetir cada um como
+    painel inteiro com timeline: com ate 17 relacionados numa TAG so, isso
+    virava uma ficha gigante e ainda deixava os 288px da 2a coluna vazios
+    (achado na auditoria visual, "está tudo fora de pixels")."""
+    tem_relacionados = itens_relacionados is not None and not itens_relacionados.empty
+
+    # Proximo prazo -- o mais cedo entre as fases atuais pendentes dos itens
+    # diretos (pode ter mais de um item por TAG). Sem nenhuma data pendente
+    # (tudo recebido, ou sem fase com data ainda), fica "—".
+    prazos = []
+    for _, r in itens_tag.iterrows():
+        atual = sup_fase_atual(r["_fases"])
+        if atual is not None:
+            fase, _desde = atual
+            d = fase["reprogramado"] or fase["previsto"]
+            if d is not None:
+                prazos.append(d)
+    prazo_txt = f"{min(prazos):%d/%m/%Y}" if prazos else "—"
+
+    cor_geral = {"ok": "var(--accent-teal)", "andamento": "var(--accent-blue)",
+                "crit": "var(--accent-red)", "warn": "var(--accent-amber)",
+                "mudo": "var(--text-2)"}.get(SUP_GERAL_TOM.get(resumo_tag["geral"], "mudo"), "var(--text-1)")
+
+    stats = (
+        f'<div class="sup-lat-stat"><span>Situação geral</span>'
+        f'<b style="color:{cor_geral}">{esc(resumo_tag["geral"])}</b></div>'
+        f'<div class="sup-lat-stat"><span>Itens diretos</span><b>{br_num(resumo_tag["n_itens"])}</b></div>')
+    if tem_relacionados:
+        stats += (f'<div class="sup-lat-stat"><span>Relacionados</span>'
+                  f'<b>{br_num(len(itens_relacionados))}</b></div>')
+    stats += f'<div class="sup-lat-stat"><span>Próximo prazo</span><b>{prazo_txt}</b></div>'
+
+    secao_relacionados = ""
+    if tem_relacionados:
+        chips = "".join(
+            f'<div class="sup-lat-chip" title="{esc(_sup_titulo_curto(r["DESCRICAO_MATERIAL"], 200))}">'
+            f'<span class="dot {sup_situacao(r, hoje)[1]}"></span>'
+            f'<span class="tx">{esc(_sup_titulo_curto(r["DESCRICAO_MATERIAL"]))}</span>'
+            f'<span class="pc">{br_pct(r["TOTAL_PROGRESSO"])}</span></div>'
+            for _, r in itens_relacionados.iterrows())
+        secao_relacionados = (
+            f'<h4>Itens relacionados<span class="conta">{br_num(len(itens_relacionados))}</span></h4>'
+            '<p class="sup-lat-nota">Kit/acessório com código próprio, citado no título desta TAG '
+            "-- não entram na contagem de itens diretos.</p>"
+            f'<div class="sup-lat-lista">{chips}</div>')
+
+    return f'<div class="sup-lateral"><h4>Resumo da TAG</h4>{stats}{secao_relacionados}</div>'
+
+
 def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
                        hoje: pd.Timestamp, movimentacoes: pd.DataFrame,
                        itens_relacionados: pd.DataFrame | None = None) -> str:
@@ -4536,11 +4640,11 @@ def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
         rotulo, tom = sup_situacao(r, hoje)
         fase_html = sup_fase_atual_html(r["_fases"]) if rotulo not in ("Recebido", "Cancelado") else ""
         return fx_painel(
-            r["DESCRICAO_MATERIAL"][:70].replace("\n", " "), "cabo",
+            _sup_titulo_curto(r["DESCRICAO_MATERIAL"]), "cabo",
             f'<span class="gtbl-badge {tom}" style="margin-bottom:10px;display:inline-block;">'
             f'{esc(rotulo)}</span>{fase_html}'
             '<div class="fx-dados">'
-            + fx_dado("Requisição", r["REQUISICAO"] or "—")
+            + fx_dado("Requisição", r["REQUISICAO"] or "—", quebra=True)
             + fx_dado("Fornecedor", r["FORNECEDOR"] or "—")
             + fx_dado("Quantidade", f'{br_num(int(r["QTDE"]))} {r["UNIDADE"] or ""}'
                       if r["QTDE"] else "—")
@@ -4554,26 +4658,14 @@ def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
                            '<p class="fx-nota">Nenhum item de suprimento cadastrado ainda pra '
                            "esta TAG -- ela é obrigação da Contratada fornecer, mas ainda não "
                            "apareceu nenhuma linha na planilha de suprimentos.</p>")
-
-    # Itens relacionados -- kit/acessorio cujo TITULO cita esta TAG, mas a
-    # propria linha tem outro codigo na coluna TAG (ex. "KIT6_FV120058B"
-    # pra quem esta vendo a ficha de "FV-120058B"). Achado pedido pelo
-    # Daniel, 2026-09-08: a ficha so mostrava o item "direto" e escondia os
-    # kits de peca interna amarrados aquela TAG.
-    if itens_relacionados is not None and not itens_relacionados.empty:
-        corpo += (
-            '<div class="sup-relacionados-nota">Os itens abaixo não têm esta TAG na própria '
-            "coluna (são kit/acessório com código próprio), mas o título deles cita "
-            f"<b>{esc(tag)}</b> -- por isso aparecem aqui, à parte da contagem acima.</div>")
-        corpo += "".join(_painel_item(r) for _, r in itens_relacionados.iterrows())
-
     corpo += fx_painel("Histórico de mudanças de status", "relogio",
                        sup_historico_html(tag, movimentacoes))
+
+    lateral = sup_lateral_html(resumo_tag, itens_tag, itens_relacionados, hoje)
     return (f'<div class="fx"><div class="fx-cab"><span class="marca">{fx_svg("tag")}</span>'
             f'<div><h2>{esc(tag)}</h2><p>Rastreabilidade de suprimento</p></div></div>'
             f'<div class="fx-tiles">{tiles}</div>'
-            f'<div class="fx-corpo"><div class="fx-col" style="flex:1 1 100%">{corpo}'
-            "</div></div></div>")
+            f'<div class="fx-corpo"><div class="fx-col">{corpo}</div>{lateral}</div></div>')
 
 
 def sup_donut(fatias: list[tuple[str, int, str]], total: int, rotulo_centro: str,
@@ -4631,7 +4723,7 @@ def sup_linha_mestre(chave: str, info: dict, itens_grupo: pd.DataFrame,
         # Fase atual + desde quando -- so faz sentido pra quem ainda esta na
         # fila (recebido/cancelado ja terminaram a jornada).
         fase_html = sup_fase_atual_html(r["_fases"]) if rotulo not in ("Recebido", "Cancelado") else ""
-        return (f'<div class="exp-item"><span>{esc(r["DESCRICAO_MATERIAL"][:55].replace(chr(10), " "))}</span>'
+        return (f'<div class="exp-item"><span>{esc(_sup_titulo_curto(r["DESCRICAO_MATERIAL"], 55))}</span>'
                f'<span class="gtbl-badge {tom_item}">{esc(rotulo)}</span></div>{fase_html}')
 
     itens_html = "".join(_item_bloco(r) for _, r in itens_grupo.iterrows())
@@ -5349,9 +5441,12 @@ def fx_kpi(rotulo: str, valor: object, sub: str, pct: float, cor: str, icone: st
             f'<div class="fx-trilho {fx_classe_cor(cor)}"><i style="width:{largura:.1f}%;"></i></div></div>')
 
 
-def fx_dado(rotulo: str, valor: object) -> str:
+def fx_dado(rotulo: str, valor: object, quebra: bool = False) -> str:
+    # quebra=True pra valor que nao pode perder informacao cortando com
+    # reticencias (ex. codigo de requisicao) -- ver .fx-dado .val.quebra.
+    classe = "val quebra" if quebra else "val"
     return (f'<div class="fx-dado"><div class="rot">{esc(rotulo)}</div>'
-            f'<div class="val" title="{esc(valor)}">{esc(valor)}</div></div>')
+            f'<div class="{classe}" title="{esc(valor)}">{esc(valor)}</div></div>')
 
 
 def fx_painel(titulo: str, icone: str, corpo: str, conta: str = "",
