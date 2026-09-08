@@ -3487,11 +3487,6 @@ def inject_css():
                          background:rgba(var(--rgb-tinta),.06); border-radius:5px;
                          padding:2px 7px; }
         .ac-perms span.vazio { color:var(--text-3); font-style:italic; }
-        /* o que o tipo escolhido libera, mostrado na hora de escolher */
-        .ac-resumo { display:flex; flex-wrap:wrap; gap:5px; margin:-6px 0 10px; }
-        .ac-resumo span { font-size:10px; color:var(--txt-teal);
-                          background:rgba(var(--rgb-teal),.12); border-radius:5px;
-                          padding:2px 8px; }
         /* Bloco de permissao por pasta (Novo/Editar login) -- pedido do
            Daniel, 2026-09-08: "definir pasta por pasta o que pode
            visualizar o login". Cada pasta e o mesmo agrupamento do menu
@@ -3510,7 +3505,11 @@ def inject_css():
         div[class*="_pf_pastas"] [data-testid="stCheckbox"] label p { font-size:12.5px; }
         div[class*="_pf_pastas"] [data-testid="stVerticalBlock"] { gap:6px !important; }
         div[class*="_pf_pastas"] [data-testid="stHorizontalBlock"] { gap:10px !important; }
-        div[class*="_pf_pastas"] [class*="_bloco"] { padding:10px 14px !important; }
+        /* Sem cartao (sem borda ao redor/fundo proprio) -- so um fio
+           separando uma pasta da outra, bem mais enxuto que o cartao com
+           borda inteira da primeira versao. */
+        div[class*="_pf_pastas"] [class*="_bloco"] { padding:6px 0 0 !important;
+          border-top:1px solid var(--border-color); }
         div[class*="_pf_pastas"] [data-testid="stElementContainer"] { margin-bottom:0 !important; }
 
         /* o selo do papel: mesma familia de cor nos dois lugares onde aparece */
@@ -13982,7 +13981,7 @@ def _bloco_pasta(prefixo: str, nome: str, chaves: list[str], marcadas: list[str]
     # itens um a um em vez de usar o toggle.
     st.session_state[f"{prefixo_secao}__todas"] = len(marcadas_agora) == len(chaves)
 
-    with st.container(border=True, key=f"{prefixo_secao}_bloco"):
+    with st.container(key=f"{prefixo_secao}_bloco"):
         col_nome, col_toggle = st.columns([3, 2], vertical_alignment="center")
         with col_nome:
             st.markdown(f"**{esc(nome)}** &nbsp;"
@@ -13991,9 +13990,12 @@ def _bloco_pasta(prefixo: str, nome: str, chaves: list[str], marcadas: list[str]
         with col_toggle:
             st.checkbox("Marcar toda a pasta", key=f"{prefixo_secao}__todas",
                        on_change=_marcar_pasta_toggle, args=(chaves, prefixo_secao))
-        cols = st.columns(2)
+        # Uma linha só de checkbox (nao 2 colunas x N linhas) -- nenhuma
+        # pasta passa de 4 abas, entao cabe. Achado do Daniel, 2026-09-08:
+        # "ficou muito grande a aba de cadastro, desnecessário, simplifique".
+        cols = st.columns(len(chaves))
         for i, chave in enumerate(chaves):
-            with cols[i % 2]:
+            with cols[i]:
                 st.checkbox(acesso.PERMISSOES[chave].replace("Ver a aba ", ""),
                            key=f"{prefixo_secao}_{chave}")
     return [c for c in chaves if st.session_state[f"{prefixo_secao}_{c}"]]
@@ -14011,11 +14013,11 @@ def campos_do_papel(prefixo: str, papel_inicial: str, marcadas: list[str]):
     papel = st.selectbox(
         "Tipo de usuário", list(acesso.PAPEIS),
         index=list(acesso.PAPEIS).index(papel_inicial), key=f"{prefixo}_papel")
-    render_html(
-        '<div class="ac-resumo">'
-        + "".join(f'<span>{esc(acesso.PERMISSOES[p])}</span>'
-                  for p in acesso.PAPEIS[papel])
-        + "</div>")
+    # O resumo em chips (.ac-resumo) saiu -- virou repetição do que os
+    # checkboxes das pastas logo abaixo já mostram, agora que ficam sempre
+    # visíveis (antes, quando moravam num expander fechado, o resumo é que
+    # dava a visão rápida). Achado do Daniel, 2026-09-08: "ficou muito
+    # grande a aba de cadastro, desnecessário, simplifique".
     trocou = papel != papel_inicial
     base = list(acesso.PAPEIS[papel]) if trocou else marcadas
 
