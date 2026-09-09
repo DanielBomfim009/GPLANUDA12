@@ -13534,31 +13534,14 @@ def _rd_fase(tags: pd.DataFrame, chave: str, rotulo: str, prod: dict,
     previsto_sem = dict(zip(semanas_previsto,
                             _rd_curva(total, uteis_previsto, 0.0, cfg)))
 
-    # ---------------- TENDÊNCIA: o que falta, no ritmo de hoje -------------
-    # O horizonte não para no prazo: se o ritmo atual leva a fase para depois
-    # dele, a tendência tem que atravessar a data limite -- é justamente esse
-    # excesso que a tela precisa mostrar.
+    # ---------------- TENDÊNCIA: o replanejamento ----------------
+    # Parte do saldo de HOJE e fecha esse saldo até a MESMA data limite --
+    # exatamente o que o usuário digitava na coluna Tendência da planilha
+    # "Distribuição de Quantidades": não é "onde vou chegar no ritmo atual",
+    # é "como redistribuir o que falta para ainda terminar na data". Por
+    # isso ela zera no prazo, como a régua, só que partindo de onde a obra
+    # está de verdade. É a série que se move a cada semana reportada.
     media_dia = prod["media_dia"] or 0.0
-    semanas_tendencia, uteis_tendencia, acumulado_projetado = [], [], 0.0
-    s = semana_atual
-    teto = semana_atual + 520
-    while acumulado_projetado < saldo and s <= teto:
-        du = _rd_dias_uteis_semana(s, cfg, desde=hoje if s == semana_atual else None)
-        semanas_tendencia.append(s)
-        uteis_tendencia.append(du)
-        acumulado_projetado += du * media_dia
-        s += 1
-        if media_dia <= 0:                      # sem ritmo medido não há projeção
-            break
-    if saldo > 0 and media_dia > 0 and semanas_tendencia:
-        tendencia_sem = dict(zip(semanas_tendencia,
-                                 _rd_curva(saldo, uteis_tendencia, media_dia, cfg)))
-    else:
-        tendencia_sem = {}
-
-    # ------- NECESSÁRIO: o que ainda dá pra fazer dentro do prazo ----------
-    # Diferente do Previsto: este recalcula a cada semana, do saldo de hoje
-    # até a data limite. É o número que vai para a programação da semana.
     semanas_futuras = list(range(semana_atual, semana_prazo + 1))
     dias_por_semana = [
         _rd_dias_uteis_semana(s, cfg, desde=hoje if s == semana_atual else None,
@@ -13578,7 +13561,7 @@ def _rd_fase(tags: pd.DataFrame, chave: str, rotulo: str, prod: dict,
         dias_por_semana = [max(_rd_dias_uteis_semana(semana_atual, cfg, desde=hoje), 1)]
         dias_uteis = dias_por_semana[0]
     valores = _rd_curva(saldo, dias_por_semana, media_dia, cfg)
-    necessario = dict(zip(semanas_futuras, valores))
+    tendencia_sem = dict(zip(semanas_futuras, valores))
     uteis = dict(zip(semanas_futuras, dias_por_semana))
 
     # ---------------- as linhas, semana a semana ----------------
@@ -13599,17 +13582,15 @@ def _rd_fase(tags: pd.DataFrame, chave: str, rotulo: str, prod: dict,
         montado = float(h["montado"]) if h else None
         futuro = s >= semana_atual
         prev = previsto_sem.get(s)
-        nec = necessario.get(s) if futuro else None
-        tend = tendencia_sem.get(s)
+        tend = tendencia_sem.get(s) if futuro else None
         du = uteis.get(s) or _rd_dias_uteis_semana(s, cfg)
 
         acumulado_previsto += (prev or 0.0)
         if futuro:
-            saldo_corrente = max(saldo_corrente - (nec or 0.0), 0.0)
-            saldo_fim = saldo_corrente
-            acum_real = None
             acumulado_tendencia = min(acumulado_tendencia + (tend or 0.0), total)
-            acum_tend = acumulado_tendencia if (tend or s == semana_atual) else None
+            saldo_fim = max(total - acumulado_tendencia, 0.0)
+            acum_real = None
+            acum_tend = acumulado_tendencia
         else:
             acumulado_montado += (montado or 0.0)
             acumulado_programado += (programado or 0.0)
@@ -13622,9 +13603,9 @@ def _rd_fase(tags: pd.DataFrame, chave: str, rotulo: str, prod: dict,
         # naquele momento); daí pra frente é o necessário, que é o plano que
         # passa a existir. Sem unificar, a semana em curso ficava sem par de
         # comparação no desenho.
-        plano = programado if (not futuro or s == semana_atual) else nec
+        plano = programado if (not futuro or s == semana_atual) else tend
         if plano is None and futuro:
-            plano = nec
+            plano = tend
 
         linhas.append({
             "semana": s, "futuro": futuro,
@@ -13643,8 +13624,9 @@ def _rd_fase(tags: pd.DataFrame, chave: str, rotulo: str, prod: dict,
                        if not futuro else None),
             "aderencia": ((montado / programado * 100)
                           if (programado and montado is not None) else None),
-            "previsto": prev, "necessario": nec, "tendencia": tend,
-            "previsto_dia": ((nec / du) if (nec and du) else None),
+            "previsto": prev, "tendencia": tend,
+            "saldo_previsto": max(total - acumulado_previsto, 0.0),
+            "tendencia_dia": ((tend / du) if (tend and du) else None),
             "saldo": saldo_fim,
         })
 
@@ -13822,8 +13804,8 @@ def _rd_indicadores(f: dict) -> str:
          ("PRAZO VENCIDO" if f["prazo_vencido"] else
           f'{br_num(f["semanas_restantes"])} semanas · {br_num(f["dias_uteis"])} dias úteis'),
          "vermelho"),
-        ("Necessário / semana", _rd_num(f["ritmo_semana"], 1), "média até o prazo", "azul"),
-        ("Necessário / dia útil", _rd_num(f["ritmo_dia"], 1), "média até o prazo", "azul"),
+        ("Tendência / semana", _rd_num(f["ritmo_semana"], 1), "média até o prazo", "azul"),
+        ("Tendência / dia útil", _rd_num(f["ritmo_dia"], 1), "média até o prazo", "azul"),
         ("Pico da curva", br_num(round(f["pico"])), "semana mais carregada", "azul"),
         ("Produtividade média", _rd_num(prod["media"], 1),
          f'últimas 4: {_rd_num(prod["media4"], 1)}/sem', "verde"),
@@ -13871,10 +13853,10 @@ def _rd_grafico(f: dict) -> str:
     s_min, s_max = linhas[0]["semana"], linhas[-1]["semana"]
     barras_desde = atual - f.get("janela", RUNDOWN_JANELA_BARRAS)
 
-    acum_max = max([l["acumulado"] or 0 for l in linhas]
-                   + [l["acumulado_previsto"] or 0 for l in linhas]
-                   + [l["acumulado_tendencia"] or 0 for l in linhas] + [f["total"]])
-    acum_max = (acum_max * 1.06) or 1.0
+    # eixo do saldo: começa no total e desce até zero -- é a leitura do
+    # rundown (contagem regressiva do que falta), a mesma do modelo que o
+    # usuário mantinha à mão
+    acum_max = (f["total"] * 1.06) or 1.0
     sem_max = max([v for l in linhas if l["semana"] >= barras_desde
                    for v in (l["plano"], l["montado"]) if v] or [1.0])
     sem_max = (sem_max * 1.35) or 1.0
@@ -13919,7 +13901,7 @@ def _rd_grafico(f: dict) -> str:
         plano, feito_sem = l["plano"] or 0, l["montado"]
         if plano > 0:
             classe = "rd-b-prev" if l["futuro"] else "rd-b-prog"
-            rotulo = "necessário" if (l["futuro"] and l["semana"] != atual) else "programado"
+            rotulo = "tendência" if (l["futuro"] and l["semana"] != atual) else "programado"
             barras += (f'<rect x="{cx - larg_barra - 0.5:.1f}" y="{y_sem(plano):.1f}" '
                        f'width="{larg_barra:.1f}" height="{(base_y - y_sem(plano)):.1f}" '
                        f'class="{classe}"><title>S{l["semana"]} · {rotulo} '
@@ -13934,16 +13916,16 @@ def _rd_grafico(f: dict) -> str:
                           if plano else "") + '</title></rect>')
 
     # --- curvas acumuladas + pontos ---
+    # As três séries em SALDO A MONTAR, descendo até zero.
     # PREVISTO: a régua, do início ao prazo. Não muda com o que foi
-    # executado, então atravessa o gráfico inteiro -- é contra ela que se lê
-    # adiantamento e atraso.
-    prev = [(l["semana"], l["acumulado_previsto"])
-            for l in linhas if l["acumulado_previsto"] is not None]
-    # REAL + TENDÊNCIA: a linha que se move. A tendência começa exatamente
-    # onde o real parou, senão o desenho mostraria um degrau que não existe.
-    feito = [(l["semana"], l["acumulado"]) for l in linhas if l["acumulado"] is not None]
-    tend = [(l["semana"], l["acumulado_tendencia"])
-            for l in linhas if l["acumulado_tendencia"] is not None]
+    # executado -- é contra ela que se lê adiantamento e atraso.
+    prev = [(l["semana"], l["saldo_previsto"])
+            for l in linhas if l["saldo_previsto"] is not None]
+    # REAL até hoje, e a TENDÊNCIA emendada nele: a tendência começa
+    # exatamente onde o real parou, para as duas formarem uma linha
+    # contínua em vez de um degrau.
+    feito = [(l["semana"], l["saldo"]) for l in linhas if l["acumulado"] is not None]
+    tend = [(l["semana"], l["saldo"]) for l in linhas if l["futuro"]]
     if feito and tend:
         tend = [feito[-1]] + tend
 
@@ -13955,10 +13937,6 @@ def _rd_grafico(f: dict) -> str:
     if len(prev) > 1:
         curvas += f'<path d="{caminho(prev)}" class="cs-linha rd-l-prev"/>'
     if len(feito) > 1:
-        area = (f'{x(feito[0][0]):.1f},{base_y:.1f} '
-                + " ".join(f"{x(s):.1f},{y_acum(v):.1f}" for s, v in feito)
-                + f' {x(feito[-1][0]):.1f},{base_y:.1f}')
-        curvas += f'<polygon points="{area}" class="cs-area-real"/>'
         curvas += f'<path d="{caminho(feito)}" class="cs-linha cs-real"/>'
     if len(tend) > 1:
         curvas += f'<path d="{caminho(tend)}" class="cs-linha cs-tendencia"/>'
@@ -13986,17 +13964,17 @@ def _rd_grafico(f: dict) -> str:
                       default=None)
     for l in linhas:
         marco = (l["semana"] - s_min) % passo_valor == 0
-        if l["acumulado_previsto"] is not None:
-            pontos += _ponto(l, l["acumulado_previsto"], "rd-pt-prev", "rd-vlr-prev",
-                             "previsto acumulado",
+        if l["saldo_previsto"] is not None:
+            pontos += _ponto(l, l["saldo_previsto"], "rd-pt-prev", "rd-vlr-prev",
+                             "saldo pelo previsto",
                              marco or l["semana"] == f["semana_prazo"])
         if l["acumulado"] is not None:
-            pontos += _ponto(l, l["acumulado"], "rd-pt-real", "rd-vlr-real",
-                             "real acumulado",
+            pontos += _ponto(l, l["saldo"], "rd-pt-real", "rd-vlr-real",
+                             "saldo real",
                              marco or l["semana"] == ultima_real, acima=False)
-        if l["acumulado_tendencia"] is not None:
-            pontos += _ponto(l, l["acumulado_tendencia"], "rd-pt-tend", "rd-vlr-tend",
-                             "tendência acumulada", marco, acima=False)
+        elif l["futuro"]:
+            pontos += _ponto(l, l["saldo"], "rd-pt-tend", "rd-vlr-tend",
+                             "saldo pela tendência", marco, acima=False)
 
     # --- marcadores de hoje e do prazo ---
     marcas = ""
@@ -14056,8 +14034,8 @@ def _rd_tabela(f: dict) -> pd.DataFrame:
                   f'<td class="num cinza">{l["data"].strftime("%d/%m/%y")}</td>'
                   + cel(l["programado"]) + cel(l["montado"], "num verde") + ader
                   + cel(l["previsto"], "num cinza")
-                  + cel(l["necessario"], "num azul")
-                  + cel(l["previsto_dia"], "num azul", inteiro=False)
+                  + cel(l["tendencia"], "num azul")
+                  + cel(l["tendencia_dia"], "num azul", inteiro=False)
                   + cel(l["saldo"], "num forte") + '</tr>')
 
     render_html(
@@ -14068,8 +14046,9 @@ def _rd_tabela(f: dict) -> pd.DataFrame:
         '<th>Semana</th><th>Início</th>'
         '<th>Programado</th><th>Montado</th><th>Aderência</th>'
         '<th>Previsto<br><span class="sub">régua</span></th>'
-        '<th>Necessário</th>'
-        '<th>Necessário<br><span class="sub">por dia útil</span></th><th>Saldo</th>'
+        '<th>Tendência</th>'
+        '<th>Tendência<br><span class="sub">por dia útil</span></th>'
+        '<th>Saldo</th>'
         f'</tr></thead><tbody>{corpo}</tbody></table></div></div>')
 
     return pd.DataFrame([{
@@ -14079,8 +14058,8 @@ def _rd_tabela(f: dict) -> pd.DataFrame:
         "PROGRAMADO": l["programado"], "MONTADO": l["montado"],
         "ADERENCIA_PCT": (round(l["aderencia"], 1) if l["aderencia"] is not None else None),
         "PREVISTO_REGUA": l["previsto"],
-        "NECESSARIO": l["necessario"],
-        "NECESSARIO_DIA_UTIL": (round(l["previsto_dia"], 2) if l["previsto_dia"] else None),
+        "TENDENCIA": l["tendencia"],
+        "TENDENCIA_DIA_UTIL": (round(l["tendencia_dia"], 2) if l["tendencia_dia"] else None),
         "SALDO_A_MONTAR": round(l["saldo"]),
     } for l in f["linhas"]])
 
@@ -14100,14 +14079,14 @@ def _rd_bloco(f: dict, chave: str) -> None:
         <div class="rd-cab">
           <div class="rd-legenda">
             <span class="l-prev"><span class="m"></span>Previsto (régua fixa)</span>
-            <span class="l-real"><span class="m"></span>Real acumulado</span>
-            <span class="l-tend"><span class="m"></span>Tendência</span>
+            <span class="l-real"><span class="m"></span>Saldo real</span>
+            <span class="l-tend"><span class="m"></span>Tendência (fecha no prazo)</span>
             <span class="b-prog"><span class="m"></span>Programado na semana</span>
-            <span class="b-prev"><span class="m"></span>Necessário na semana</span>
+            <span class="b-prev"><span class="m"></span>Tendência na semana</span>
             <span class="b-mont"><span class="m"></span>Montado na semana</span>
           </div>
           <div class="rd-eixos">
-            <span>← acumulado</span><span>por semana →</span>
+            <span>← saldo a montar</span><span>por semana →</span>
           </div>
         </div>
         {_rd_grafico(f)}
