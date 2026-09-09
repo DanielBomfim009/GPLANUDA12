@@ -2198,7 +2198,24 @@ def inject_css():
            outra -- por isso o :not() em vez de pegar todas. */
         [data-testid="stCheckbox"] label > div:not([data-testid="stWidgetLabel"]) {
           background: var(--dark-card-2) !important; border-color: var(--border-strong) !important; }
+        /* O visto em si e um <polyline> (contorno, nao area preenchida) --
+           so "fill" (de cima) nao acende ele, quem desenha a linha e
+           "stroke". Sem isso o visto fica branco fixo (cor do config.toml)
+           e some no tema claro -- achado do Daniel, 2026-09-09, "ao
+           selecionar as caixas... no tema claro nao da pra ver", e
+           confirmado que e o app inteiro (todo st.checkbox usa o mesmo
+           componente), nao so a tela de Acessos. */
         [data-testid="stCheckbox"] svg { fill: var(--text-1) !important; }
+        [data-testid="stCheckbox"] svg polyline, [data-testid="stCheckbox"] svg path {
+          stroke: var(--text-1) !important; }
+        /* O X de fechar dialog (Meu perfil/Novo login/Editar login) desenha
+           com stroke="currentColor" e nunca tinha "color" proprio -- herdava
+           o branco fixo do config.toml e sumia no tema claro, mesmo bug dos
+           checkboxes. */
+        div[data-testid="stDialog"] [role="dialog"] button[aria-label="Close"] {
+          color: var(--text-2) !important; }
+        div[data-testid="stDialog"] [role="dialog"] button[aria-label="Close"]:hover {
+          color: var(--text-1) !important; }
         /* tudo que esta dentro do controle -- valor escolhido, pilulas,
            contador -- e nao so o input: o texto ali nasce com a cor do
            config.toml e no tema claro fica branco sobre branco */
@@ -3519,7 +3536,7 @@ def inject_css():
         div[class*="_cab"][data-testid="stVerticalBlock"],
         div[class*="_itens"][data-testid="stVerticalBlock"] {
           flex-direction:row !important; flex-wrap:wrap !important;
-          align-items:center !important; row-gap:6px !important; column-gap:20px !important; }
+          align-items:center !important; row-gap:6px !important; column-gap:12px !important; }
         div[class*="_cab"][data-testid="stVerticalBlock"] > div[data-testid="stElementContainer"],
         div[class*="_itens"][data-testid="stVerticalBlock"] > div[data-testid="stElementContainer"] {
           width:fit-content !important; }
