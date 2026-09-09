@@ -52,7 +52,7 @@ PERMISSOES = {
     "ver_planta": "Ver a aba Planta",
     "ver_avanco_fisico": "Ver a aba Avanço Físico",
     "ver_previsao_medicao": "Ver a aba Previsão Medição",
-    "ver_curva_s": "Ver a aba Curva S",
+    "ver_curva_s": "Ver a aba Rundown",
     "ver_valores": "Ver valores em reais",
     "administrar": "Criar, editar e remover logins",
 }

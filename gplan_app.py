@@ -1761,6 +1761,43 @@ def inject_css():
         .cs-resumo .badge.alerta { background:rgba(var(--rgb-vermelho),.15); color:var(--accent-red); }
         .cs-resumo .badge.neutro { background:rgba(var(--rgb-tinta),.08); color:var(--text-3); }
 
+        /* Programação (aba da Rundown) -- S.ANT/S.ATUAL/S.PROX em 3
+           celulas (mesmo desenho do cs-kpi6, so que 3 colunas e com uma
+           segunda linha pro Real daquela semana). */
+        .cs-kpi3 { display:grid; grid-template-columns:repeat(3, 1fr); gap:1px;
+                   background:var(--border-color); border:1px solid var(--border-color);
+                   border-radius:14px; overflow:hidden; margin:4px 0 18px; }
+        .cs-kpi3 .cel { background:var(--dark-card); padding:15px 13px; min-width:0; }
+        .cs-kpi3 .cel.hoje { background:rgba(var(--rgb-teal),.06); }
+        .cs-kpi3 .rot { font-size:9.5px; font-weight:700; text-transform:uppercase;
+                        letter-spacing:.4px; color:var(--text-3); }
+        .cs-kpi3 .val { font-size:24px; font-weight:800; margin-top:6px; color:var(--text-1);
+                        font-variant-numeric:tabular-nums; }
+        .cs-kpi3 .val.azul { color:var(--accent-blue); }
+        .cs-kpi3 .nota { font-size:10px; color:var(--text-3); margin-top:4px; }
+        .cs-kpi3 .sub { font-size:11.5px; font-weight:700; color:var(--accent-teal);
+                        margin-top:10px; padding-top:10px;
+                        border-top:1px solid rgba(var(--rgb-tinta),.08); }
+        @media (max-width:700px) { .cs-kpi3 { grid-template-columns:1fr; } }
+
+        /* Grafico de barras Planejado x Realizado, semana a semana, numa
+           janela curta em volta de hoje -- a curva acumulada de cima ja
+           cobre o horizonte inteiro, esta aqui e so "essa semana e a que
+           vem". */
+        .cs-rd-svg { width:100%; height:auto; display:block; }
+        .cs-rd-grade { stroke:rgba(var(--rgb-tinta),.09); stroke-width:1; }
+        .cs-rd-rotulo-x, .cs-rd-rotulo-y { font-size:9.5px; fill:var(--text-3); }
+        .cs-rd-barra-plan { fill:var(--text-3); opacity:.5; }
+        .cs-rd-barra-real { fill:var(--accent-teal); }
+        .cs-rd-hoje-linha { stroke:var(--text-1); stroke-width:1.5; stroke-dasharray:2 3; opacity:.5; }
+        .cs-rd-hoje-rotulo { font-size:10px; font-weight:700; fill:var(--text-2); }
+        .cs-rd-legenda { display:flex; gap:18px; flex-wrap:wrap; margin:2px 0 14px;
+                         font-size:12px; color:var(--text-2); }
+        .cs-rd-legenda span.marca { display:inline-block; width:12px; height:12px;
+                                    border-radius:3px; margin-right:6px; vertical-align:-2px; }
+        .cs-rd-legenda .plan .marca { background:var(--text-3); opacity:.5; }
+        .cs-rd-legenda .real .marca { background:var(--accent-teal); }
+
         .du-br .fr { font-size:10px; color:var(--text-3); text-align:right; }
         .du-br .pc { font-size:10.5px; font-weight:700; color:var(--text-1); text-align:right; }
 
@@ -13471,7 +13508,12 @@ def curva_s_montar(tipo: str, tags: pd.DataFrame,
 def curva_s_dados(tags: pd.DataFrame, cache_key: str) -> dict:
     real_base = curva_s_real(cache_key)
     return {"geral": curva_s_montar("geral", tags, real_base),
-           "prioritario": curva_s_montar("prioritario", tags, real_base)}
+           "prioritario": curva_s_montar("prioritario", tags, real_base),
+           # cru, nao filtrado -- a Programacao (_curva_s_semanal) precisa
+           # do valor reportado na ULTIMA semana tambem (c["real"] exclui
+           # essa fronteira de proposito, ver _curva_s_com_prazo), senao o
+           # delta daquela semana engole a anterior junto.
+           "real_base": real_base}
 
 
 def _curva_s_svg(previsto: list[tuple[float, float]], real: list[tuple[float, float]],
@@ -13629,7 +13671,7 @@ def _curva_s_svg(previsto: list[tuple[float, float]], real: list[tuple[float, fl
 
     return (
         f'<svg viewBox="0 0 {LARG} {ALT}" class="cs-svg" role="img" '
-        f'aria-label="Curva S: previsto, real e tendência">'
+        f'aria-label="Rundown: previsto, real e tendência">'
         f'{linhas_grade_v}{linhas_grade}{marcador_prazo}{marcador_hoje}{rotulos_x}'
         + area_real
         + (f'<path d="{caminho(previsto)}" class="cs-linha cs-previsto"/>' if previsto else "")
@@ -13764,7 +13806,7 @@ def _curva_s_bloco(c: dict, escolha: str, chave: str) -> None:
     render_html(f"""
       <div class="cs-secao">
         {du_tile("#5b8def" if escolha == "Geral" else "#9d6bff", "trend")}
-        <div class="txt"><strong>Curva S — {esc(escolha)}</strong><span>{esc(subtitulo)}</span></div>
+        <div class="txt"><strong>Rundown — {esc(escolha)}</strong><span>{esc(subtitulo)}</span></div>
       </div>""")
     render_html(_curva_s_kpis6(c, escolha))
 
@@ -13844,7 +13886,7 @@ def _curva_s_bloco(c: dict, escolha: str, chave: str) -> None:
     } for xv in xs])
     with menu_cs:
         st.download_button(
-            f"Exportar Curva S — {escolha}",
+            f"Exportar Rundown — {escolha}",
             exportar.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
             file_name=f'curva_s_{chave}.csv', mime="text/csv",
             key=f"curva_s_csv_{chave}", icon=":material/download:",
@@ -13909,35 +13951,267 @@ def _curva_s_comparativo(geral: dict, prio: dict) -> None:
         f'<tbody>{linhas_html}</tbody></table></div></div>')
 
 
+def _curva_s_semanal(c: dict, real_base: dict[int, tuple[float | None, float | None]],
+                     so_prioritarias: bool) -> list[dict]:
+    """Fatia as séries ACUMULADAS de curva_s_montar/_com_prazo em
+    quantidade POR SEMANA -- a base do rundown é "quanto falta andar cada
+    semana", não "quanto já andou no total", que é o que a Curva S
+    acumulada responde. Mesma numeração contínua de semana da Curva S.
+
+    O real por semana vem direto de real_base (a 10_BASE_CURVA_S crua),
+    não de c["real"]: essa série exclui de propósito a última semana
+    reportada (ver _curva_s_com_prazo, "s < semana_hoje") pra não duplicar
+    o ponto de "hoje" no gráfico contínuo -- usar ela aqui faria o delta
+    daquela última semana reportada ser engolido pelo delta da semana
+    seguinte (dois relatos de real virando um só). "Hoje" pode ser
+    fracionário (ver _semana_equivalente); o real de hoje entra na semana
+    ARREDONDADA (c["x_atual"]), nunca numa linha própria fracionária.
+    """
+    previsto_map = dict(c["previsto"])
+    if not previsto_map:
+        return []
+    idx = 1 if so_prioritarias else 0
+    real_map = {s: v[idx] for s, v in real_base.items() if v[idx] is not None}
+    tendencia_map = dict(c["tendencia"])
+    total = c["total"]
+    x_atual = c["x_atual"]
+    if x_atual is not None and c["real_atual"] is not None:
+        real_map[x_atual] = c["real_atual"]
+
+    semanas = sorted(set(previsto_map) | set(real_map) | set(tendencia_map))
+    linhas, prev_ant, real_ant = [], None, None
+    for s in semanas:
+        prev_ac, real_ac, tend_ac = previsto_map.get(s), real_map.get(s), tendencia_map.get(s)
+        linhas.append({
+            "semana": s, "previsto_acum": prev_ac, "real_acum": real_ac,
+            "tendencia_acum": tend_ac,
+            "planejado_sem": (prev_ac - prev_ant) if (prev_ac is not None and prev_ant is not None) else None,
+            "realizado_sem": (real_ac - real_ant) if (real_ac is not None and real_ant is not None) else None,
+            "saldo_previsto": (total - prev_ac) if prev_ac is not None else None,
+            "saldo_real": (total - real_ac) if real_ac is not None else None,
+        })
+        prev_ant = prev_ac if prev_ac is not None else prev_ant
+        real_ant = real_ac if real_ac is not None else real_ant
+    return linhas
+
+
+def _curva_s_kpi3_programacao(c: dict, semanal: list[dict]) -> str:
+    """S. ANT / S. ATUAL / S. PRÓX -- responde direto a pergunta do
+    Daniel ("quanto está programado pra semana atual"), no espírito do
+    painel auxiliar que ele montava a mão no Excel (colunas AE:AK do
+    rundown), só que os três números aqui vêm do MESMO modelo smootherstep
+    da Curva S (nunca do SEMANA_PROGRAMADA por TAG -- esse campo é só um
+    log histórico de quando cada TAG passou por montagem, não um plano
+    futuro; ver _curva_s_previsto). É esse modelo que garante a
+    distribuição suave até o prazo, em vez dos picos de 80-200+ TAGs numa
+    única semana que o rundown manual dele produzia.
+    """
+    total = c["total"]
+    x_atual = c["x_atual"]
+    mapa = {l["semana"]: l for l in semanal}
+    if x_atual is None or x_atual not in mapa:
+        return '<div class="cs-vazio">Sem semana atual definida.</div>'
+
+    def celula(rot: str, s: int, hoje: bool = False) -> str:
+        l = mapa.get(s)
+        plan = l["planejado_sem"] if l else None
+        real = l["realizado_sem"] if l else None
+        plan_txt = br_num(round(plan)) if plan is not None else "—"
+        pct_txt = br_pct(plan / total * 100, 1) if (plan is not None and total) else "—"
+        if real is not None:
+            real_txt = f'Real: {br_num(round(real))}'
+        elif s > x_atual:
+            real_txt = "projeção"
+        else:
+            real_txt = "Real: sem dado ainda"
+        return (f'<div class="cel{" hoje" if hoje else ""}"><div class="rot">{esc(rot)}</div>'
+               f'<div class="val azul">{plan_txt}</div>'
+               f'<div class="nota">planejado · {pct_txt} do total</div>'
+               f'<div class="sub">{esc(real_txt)}</div></div>')
+
+    corpo = (celula("Semana anterior", x_atual - 1)
+            + celula(f"Semana atual · S{x_atual}", x_atual, hoje=True)
+            + celula("Semana seguinte", x_atual + 1))
+    return f'<div class="cs-kpi3">{corpo}</div>'
+
+
+def _curva_s_rundown_svg(semanal: list[dict], x_atual: int | None) -> str:
+    """Barras pareadas Planejado x Realizado numa janela curta em volta de
+    hoje -- a curva acumulada do bloco Visão geral já cobre o horizonte
+    inteiro; esta pergunta é operacional ("essa semana e a que vem"), não
+    estratégica, por isso a janela fica curta de propósito."""
+    if not semanal or x_atual is None:
+        return '<div class="cs-vazio">Sem dado suficiente para o gráfico semanal.</div>'
+    mapa = {l["semana"]: l for l in semanal}
+    janela = [s for s in range(x_atual - 6, x_atual + 11) if s in mapa]
+    if not janela:
+        return '<div class="cs-vazio">Sem dado suficiente para o gráfico semanal.</div>'
+
+    valores = [v for s in janela for v in
+              (mapa[s]["planejado_sem"] or 0, mapa[s]["realizado_sem"])
+              if v is not None]
+    y_max = (max(valores) * 1.25) if valores else 1.0
+    y_max = y_max or 1.0
+
+    LARG, ALT = 920, 260
+    PAD_ESQ, PAD_DIR, PAD_CIMA, PAD_BAIXO = 40, 16, 20, 30
+    area_larg, area_alt = LARG - PAD_ESQ - PAD_DIR, ALT - PAD_CIMA - PAD_BAIXO
+    grupo_larg = area_larg / len(janela)
+    barra_larg = min(16.0, grupo_larg * 0.32)
+
+    def y(v: float) -> float:
+        return PAD_CIMA + area_alt - (v / y_max) * area_alt
+
+    linhas_grade = ""
+    for i in range(4):
+        frac = i / 3
+        yy = PAD_CIMA + area_alt - frac * area_alt
+        linhas_grade += (
+            f'<line x1="{PAD_ESQ}" y1="{yy:.1f}" x2="{LARG-PAD_DIR}" y2="{yy:.1f}" class="cs-rd-grade"/>'
+            f'<text x="{PAD_ESQ-6}" y="{yy+3:.1f}" text-anchor="end" class="cs-rd-rotulo-y">'
+            f'{br_num(round(frac * y_max))}</text>')
+
+    barras, rotulos = "", ""
+    for i, s in enumerate(janela):
+        cx = PAD_ESQ + grupo_larg * (i + 0.5)
+        l = mapa[s]
+        plan, real = l["planejado_sem"] or 0, l["realizado_sem"]
+        y_plan = y(plan)
+        barras += (f'<rect x="{cx - barra_larg - 1:.1f}" y="{y_plan:.1f}" width="{barra_larg:.1f}" '
+                  f'height="{(PAD_CIMA + area_alt - y_plan):.1f}" class="cs-rd-barra-plan"/>')
+        if real is not None:
+            y_real = y(real)
+            barras += (f'<rect x="{cx + 1:.1f}" y="{y_real:.1f}" width="{barra_larg:.1f}" '
+                      f'height="{(PAD_CIMA + area_alt - y_real):.1f}" class="cs-rd-barra-real"/>')
+        rotulos += f'<text x="{cx:.1f}" y="{ALT-10}" text-anchor="middle" class="cs-rd-rotulo-x">S{s}</text>'
+
+    hoje_marca = ""
+    if x_atual in janela:
+        hx = PAD_ESQ + grupo_larg * (janela.index(x_atual) + 0.5)
+        hoje_marca = (
+            f'<line x1="{hx:.1f}" y1="{PAD_CIMA}" x2="{hx:.1f}" y2="{PAD_CIMA+area_alt}" class="cs-rd-hoje-linha"/>'
+            f'<text x="{hx:.1f}" y="{PAD_CIMA-6}" text-anchor="middle" class="cs-rd-hoje-rotulo">Hoje</text>')
+
+    return (f'<svg viewBox="0 0 {LARG} {ALT}" class="cs-rd-svg" role="img" '
+           f'aria-label="Planejado e realizado por semana">'
+           f'{linhas_grade}{barras}{hoje_marca}{rotulos}</svg>')
+
+
+def _curva_s_programacao_bloco(c: dict, escolha: str, chave: str,
+                               real_base: dict[int, tuple[float | None, float | None]]) -> None:
+    """Aba Programação de uma curva: os três cartões (semana passada,
+    atual, seguinte), o gráfico de barras da janela operacional e a
+    tabela completa planejado x realizado semana a semana. Pedido do
+    Daniel, 2026-09-09: o rundown que ele montava a mão no Excel
+    concentrava a montagem em poucas semanas ("antecipar"); aqui o plano
+    vem do mesmo modelo smootherstep já usado na Curva S (distribui até o
+    prazo, sem picos) -- é só quantidade por semana, não TAG por TAG."""
+    if c["real_atual"] is None:
+        render_html(
+            '<div class="gplan-panel"><div class="cs-vazio">Nenhuma semana de Real '
+            'informada ainda -- sem isso não há como calcular a Programação.</div></div>')
+        return
+    semanal = _curva_s_semanal(c, real_base, escolha == "Prioritários")
+    if not semanal:
+        render_html(
+            '<div class="gplan-panel"><div class="cs-vazio">Sem previsto suficiente '
+            'para montar a Programação.</div></div>')
+        return
+
+    menu_prog = menu_exportar(f"expmenu_prog_{chave}")
+
+    render_html(_curva_s_kpi3_programacao(c, semanal))
+
+    svg = _curva_s_rundown_svg(semanal, c["x_atual"])
+    render_html(f"""
+      <div class="gplan-panel cs-painel">
+        <div class="cs-rd-legenda">
+          <span class="plan"><span class="marca"></span>Planejado</span>
+          <span class="real"><span class="marca"></span>Realizado</span>
+        </div>
+        {svg}
+      </div>""")
+
+    corpo = ""
+    for l in semanal:
+        plan_txt = br_num(round(l["planejado_sem"])) if l["planejado_sem"] is not None else "—"
+        real_txt = br_num(round(l["realizado_sem"])) if l["realizado_sem"] is not None else "—"
+        saldo_txt = br_num(round(l["saldo_previsto"])) if l["saldo_previsto"] is not None else "—"
+        pct = (l["previsto_acum"] / c["total"] * 100) if (l["previsto_acum"] is not None and c["total"]) else None
+        pct_html = "—"
+        if pct is not None:
+            pct_html = ('<div class="pctwrap"><div class="pctbar">'
+                       f'<i style="width:{min(pct, 100):.1f}%"></i></div>'
+                       f'<span class="pctval">{br_pct(pct, 0)}</span></div>')
+        destaque = ' style="font-weight:800"' if l["semana"] == c["x_atual"] else ""
+        corpo += (
+            f'<tr{destaque}><td class="rotulo">Semana {l["semana"]}</td>'
+            f'<td>{plan_txt}</td><td>{real_txt}</td><td>{saldo_txt}</td><td>{pct_html}</td></tr>')
+
+    render_html(
+        '<div class="gplan-panel ct-painel"><div class="gplan-panel-title">Programação semanal'
+        f'<span class="gtbl-muted" style="font-weight:500">{br_num(len(semanal))} semanas'
+        '</span></div><div class="ct-rolo cs-tabela-wrap">'
+        '<table class="cs-tabela"><thead><tr><th>Semana</th><th>Planejado</th>'
+        '<th>Realizado</th><th>Saldo a montar</th><th>% concluído (previsto)</th></tr></thead>'
+        f'<tbody>{corpo}</tbody></table></div></div>')
+
+    exportar = pd.DataFrame([{
+        "SEMANA": f'Semana {l["semana"]}',
+        "PLANEJADO_SEMANA": l["planejado_sem"],
+        "REALIZADO_SEMANA": l["realizado_sem"],
+        "SALDO_A_MONTAR": l["saldo_previsto"],
+    } for l in semanal])
+    with menu_prog:
+        st.download_button(
+            f"Exportar Programação — {escolha}",
+            exportar.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+            file_name=f'programacao_rundown_{chave}.csv', mime="text/csv",
+            key=f"programacao_csv_{chave}", icon=":material/download:",
+            type="tertiary", use_container_width=True)
+
+
 def render_curva_s(tags: pd.DataFrame, cache_key: str = ""):
-    """Curva S: duas curvas, Geral e Prioritários, cada uma no modelo que os
+    """Rundown: duas curvas, Geral e Prioritários, cada uma no modelo que os
     dados dela permitem (ver CURVA_S_PRAZO e curva_s_montar) -- Visão Geral
     traz as duas empilhadas (cartões, gráfico com painel de resumo ao lado,
-    tabela semanal); Comparativo cruza as duas numa tabela só.
+    tabela semanal); Comparativo cruza as duas numa tabela só; Programação
+    fatia a mesma curva em quantidade por semana (planejado x realizado),
+    pedido do Daniel pra substituir o rundown manual dele -- ver
+    _curva_s_programacao_bloco.
 
     Sem prazo contratual para aquela curva, a projeção de término aparece em
     "Semana NN" (a numeração própria do cronograma do projeto) -- inventar
     uma correspondência com data de calendário violaria a regra de não
     inventar dado que motivou esta aba inteira.
     """
-    render_header("Curva S")
+    render_header("Rundown")
     dados = curva_s_dados(tags, cache_key)
-    geral, prio = dados["geral"], dados["prioritario"]
+    geral, prio, real_base = dados["geral"], dados["prioritario"], dados["real_base"]
 
     if not geral["total"]:
         render_html(
             '<div class="gplan-panel"><div class="cs-vazio">Nenhuma TAG com semana '
             'programada na 01_BASE_TAGS -- sem isso não há previsto para desenhar a '
-            'Curva S.</div></div>')
+            'Rundown.</div></div>')
         return
 
-    aba_geral, aba_prio, aba_comparativo = st.tabs(["Visão geral", "Prioritários", "Comparativo"])
+    aba_geral, aba_prio, aba_comparativo, aba_programacao = st.tabs(
+        ["Visão geral", "Prioritários", "Comparativo", "Programação"])
     with aba_geral:
         _curva_s_bloco(geral, "Geral", "geral")
     with aba_prio:
         _curva_s_bloco(prio, "Prioritários", "prioritarios")
     with aba_comparativo:
         _curva_s_comparativo(geral, prio)
+    with aba_programacao:
+        escolha_prog = st.segmented_control(
+            "Curva", ["Geral", "Prioritários"], default="Geral",
+            key="curva_s_prog_escolha", label_visibility="collapsed") or "Geral"
+        if escolha_prog == "Prioritários":
+            _curva_s_programacao_bloco(prio, "Prioritários", "prioritarios", real_base)
+        else:
+            _curva_s_programacao_bloco(geral, "Geral", "geral", real_base)
 
 
 def render_perfil_lateral():
@@ -14345,7 +14619,7 @@ def main():
     curva_s_page = st.Page(
         lambda: _sob_carga("Calculando avanço de montagem por semana",
                            lambda: render_curva_s(tags, cache_key)),
-        title="Curva S", icon=":material/show_chart:", url_path="curva-s")
+        title="Rundown", icon=":material/show_chart:", url_path="rundown")
 
     # A aba que a permissão não cobre não entra no menu, em vez de entrar e
     # avisar que é proibida: a Gitec sem valores viraria uma tela de traços, e
