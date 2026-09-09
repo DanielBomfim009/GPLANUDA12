@@ -3504,12 +3504,25 @@ def inject_css():
            area (nao mexe no resto do app). */
         div[class*="_pf_pastas"] [data-testid="stCheckbox"] label p { font-size:12.5px; }
         div[class*="_pf_pastas"] [data-testid="stVerticalBlock"] { gap:6px !important; }
-        div[class*="_pf_pastas"] [data-testid="stHorizontalBlock"] { gap:10px !important; }
         /* Sem cartao (sem borda ao redor/fundo proprio) -- so um fio
            separando uma pasta da outra, bem mais enxuto que o cartao com
            borda inteira da primeira versao. */
         div[class*="_pf_pastas"] [class*="_bloco"] { padding:6px 0 0 !important;
           border-top:1px solid var(--border-color); }
+        /* Cabecalho (nome+contador+toggle) e itens em linha compacta --
+           por padrao cada st.checkbox/st.markdown vira um bloco que
+           ocupa 100% da largura do dialogo (width="large"), entao
+           empilhavam um embaixo do outro OU (com st.columns) esticavam
+           com um vao enorme entre eles. Vira flex-row com cada filho do
+           tamanho do proprio conteudo, coladinhos. Achado do Daniel,
+           2026-09-08: "diminua o pixel na horizontal". */
+        div[class*="_cab"][data-testid="stVerticalBlock"],
+        div[class*="_itens"][data-testid="stVerticalBlock"] {
+          flex-direction:row !important; flex-wrap:wrap !important;
+          align-items:center !important; row-gap:6px !important; column-gap:20px !important; }
+        div[class*="_cab"][data-testid="stVerticalBlock"] > div[data-testid="stElementContainer"],
+        div[class*="_itens"][data-testid="stVerticalBlock"] > div[data-testid="stElementContainer"] {
+          width:fit-content !important; }
         div[class*="_pf_pastas"] [data-testid="stElementContainer"] { margin-bottom:0 !important; }
 
         /* o selo do papel: mesma familia de cor nos dois lugares onde aparece */
@@ -13982,20 +13995,19 @@ def _bloco_pasta(prefixo: str, nome: str, chaves: list[str], marcadas: list[str]
     st.session_state[f"{prefixo_secao}__todas"] = len(marcadas_agora) == len(chaves)
 
     with st.container(key=f"{prefixo_secao}_bloco"):
-        col_nome, col_toggle = st.columns([3, 2], vertical_alignment="center")
-        with col_nome:
+        # Cabecalho e itens em linha compacta (flex-row via CSS, ver
+        # inject_css) em vez de st.columns -- colunas dividem a LARGURA
+        # TOTAL do dialogo (width="large") em partes iguais, entao "Nome"/
+        # "Progresso" ficavam esticados com um vao enorme entre eles.
+        # Achado do Daniel, 2026-09-08: "diminua o pixel na horizontal".
+        with st.container(key=f"{prefixo_secao}_cab"):
             st.markdown(f"**{esc(nome)}** &nbsp;"
                        f'<span class="pf-conta">{len(marcadas_agora)}/{len(chaves)}</span>',
                        unsafe_allow_html=True)
-        with col_toggle:
             st.checkbox("Marcar toda a pasta", key=f"{prefixo_secao}__todas",
                        on_change=_marcar_pasta_toggle, args=(chaves, prefixo_secao))
-        # Uma linha só de checkbox (nao 2 colunas x N linhas) -- nenhuma
-        # pasta passa de 4 abas, entao cabe. Achado do Daniel, 2026-09-08:
-        # "ficou muito grande a aba de cadastro, desnecessário, simplifique".
-        cols = st.columns(len(chaves))
-        for i, chave in enumerate(chaves):
-            with cols[i]:
+        with st.container(key=f"{prefixo_secao}_itens"):
+            for chave in chaves:
                 st.checkbox(acesso.PERMISSOES[chave].replace("Ver a aba ", ""),
                            key=f"{prefixo_secao}_{chave}")
     return [c for c in chaves if st.session_state[f"{prefixo_secao}_{c}"]]
