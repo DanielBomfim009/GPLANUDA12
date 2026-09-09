@@ -1,5 +1,6 @@
 import base64
 import collections
+import hashlib
 import io
 import json
 import math
@@ -13415,14 +13416,48 @@ def _rd_fase(tags: pd.DataFrame, chave: str, rotulo: str, prod: dict) -> dict:
     }
 
 
+def _rd_assinatura() -> str:
+    """Impressão digital do código que monta o rundown, pra entrar na chave
+    do cache.
+
+    O @st.cache_data só olha o corpo da função DECORADA. Como quem monta as
+    linhas é _rd_fase, mudar a forma do dicionário lá não invalidava nada:
+    a tela voltava a receber o dicionário da versão anterior e quebrava no
+    primeiro campo novo (KeyError: 'plano', 2026-09-09, com o app já rodando
+    desde antes da mudança). Com a assinatura na chave, qualquer alteração
+    no motor descarta o cache velho sozinha -- sem depender de alguém
+    lembrar de limpar cache ou de subir um número de versão na mão.
+
+    Lê o BYTECODE, não o arquivo: inspect.getsource depende do .py estar
+    no disco do jeito que foi importado, e devolve vazio em ambiente
+    empacotado -- aí a assinatura viraria uma constante e o problema
+    voltaria calado. co_code e as constantes simples mudam com qualquer
+    alteração de lógica ou de número, e não têm endereço de memória
+    dentro (que faria a chave mudar a cada run e o cache nunca pegar).
+    """
+    partes = []
+    for f in (_rd_fase, _rd_curva, _rd_historico, _rd_produtividade):
+        codigo = f.__code__
+        partes.append(codigo.co_code.hex())
+        partes.append(repr([c for c in codigo.co_consts
+                            if isinstance(c, (int, float, str, bytes, bool, type(None)))]))
+    partes.append(repr((RUNDOWN_PRAZO, RUNDOWN_ANCORA, RUNDOWN_RAMPA_INI,
+                        RUNDOWN_RAMPA_FIM, RUNDOWN_PISO_FIM)))
+    return hashlib.md5("".join(partes).encode("utf-8")).hexdigest()[:10]
+
+
 @st.cache_data(show_spinner=False, max_entries=3)
-def rundown_dados(tags: pd.DataFrame, cache_key: str) -> dict:
-    """As duas fases do rundown, com a produtividade medida uma vez só no
-    universo completo e reaproveitada nas duas (ver _rd_produtividade)."""
+def _rundown_dados(tags: pd.DataFrame, cache_key: str, assinatura: str) -> dict:
     semana_atual = _rd_semana_da_data(date.today())
     prod = _rd_produtividade(tags, semana_atual)
     return {chave: _rd_fase(tags, chave, rotulo, prod)
             for chave, rotulo in RUNDOWN_FASES}
+
+
+def rundown_dados(tags: pd.DataFrame, cache_key: str) -> dict:
+    """As duas fases do rundown, com a produtividade medida uma vez só no
+    universo completo e reaproveitada nas duas (ver _rd_produtividade)."""
+    return _rundown_dados(tags, cache_key, _rd_assinatura())
 
 
 def _smootherstep(t: float) -> float:
