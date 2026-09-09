@@ -453,7 +453,30 @@ def load_data(cache_key: str):
         file_bytes = client.storage.from_(SUPABASE_BUCKET).download(SUPABASE_FILE_PATH)
         source = io.BytesIO(file_bytes)
     elif os.path.exists(LOCAL_EXCEL_FALLBACK):
-        source = LOCAL_EXCEL_FALLBACK
+        # A planilha costuma estar aberta no Excel de quem a mantem, o que no
+        # Windows bloqueia ate leitura. Tenta de novo por alguns segundos --
+        # muitas vezes o lock e passageiro (autosave, sincronizacao do
+        # OneDrive) -- e so entao desiste com uma mensagem clara em vez do
+        # traceback do PermissionError.
+        file_bytes = None
+        for tentativa in range(5):
+            try:
+                with open(LOCAL_EXCEL_FALLBACK, "rb") as f:
+                    file_bytes = f.read()
+                break
+            except PermissionError:
+                if tentativa < 4:
+                    time.sleep(1.5)
+        if file_bytes is None:
+            st.error(
+                "Não consegui ler a planilha "
+                f"`{os.path.basename(LOCAL_EXCEL_FALLBACK)}` porque ela está aberta "
+                "em outro programa (Excel) ou sendo sincronizada pelo OneDrive. "
+                "Feche o arquivo no Excel e clique em Rerun (ou recarregue a "
+                "página) para tentar de novo."
+            )
+            st.stop()
+        source = io.BytesIO(file_bytes)
     else:
         st.error(
             "Não encontrei a planilha. Configure SUPABASE_URL e SUPABASE_KEY em "
@@ -1797,6 +1820,45 @@ def inject_css():
                                     border-radius:3px; margin-right:6px; vertical-align:-2px; }
         .cs-rd-legenda .plan .marca { background:var(--text-3); opacity:.5; }
         .cs-rd-legenda .real .marca { background:var(--accent-teal); }
+
+        /* Rundown ponderado (aba Programação) -- um cartao por bloco, cada
+           um com o SEU prazo e o ritmo que essa data exige, mais o total.
+           A tira lateral colorida amarra o cartao a cor da barra do
+           grafico: azul = prioritarios, ambar = nao prioritarios. */
+        .rd-blocos { display:grid; grid-template-columns:repeat(3, 1fr); gap:14px;
+                     margin:4px 0 18px; }
+        .rd-bloco { position:relative; overflow:hidden; background:var(--dark-card);
+                    border:1px solid var(--border-color); border-radius:14px;
+                    padding:16px 18px 14px 21px; }
+        .rd-bloco::before { content:""; position:absolute; left:0; top:0; bottom:0; width:4px; }
+        .rd-bloco.prio::before { background:var(--accent-blue); }
+        .rd-bloco.nprio::before { background:var(--accent-amber); }
+        .rd-bloco.total::before { background:var(--accent-teal); }
+        .rd-bloco .rot { font-size:10px; font-weight:700; text-transform:uppercase;
+                         letter-spacing:.5px; color:var(--text-3); }
+        .rd-bloco .val { font-size:26px; font-weight:800; margin-top:7px; color:var(--text-1);
+                         font-variant-numeric:tabular-nums; line-height:1; }
+        .rd-bloco.prio .val { color:var(--accent-blue); }
+        .rd-bloco.nprio .val { color:var(--accent-amber); }
+        .rd-bloco.total .val { color:var(--accent-teal); }
+        .rd-bloco .nota { font-size:11px; color:var(--text-3); margin-top:6px; }
+        .rd-bloco .pe { display:flex; justify-content:space-between; gap:10px;
+                        margin-top:13px; padding-top:11px; font-size:11.5px;
+                        color:var(--text-3); border-top:1px solid rgba(var(--rgb-tinta),.08); }
+        .rd-bloco .pe b { color:var(--text-1); font-variant-numeric:tabular-nums; }
+        @media (max-width:1100px) { .rd-blocos { grid-template-columns:1fr; } }
+
+        .cs-rd-barra-prio { fill:var(--accent-blue); }
+        .cs-rd-barra-nprio { fill:var(--accent-amber); }
+        .cs-rd-legenda .prio .marca { background:var(--accent-blue); }
+        .cs-rd-legenda .nprio .marca { background:var(--accent-amber); }
+        .rd-tabela th .sub { display:block; font-size:9px; font-weight:600;
+                             text-transform:none; letter-spacing:0; color:var(--text-3); }
+        .rd-tabela td.num { text-align:right; }
+        .rd-tabela td.num.verde { color:var(--accent-teal); font-weight:700; }
+        .rd-tabela td.num.forte { color:var(--text-1); font-weight:800; }
+        .rd-tabela td.num.cinza { color:var(--text-3); }
+        .rd-tabela tr.agora td { background:rgba(var(--rgb-teal),.08); font-weight:800; }
 
         .du-br .fr { font-size:10px; color:var(--text-3); text-align:right; }
         .du-br .pc { font-size:10.5px; font-weight:700; color:var(--text-1); text-align:right; }
@@ -12820,7 +12882,7 @@ def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
     usa em Certificação), pra filtrar e priorizar tratamento no Excel sem
     reorganizar nada na mão.
     """
-    render_header("Avanço Físico")
+    render_header("Avanço")
     menu_af = menu_exportar("expmenu_af")
     linhas = medicao_prontidao(tags, resumo, esperados, lanc, depara, cache_key)
     if not linhas:
@@ -13508,12 +13570,7 @@ def curva_s_montar(tipo: str, tags: pd.DataFrame,
 def curva_s_dados(tags: pd.DataFrame, cache_key: str) -> dict:
     real_base = curva_s_real(cache_key)
     return {"geral": curva_s_montar("geral", tags, real_base),
-           "prioritario": curva_s_montar("prioritario", tags, real_base),
-           # cru, nao filtrado -- a Programacao (_curva_s_semanal) precisa
-           # do valor reportado na ULTIMA semana tambem (c["real"] exclui
-           # essa fronteira de proposito, ver _curva_s_com_prazo), senao o
-           # delta daquela semana engole a anterior junto.
-           "real_base": real_base}
+           "prioritario": curva_s_montar("prioritario", tags, real_base)}
 
 
 def _curva_s_svg(previsto: list[tuple[float, float]], real: list[tuple[float, float]],
@@ -13951,113 +14008,372 @@ def _curva_s_comparativo(geral: dict, prio: dict) -> None:
         f'<tbody>{linhas_html}</tbody></table></div></div>')
 
 
-def _curva_s_semanal(c: dict, real_base: dict[int, tuple[float | None, float | None]],
-                     so_prioritarias: bool) -> list[dict]:
-    """Fatia as séries ACUMULADAS de curva_s_montar/_com_prazo em
-    quantidade POR SEMANA -- a base do rundown é "quanto falta andar cada
-    semana", não "quanto já andou no total", que é o que a Curva S
-    acumulada responde. Mesma numeração contínua de semana da Curva S.
+# =====================================================================
+# Rundown ponderado pela data limite -- o motor da aba Programação.
+#
+# O rundown que o Daniel mantinha à mão ("modelo rundown.xlsx", aba
+# "Rundown - Mon_Instr") tem três séries digitadas semana a semana: X =
+# planejado, Y = realizado, Z = projetado. As colunas D/E/G dela são o
+# SALDO caindo de 5.098 até zero -- é daí que vem o nome: rundown é a
+# contagem regressiva do que FALTA, não a subida do que já foi feito.
+#
+# O que se aproveita da planilha: os quantitativos (executado, previsto e
+# projetado). O que NÃO se aproveita: a distribuição do projetado, que ele
+# digitava pra ANTECIPAR a montagem -- ela empilha 229-237 TAGs em semanas
+# isoladas de nov/dez e trata o universo inteiro como um bloco só, ignorando
+# que prioritário e não prioritário têm datas limite diferentes.
+#
+# No lugar dela, o saldo é PONDERADO PELA DATA LIMITE de cada bloco (pedido
+# do Daniel, 2026-09-09: "ponderar o quantitativo baseado nas datas limites,
+# pois temos mais tempo suficiente para executar"):
+#
+#   Prioritários      -> CURVA_S_PRAZO["prioritario"]  (31/12/2026)
+#   Não prioritários  -> CURVA_S_PRAZO["geral"]        (14/04/2027)
+#
+# Cada bloco dilui o SEU saldo em ritmo constante até o SEU prazo, e o plano
+# da semana é a soma dos dois. Ritmo constante -- não o smootherstep da Curva
+# S -- porque a pergunta aqui é operacional ("quantas por semana pra não
+# estourar a data"), e a distribuição uniforme é a que usa todo o tempo
+# disponível com o MENOR PICO possível, que é justamente o que a antecipação
+# manual desperdiçava.
+#
+# Ver _rd_programacao() para a tela.
+# =====================================================================
 
-    O real por semana vem direto de real_base (a 10_BASE_CURVA_S crua),
-    não de c["real"]: essa série exclui de propósito a última semana
-    reportada (ver _curva_s_com_prazo, "s < semana_hoje") pra não duplicar
-    o ponto de "hoje" no gráfico contínuo -- usar ela aqui faria o delta
-    daquela última semana reportada ser engolido pelo delta da semana
-    seguinte (dois relatos de real virando um só). "Hoje" pode ser
-    fracionário (ver _semana_equivalente); o real de hoje entra na semana
-    ARREDONDADA (c["x_atual"]), nunca numa linha própria fracionária.
+# Os dois blocos, cada um com o prazo que vale pra ele. O prazo não é
+# redigitado aqui de propósito: sai de CURVA_S_PRAZO, a mesma fonte que a
+# Curva S usa -- mudar a data lá muda a ponderação aqui junto.
+RUNDOWN_BLOCOS = (
+    ("prioritario", "Prioritários", "prioritario"),
+    ("nao_prioritario", "Não prioritários", "geral"),
+)
+
+
+def rundown_plano_manual(cache_key: str) -> dict[int, dict[str, float | None]]:
+    """Semana -> {planejado, realizado, projetado} do rundown manual do
+    Daniel, quando a aba 10_BASE_RUNDOWN existir no workbook (o pipeline a
+    gera a partir de "modelo rundown.xlsx"). Serve de COMPARAÇÃO na tela --
+    é o plano antecipado que a ponderação por data limite substitui --, e
+    nunca de insumo do cálculo: sem a aba, a Programação segue inteira,
+    só sem a coluna de comparação.
     """
-    previsto_map = dict(c["previsto"])
-    if not previsto_map:
+    client = get_supabase_client()
+    if client is not None:
+        fonte = io.BytesIO(client.storage.from_(SUPABASE_BUCKET)
+                           .download(SUPABASE_FILE_PATH))
+    elif os.path.exists(LOCAL_EXCEL_FALLBACK):
+        fonte = LOCAL_EXCEL_FALLBACK
+    else:
+        return {}
+    try:
+        base = pd.read_excel(fonte, sheet_name="10_BASE_RUNDOWN")
+    except Exception:
+        return {}
+    if base.empty or "SEMANA" not in base.columns:
+        return {}
+
+    def num(r, coluna):
+        v = r.get(coluna)
+        return None if v is None or pd.isna(v) else cert_num(v)
+
+    saida: dict[int, dict[str, float | None]] = {}
+    for r in base.to_dict("records"):
+        semana = _semana_num(r.get("SEMANA"))
+        if semana is None:
+            continue
+        saida[semana] = {"planejado": num(r, "PLANEJADO_SEMANA"),
+                         "realizado": num(r, "REALIZADO_SEMANA"),
+                         "projetado": num(r, "PROJETADO_SEMANA")}
+    return saida
+
+
+def _rd_blocos(tags: pd.DataFrame) -> list[dict]:
+    """Os dois blocos do rundown, cada um com total, realizado, saldo e o
+    ritmo que a SUA data limite exige.
+
+    A partição sai do MESMO universo da Curva S Geral (_curva_s_universo:
+    tudo que não está CANCELADO) dividido pelo SSOP_PRIORITARIO -- não da
+    contagem bruta da coluna que a curva de Prioritários usa. Aqui os dois
+    blocos precisam SOMAR o geral, senão o plano da semana não fecha com o
+    total a montar; a diferença são as 14 TAGs prioritárias que já estão
+    canceladas, e que ninguém vai montar.
+
+    "Não prioritário" é tudo que não é SIM -- inclui o "NÃO" explícito e o
+    "-" (ainda não classificado, hoje a maior fatia dos dois). É o
+    enquadramento certo pro prazo: o que não está marcado como prioritário
+    responde pela data limite geral, não pela de dezembro. Se uma dessas
+    TAGs virar prioritária depois, ela migra de bloco sozinha na próxima
+    leitura da base.
+    """
+    universo = _curva_s_universo(tags, False)
+    if universo is None or "STATUS_MONTAGEM" not in universo.columns:
         return []
-    idx = 1 if so_prioritarias else 0
-    real_map = {s: v[idx] for s, v in real_base.items() if v[idx] is not None}
-    tendencia_map = dict(c["tendencia"])
-    total = c["total"]
-    x_atual = c["x_atual"]
-    if x_atual is not None and c["real_atual"] is not None:
-        real_map[x_atual] = c["real_atual"]
+    if "SSOP_PRIORITARIO" in universo.columns:
+        eh_prio = (universo["SSOP_PRIORITARIO"].astype(str).str.strip().str.upper()
+                   == "SIM")
+    else:
+        eh_prio = pd.Series(False, index=universo.index)
+    montado = universo["STATUS_MONTAGEM"].astype(str).str.strip() == "Montado"
 
-    semanas = sorted(set(previsto_map) | set(real_map) | set(tendencia_map))
-    linhas, prev_ant, real_ant = [], None, None
-    for s in semanas:
-        prev_ac, real_ac, tend_ac = previsto_map.get(s), real_map.get(s), tendencia_map.get(s)
-        linhas.append({
-            "semana": s, "previsto_acum": prev_ac, "real_acum": real_ac,
-            "tendencia_acum": tend_ac,
-            "planejado_sem": (prev_ac - prev_ant) if (prev_ac is not None and prev_ant is not None) else None,
-            "realizado_sem": (real_ac - real_ant) if (real_ac is not None and real_ant is not None) else None,
-            "saldo_previsto": (total - prev_ac) if prev_ac is not None else None,
-            "saldo_real": (total - real_ac) if real_ac is not None else None,
+    base_semana, base_data, _ = CURVA_S_PREVISTO_BASE["geral"]
+    x_hoje = _semana_equivalente(base_semana, base_data, date.today())
+
+    blocos = []
+    for chave, rotulo, prazo_de in RUNDOWN_BLOCOS:
+        mascara = eh_prio if chave == "prioritario" else ~eh_prio
+        prazo = CURVA_S_PRAZO.get(prazo_de)
+        total = float(mascara.sum())
+        feito = float((mascara & montado).sum())
+        saldo = max(total - feito, 0.0)
+        x_prazo = (_semana_equivalente(base_semana, base_data, prazo)
+                   if prazo else None)
+        # Semanas que ainda restam até o prazo. Zero ou negativo = prazo
+        # vencido: o saldo inteiro cai na semana atual, sem diluição
+        # nenhuma -- não existe "espalhar" no que já passou.
+        semanas = (x_prazo - x_hoje) if x_prazo is not None else None
+        blocos.append({
+            "chave": chave, "rotulo": rotulo, "prazo": prazo,
+            "total": total, "realizado": feito, "saldo": saldo,
+            "x_prazo": x_prazo, "semanas": semanas,
+            "ritmo": (saldo / semanas) if (semanas and semanas > 0) else None,
+            "pct": (feito / total * 100) if total else None,
         })
-        prev_ant = prev_ac if prev_ac is not None else prev_ant
-        real_ant = real_ac if real_ac is not None else real_ant
-    return linhas
+    return blocos
 
 
-def _curva_s_kpi3_programacao(c: dict, semanal: list[dict]) -> str:
-    """S. ANT / S. ATUAL / S. PRÓX -- responde direto a pergunta do
-    Daniel ("quanto está programado pra semana atual"), no espírito do
-    painel auxiliar que ele montava a mão no Excel (colunas AE:AK do
-    rundown), só que os três números aqui vêm do MESMO modelo smootherstep
-    da Curva S (nunca do SEMANA_PROGRAMADA por TAG -- esse campo é só um
-    log histórico de quando cada TAG passou por montagem, não um plano
-    futuro; ver _curva_s_previsto). É esse modelo que garante a
-    distribuição suave até o prazo, em vez dos picos de 80-200+ TAGs numa
-    única semana que o rundown manual dele produzia.
+def _rd_distribuir(saldo: float, s_ini: int, s_fim: int) -> dict[int, float]:
+    """Reparte um saldo em ritmo constante entre duas semanas (inclusive).
+
+    O valor de cada semana é a diferença de dois ACUMULADOS arredondados,
+    não o ritmo arredondado repetido: assim a soma fecha exatamente o saldo,
+    em vez de escorrer algumas dezenas de instrumentos no arredondamento ao
+    longo de 30 semanas.
     """
-    total = c["total"]
-    x_atual = c["x_atual"]
-    mapa = {l["semana"]: l for l in semanal}
-    if x_atual is None or x_atual not in mapa:
+    if saldo <= 0:
+        return {}
+    n = s_fim - s_ini + 1
+    if n <= 0:
+        return {s_ini: saldo}
+    saida, anterior = {}, 0.0
+    for i in range(n):
+        acumulado = round(saldo * (i + 1) / n)
+        saida[s_ini + i] = acumulado - anterior
+        anterior = acumulado
+    return saida
+
+
+@st.cache_data(show_spinner=False, max_entries=3)
+def rundown_dados(tags: pd.DataFrame, cache_key: str) -> dict:
+    """O rundown inteiro: histórico realizado (10_BASE_CURVA_S), plano
+    ponderado por data limite daqui pra frente e, quando existir, o plano
+    manual da planilha do Daniel pra comparar.
+
+    Uma linha por semana, do começo do acompanhamento até o prazo mais
+    distante. As semanas passadas trazem o realizado; as de hoje em diante,
+    o planejado de cada bloco. O saldo é a coluna que dá nome à tela: quanto
+    ainda falta montar ao fim daquela semana.
+    """
+    blocos = _rd_blocos(tags)
+    if not blocos:
+        return {"blocos": [], "linhas": [], "semana_atual": None, "total": 0.0}
+
+    real_base = curva_s_real(cache_key)
+    manual = rundown_plano_manual(cache_key)
+    por_chave = {b["chave"]: b for b in blocos}
+    prio, nprio = por_chave["prioritario"], por_chave["nao_prioritario"]
+    total_geral = prio["total"] + nprio["total"]
+
+    base_semana, base_data, _ = CURVA_S_PREVISTO_BASE["geral"]
+    x_hoje = _semana_equivalente(base_semana, base_data, date.today())
+    semana_atual = round(x_hoje)
+
+    # Plano ponderado: cada bloco dilui o seu saldo no seu horizonte. Um
+    # prazo já vencido concentra tudo na semana atual (ver _rd_distribuir).
+    planos = {}
+    for b in blocos:
+        s_fim = round(b["x_prazo"]) if b["x_prazo"] is not None else semana_atual
+        planos[b["chave"]] = _rd_distribuir(b["saldo"], semana_atual,
+                                            max(s_fim, semana_atual))
+
+    # Realizado por semana, do acumulado informado a mão. O não prioritário
+    # não é reportado direto: é a diferença entre o acumulado geral e o
+    # prioritário da mesma semana -- as duas colunas que a 10_BASE_CURVA_S
+    # já traz.
+    hist = sorted(s for s, v in real_base.items() if v[0] is not None)
+    real_sem: dict[int, dict[str, float]] = {}
+    ac_geral_ant = ac_prio_ant = 0.0
+    for s in hist:
+        ac_geral = cert_num(real_base[s][0])
+        ac_prio = cert_num(real_base[s][1]) if real_base[s][1] is not None else ac_prio_ant
+        real_sem[s] = {
+            "total": ac_geral - ac_geral_ant,
+            "prio": ac_prio - ac_prio_ant,
+            "nprio": (ac_geral - ac_geral_ant) - (ac_prio - ac_prio_ant),
+            "acum": ac_geral,
+        }
+        ac_geral_ant, ac_prio_ant = ac_geral, ac_prio
+
+    # A semana de hoje fecha com o realizado de VERDADE (STATUS_MONTAGEM
+    # agora), não com o último acumulado reportado -- é o mesmo número que
+    # os cartões de saldo mostram, e o que a ponderação já descontou.
+    realizado_hoje = prio["realizado"] + nprio["realizado"]
+
+    s_ini = hist[0] if hist else semana_atual
+    s_fim = max([semana_atual]
+                + [round(b["x_prazo"]) for b in blocos if b["x_prazo"] is not None]
+                + list(manual))
+
+    linhas, saldo_prio, saldo_nprio = [], prio["saldo"], nprio["saldo"]
+    for s in range(s_ini, s_fim + 1):
+        futuro = s >= semana_atual
+        r = real_sem.get(s)
+        plan_prio = planos["prioritario"].get(s) if futuro else None
+        plan_nprio = planos["nao_prioritario"].get(s) if futuro else None
+        plan_total = ((plan_prio or 0.0) + (plan_nprio or 0.0)
+                      if (plan_prio is not None or plan_nprio is not None) else None)
+
+        if futuro:
+            saldo_prio = max(saldo_prio - (plan_prio or 0.0), 0.0)
+            saldo_nprio = max(saldo_nprio - (plan_nprio or 0.0), 0.0)
+            saldo_total = saldo_prio + saldo_nprio
+        else:
+            saldo_total = (total_geral - r["acum"]) if r else None
+
+        m = manual.get(s, {})
+        linhas.append({
+            "semana": s, "futuro": futuro,
+            "plan_prio": plan_prio, "plan_nprio": plan_nprio, "plan_total": plan_total,
+            "real_prio": r["prio"] if r else None,
+            "real_nprio": r["nprio"] if r else None,
+            "real_total": r["total"] if r else None,
+            "saldo_total": saldo_total,
+            "manual_plan": m.get("planejado"),
+            "manual_proj": m.get("projetado"),
+        })
+
+    return {
+        "blocos": blocos, "linhas": linhas, "semana_atual": semana_atual,
+        "total": total_geral, "realizado": realizado_hoje,
+        "saldo": total_geral - realizado_hoje,
+        "tem_manual": bool(manual),
+        "pico": max([l["plan_total"] for l in linhas if l["plan_total"]] or [0.0]),
+        "pico_manual": max([l["manual_proj"] for l in linhas
+                            if l["manual_proj"]] or [0.0]),
+    }
+
+
+def _rd_cartoes_blocos(dados: dict) -> str:
+    """Um cartão por bloco (o prazo de cada um, o saldo e o ritmo que essa
+    data exige) mais um de fechamento com o total. É o cartão que responde
+    "por que a semana pede tanto": o ritmo não é escolha de ninguém, é o
+    saldo dividido pelas semanas que sobraram até a data limite."""
+    cartoes = ""
+    for b in dados["blocos"]:
+        classe = "prio" if b["chave"] == "prioritario" else "nprio"
+        prazo_txt = b["prazo"].strftime("%d/%m/%Y") if b["prazo"] else "sem prazo"
+        if b["ritmo"] is None:
+            ritmo_txt, nota = "—", ("prazo vencido" if b["prazo"] else "sem prazo definido")
+        else:
+            ritmo_txt = f'{br_num(round(b["ritmo"]))}/sem'
+            nota = f'{br_num(round(b["semanas"]))} semanas até {prazo_txt}'
+        cartoes += (
+            f'<div class="rd-bloco {classe}">'
+            f'<div class="rot">{esc(b["rotulo"])}</div>'
+            f'<div class="val">{ritmo_txt}</div>'
+            f'<div class="nota">{esc(nota)}</div>'
+            f'<div class="pe">'
+            f'<span><b>{br_num(round(b["saldo"]))}</b> a montar</span>'
+            f'<span><b>{br_num(round(b["realizado"]))}</b> de '
+            f'{br_num(round(b["total"]))} feitos</span></div></div>')
+
+    pct = (dados["realizado"] / dados["total"] * 100) if dados["total"] else 0.0
+    # O total do cartão é o plano da SEMANA ATUAL, não o pico do horizonte:
+    # é o número que a equipe leva pra reunião de programação. O pico vira
+    # nota, pra dizer o quanto essa semana representa do maior esforço.
+    atual = next((l for l in dados["linhas"]
+                  if l["semana"] == dados["semana_atual"]), None)
+    plano_semana = (atual or {}).get("plan_total")
+    cartoes += (
+        '<div class="rd-bloco total">'
+        '<div class="rot">Total desta semana</div>'
+        f'<div class="val">{br_num(round(plano_semana)) if plano_semana is not None else "—"}'
+        '/sem</div>'
+        f'<div class="nota">soma dos dois blocos · pico de '
+        f'{br_num(round(dados["pico"]))}/sem no horizonte</div>'
+        f'<div class="pe"><span><b>{br_num(round(dados["saldo"]))}</b> a montar</span>'
+        f'<span><b>{br_pct(pct, 1)}</b> concluído</span></div></div>')
+    return f'<div class="rd-blocos">{cartoes}</div>'
+
+
+def _rd_kpi3(dados: dict) -> str:
+    """S. ANT / S. ATUAL / S. PRÓX -- o mesmo painel auxiliar que o Daniel
+    mantinha nas colunas AE:AK do rundown manual, só que o planejado de cada
+    semana agora vem da ponderação por data limite, e o realizado da base."""
+    atual = dados["semana_atual"]
+    mapa = {l["semana"]: l for l in dados["linhas"]}
+    if atual is None or atual not in mapa:
         return '<div class="cs-vazio">Sem semana atual definida.</div>'
+    total = dados["total"]
 
     def celula(rot: str, s: int, hoje: bool = False) -> str:
         l = mapa.get(s)
-        plan = l["planejado_sem"] if l else None
-        real = l["realizado_sem"] if l else None
+        # Semana futura tem plano ponderado; semana que já passou não tem
+        # (a ponderação começa hoje) -- ali o único planejado que existe é o
+        # do Excel manual, e a nota diz isso, pra ninguém ler um número do
+        # plano antigo achando que é do novo.
+        ponderado = l["plan_total"] if l else None
+        plan = ponderado if ponderado is not None else (l["manual_plan"] if l else None)
+        origem = "planejado" if ponderado is not None else "planejado (Excel)"
+        real = l["real_total"] if l else None
         plan_txt = br_num(round(plan)) if plan is not None else "—"
         pct_txt = br_pct(plan / total * 100, 1) if (plan is not None and total) else "—"
         if real is not None:
-            real_txt = f'Real: {br_num(round(real))}'
-        elif s > x_atual:
-            real_txt = "projeção"
+            sub = f'Real: {br_num(round(real))}'
+        elif s > atual:
+            sub = "projeção ponderada"
         else:
-            real_txt = "Real: sem dado ainda"
+            sub = "Real: sem dado ainda"
         return (f'<div class="cel{" hoje" if hoje else ""}"><div class="rot">{esc(rot)}</div>'
-               f'<div class="val azul">{plan_txt}</div>'
-               f'<div class="nota">planejado · {pct_txt} do total</div>'
-               f'<div class="sub">{esc(real_txt)}</div></div>')
+                f'<div class="val azul">{plan_txt}</div>'
+                f'<div class="nota">{origem} · {pct_txt} do total</div>'
+                f'<div class="sub">{esc(sub)}</div></div>')
 
-    corpo = (celula("Semana anterior", x_atual - 1)
-            + celula(f"Semana atual · S{x_atual}", x_atual, hoje=True)
-            + celula("Semana seguinte", x_atual + 1))
-    return f'<div class="cs-kpi3">{corpo}</div>'
+    return ('<div class="cs-kpi3">'
+            + celula("Semana anterior", atual - 1)
+            + celula(f"Semana atual · S{atual}", atual, hoje=True)
+            + celula("Semana seguinte", atual + 1)
+            + '</div>')
 
 
-def _curva_s_rundown_svg(semanal: list[dict], x_atual: int | None) -> str:
-    """Barras pareadas Planejado x Realizado numa janela curta em volta de
-    hoje -- a curva acumulada do bloco Visão geral já cobre o horizonte
-    inteiro; esta pergunta é operacional ("essa semana e a que vem"), não
-    estratégica, por isso a janela fica curta de propósito."""
-    if not semanal or x_atual is None:
+def _rd_barras_svg(dados: dict) -> str:
+    """Janela operacional em volta de hoje: o que já foi realizado (barra
+    teal, semanas passadas) e o plano ponderado empilhado daqui pra frente
+    -- prioritário embaixo, não prioritário em cima. Empilhado de propósito:
+    a altura total é o que a semana pede, e a divisão mostra de qual prazo
+    aquela pressão vem."""
+    atual = dados["semana_atual"]
+    mapa = {l["semana"]: l for l in dados["linhas"]}
+    if atual is None or not mapa:
         return '<div class="cs-vazio">Sem dado suficiente para o gráfico semanal.</div>'
-    mapa = {l["semana"]: l for l in semanal}
-    janela = [s for s in range(x_atual - 6, x_atual + 11) if s in mapa]
+    janela = [s for s in range(atual - 6, atual + 13) if s in mapa]
     if not janela:
         return '<div class="cs-vazio">Sem dado suficiente para o gráfico semanal.</div>'
 
-    valores = [v for s in janela for v in
-              (mapa[s]["planejado_sem"] or 0, mapa[s]["realizado_sem"])
-              if v is not None]
+    valores = []
+    for s in janela:
+        l = mapa[s]
+        if l["plan_total"] is not None:
+            valores.append(l["plan_total"])
+        if l["real_total"] is not None:
+            valores.append(l["real_total"])
     y_max = (max(valores) * 1.25) if valores else 1.0
     y_max = y_max or 1.0
 
     LARG, ALT = 920, 260
-    PAD_ESQ, PAD_DIR, PAD_CIMA, PAD_BAIXO = 40, 16, 20, 30
+    PAD_ESQ, PAD_DIR, PAD_CIMA, PAD_BAIXO = 40, 16, 22, 30
     area_larg, area_alt = LARG - PAD_ESQ - PAD_DIR, ALT - PAD_CIMA - PAD_BAIXO
     grupo_larg = area_larg / len(janela)
-    barra_larg = min(16.0, grupo_larg * 0.32)
+    barra_larg = min(22.0, grupo_larg * 0.5)
 
     def y(v: float) -> float:
         return PAD_CIMA + area_alt - (v / y_max) * area_alt
@@ -14067,107 +14383,249 @@ def _curva_s_rundown_svg(semanal: list[dict], x_atual: int | None) -> str:
         frac = i / 3
         yy = PAD_CIMA + area_alt - frac * area_alt
         linhas_grade += (
-            f'<line x1="{PAD_ESQ}" y1="{yy:.1f}" x2="{LARG-PAD_DIR}" y2="{yy:.1f}" class="cs-rd-grade"/>'
+            f'<line x1="{PAD_ESQ}" y1="{yy:.1f}" x2="{LARG-PAD_DIR}" y2="{yy:.1f}" '
+            f'class="cs-rd-grade"/>'
             f'<text x="{PAD_ESQ-6}" y="{yy+3:.1f}" text-anchor="end" class="cs-rd-rotulo-y">'
             f'{br_num(round(frac * y_max))}</text>')
 
+    base_y = PAD_CIMA + area_alt
     barras, rotulos = "", ""
     for i, s in enumerate(janela):
         cx = PAD_ESQ + grupo_larg * (i + 0.5)
         l = mapa[s]
-        plan, real = l["planejado_sem"] or 0, l["realizado_sem"]
-        y_plan = y(plan)
-        barras += (f'<rect x="{cx - barra_larg - 1:.1f}" y="{y_plan:.1f}" width="{barra_larg:.1f}" '
-                  f'height="{(PAD_CIMA + area_alt - y_plan):.1f}" class="cs-rd-barra-plan"/>')
-        if real is not None:
-            y_real = y(real)
-            barras += (f'<rect x="{cx + 1:.1f}" y="{y_real:.1f}" width="{barra_larg:.1f}" '
-                      f'height="{(PAD_CIMA + area_alt - y_real):.1f}" class="cs-rd-barra-real"/>')
-        rotulos += f'<text x="{cx:.1f}" y="{ALT-10}" text-anchor="middle" class="cs-rd-rotulo-x">S{s}</text>'
+        x0 = cx - barra_larg / 2
+        if l["futuro"]:
+            # Empilha de baixo pra cima: prioritário na base (o prazo mais
+            # curto, o que manda no ritmo), não prioritário em cima.
+            topo = base_y
+            for chave, classe in (("plan_prio", "cs-rd-barra-prio"),
+                                  ("plan_nprio", "cs-rd-barra-nprio")):
+                v = l[chave] or 0.0
+                if v <= 0:
+                    continue
+                alt = base_y - y(v)
+                topo -= alt
+                barras += (f'<rect x="{x0:.1f}" y="{topo:.1f}" width="{barra_larg:.1f}" '
+                           f'height="{alt:.1f}" class="{classe}"/>')
+        elif l["real_total"] is not None:
+            yr = y(l["real_total"])
+            barras += (f'<rect x="{x0:.1f}" y="{yr:.1f}" width="{barra_larg:.1f}" '
+                       f'height="{(base_y - yr):.1f}" class="cs-rd-barra-real"/>')
+        rotulos += (f'<text x="{cx:.1f}" y="{ALT-10}" text-anchor="middle" '
+                    f'class="cs-rd-rotulo-x">S{s}</text>')
 
-    hoje_marca = ""
-    if x_atual in janela:
-        hx = PAD_ESQ + grupo_larg * (janela.index(x_atual) + 0.5)
-        hoje_marca = (
-            f'<line x1="{hx:.1f}" y1="{PAD_CIMA}" x2="{hx:.1f}" y2="{PAD_CIMA+area_alt}" class="cs-rd-hoje-linha"/>'
-            f'<text x="{hx:.1f}" y="{PAD_CIMA-6}" text-anchor="middle" class="cs-rd-hoje-rotulo">Hoje</text>')
+    marca = ""
+    if atual in janela:
+        hx = PAD_ESQ + grupo_larg * janela.index(atual)
+        marca = (f'<line x1="{hx:.1f}" y1="{PAD_CIMA}" x2="{hx:.1f}" y2="{base_y}" '
+                 f'class="cs-rd-hoje-linha"/>'
+                 f'<text x="{hx:.1f}" y="{PAD_CIMA-7}" text-anchor="middle" '
+                 f'class="cs-rd-hoje-rotulo">Hoje</text>')
 
     return (f'<svg viewBox="0 0 {LARG} {ALT}" class="cs-rd-svg" role="img" '
-           f'aria-label="Planejado e realizado por semana">'
-           f'{linhas_grade}{barras}{hoje_marca}{rotulos}</svg>')
+            f'aria-label="Realizado e plano ponderado por semana">'
+            f'{linhas_grade}{barras}{marca}{rotulos}</svg>')
 
 
-def _curva_s_programacao_bloco(c: dict, escolha: str, chave: str,
-                               real_base: dict[int, tuple[float | None, float | None]]) -> None:
-    """Aba Programação de uma curva: os três cartões (semana passada,
-    atual, seguinte), o gráfico de barras da janela operacional e a
-    tabela completa planejado x realizado semana a semana. Pedido do
-    Daniel, 2026-09-09: o rundown que ele montava a mão no Excel
-    concentrava a montagem em poucas semanas ("antecipar"); aqui o plano
-    vem do mesmo modelo smootherstep já usado na Curva S (distribui até o
-    prazo, sem picos) -- é só quantidade por semana, não TAG por TAG."""
-    if c["real_atual"] is None:
-        render_html(
-            '<div class="gplan-panel"><div class="cs-vazio">Nenhuma semana de Real '
-            'informada ainda -- sem isso não há como calcular a Programação.</div></div>')
+def _rd_saldo_svg(dados: dict) -> str:
+    """O rundown propriamente dito: o saldo a montar descendo até zero. A
+    linha cheia é o que já aconteceu (total menos realizado, semana a
+    semana); a tracejada é o saldo caindo pelo plano ponderado, e cada barra
+    vertical vermelha é uma data limite -- a linha tem que chegar em zero
+    antes da segunda barra, senão o prazo não fecha."""
+    linhas = [l for l in dados["linhas"] if l["saldo_total"] is not None]
+    if len(linhas) < 2:
+        return '<div class="cs-vazio">Sem dado suficiente para a curva de saldo.</div>'
+    atual = dados["semana_atual"]
+    x_min, x_max = linhas[0]["semana"], linhas[-1]["semana"]
+    y_max = max(l["saldo_total"] for l in linhas) * 1.08 or 1.0
+
+    LARG, ALT = 920, 300
+    PAD_ESQ, PAD_DIR, PAD_CIMA, PAD_BAIXO = 48, 20, 26, 32
+    area_larg, area_alt = LARG - PAD_ESQ - PAD_DIR, ALT - PAD_CIMA - PAD_BAIXO
+
+    def x(s: float) -> float:
+        if x_max == x_min:
+            return float(PAD_ESQ)
+        return PAD_ESQ + (s - x_min) / (x_max - x_min) * area_larg
+
+    def y(v: float) -> float:
+        return PAD_CIMA + area_alt - (v / y_max) * area_alt
+
+    grade = ""
+    for i in range(5):
+        frac = i / 4
+        yy = PAD_CIMA + area_alt - frac * area_alt
+        grade += (f'<line x1="{PAD_ESQ}" y1="{yy:.1f}" x2="{LARG-PAD_DIR}" y2="{yy:.1f}" '
+                  f'class="cs-grade"/>'
+                  f'<text x="{PAD_ESQ-8}" y="{yy+4:.1f}" text-anchor="end" '
+                  f'class="cs-rotulo-y">{br_num(round(frac * y_max))}</text>')
+
+    def caminho(pontos):
+        return " ".join(f"{'M' if i == 0 else 'L'}{x(s):.1f},{y(v):.1f}"
+                        for i, (s, v) in enumerate(pontos))
+
+    feito = [(l["semana"], l["saldo_total"]) for l in linhas if not l["futuro"]]
+    plano = [(l["semana"], l["saldo_total"]) for l in linhas if l["futuro"]]
+    if feito and plano:
+        plano = [feito[-1]] + plano
+
+    series = ""
+    if len(feito) > 1:
+        series += f'<path d="{caminho(feito)}" class="cs-linha cs-real"/>'
+    if len(plano) > 1:
+        series += f'<path d="{caminho(plano)}" class="cs-linha cs-tendencia"/>'
+
+    marcas = ""
+    for b in dados["blocos"]:
+        if b["x_prazo"] is None or not (x_min <= b["x_prazo"] <= x_max):
+            continue
+        px = x(b["x_prazo"])
+        marcas += (f'<line x1="{px:.1f}" y1="{PAD_CIMA}" x2="{px:.1f}" '
+                   f'y2="{PAD_CIMA+area_alt}" class="cs-prazo-linha"/>'
+                   f'<text x="{px:.1f}" y="{PAD_CIMA-9}" text-anchor="middle" '
+                   f'class="cs-prazo-rotulo">{esc(b["prazo"].strftime("%d/%m/%y"))}</text>')
+    if atual is not None and x_min <= atual <= x_max:
+        hx = x(atual)
+        marcas += (f'<line x1="{hx:.1f}" y1="{PAD_CIMA}" x2="{hx:.1f}" '
+                   f'y2="{PAD_CIMA+area_alt}" class="cs-hoje-linha"/>')
+
+    rotulos_x = ""
+    n_col = 7
+    passo = (x_max - x_min) / n_col if x_max != x_min else 1
+    for i in range(n_col + 1):
+        xv = x_min + i * passo
+        rotulos_x += (f'<text x="{x(xv):.1f}" y="{ALT-10}" text-anchor="middle" '
+                      f'class="cs-rotulo-x">S{round(xv)}</text>')
+
+    return (f'<svg viewBox="0 0 {LARG} {ALT}" class="cs-svg" role="img" '
+            f'aria-label="Saldo a montar por semana">'
+            f'{grade}{series}{marcas}{rotulos_x}</svg>')
+
+
+def _rd_comparacao(dados: dict) -> str:
+    """A frase que explica o resultado da ponderação -- quanto o pico caiu
+    em relação ao plano manual e, principalmente, POR QUE ele não cai mais:
+    a data limite dos prioritários é o gargalo, não a forma da distribuição.
+    Sem isso a tela mostraria um número alto sem dizer de onde ele vem."""
+    por_chave = {b["chave"]: b for b in dados["blocos"]}
+    prio, nprio = por_chave.get("prioritario"), por_chave.get("nao_prioritario")
+    if not prio or not nprio:
+        return ""
+
+    partes = []
+    if dados["tem_manual"] and dados["pico_manual"]:
+        partes.append(
+            f'O rundown manual chegava a pedir <b>{br_num(round(dados["pico_manual"]))}'
+            f'/semana</b> em semanas isoladas, porque antecipava a montagem. '
+            f'Diluído até as datas limite, o pico cai para '
+            f'<b>{br_num(round(dados["pico"]))}/semana</b>.')
+
+    if prio["ritmo"] and prio["prazo"]:
+        partes.append(
+            f'O que segura esse número é o prazo dos prioritários: '
+            f'<b>{br_num(round(prio["saldo"]))}</b> a montar em '
+            f'<b>{br_num(round(prio["semanas"]))} semanas</b> até '
+            f'{prio["prazo"].strftime("%d/%m/%Y")} já exigem '
+            f'<b>{br_num(round(prio["ritmo"]))}/semana</b> sozinhos -- '
+            f'espalhar mais só é possível esticando essa data.')
+    if nprio["ritmo"] and nprio["prazo"]:
+        partes.append(
+            f'Os não prioritários é que ganham folga: <b>{br_num(round(nprio["saldo"]))}</b> '
+            f'em <b>{br_num(round(nprio["semanas"]))} semanas</b> até '
+            f'{nprio["prazo"].strftime("%d/%m/%Y")} são '
+            f'<b>{br_num(round(nprio["ritmo"]))}/semana</b>, e depois de '
+            f'{prio["prazo"].strftime("%d/%m/%Y")} sobram só eles.')
+
+    return f'<div class="cs-comparacao">{" ".join(partes)}</div>' if partes else ""
+
+
+def _rd_programacao(tags: pd.DataFrame, cache_key: str) -> None:
+    """Aba Programação: o rundown ponderado pelas datas limite. Substitui o
+    plano manual do Excel -- mesmos quantitativos (executado, previsto,
+    total), distribuição outra: cada bloco dilui o seu saldo até o SEU
+    prazo, em vez de antecipar a montagem em picos."""
+    dados = rundown_dados(tags, cache_key)
+    if not dados["blocos"] or not dados["linhas"]:
+        render_html('<div class="gplan-panel"><div class="cs-vazio">Sem TAGs '
+                    'suficientes na 01_BASE_TAGS para montar a Programação.'
+                    '</div></div>')
         return
-    semanal = _curva_s_semanal(c, real_base, escolha == "Prioritários")
-    if not semanal:
-        render_html(
-            '<div class="gplan-panel"><div class="cs-vazio">Sem previsto suficiente '
-            'para montar a Programação.</div></div>')
-        return
 
-    menu_prog = menu_exportar(f"expmenu_prog_{chave}")
+    menu_prog = menu_exportar("expmenu_rundown")
+    render_html(_rd_cartoes_blocos(dados))
+    render_html(_rd_comparacao(dados))
+    render_html(_rd_kpi3(dados))
 
-    render_html(_curva_s_kpi3_programacao(c, semanal))
-
-    svg = _curva_s_rundown_svg(semanal, c["x_atual"])
     render_html(f"""
       <div class="gplan-panel cs-painel">
+        <div class="gplan-panel-title">Realizado e plano ponderado, semana a semana</div>
         <div class="cs-rd-legenda">
-          <span class="plan"><span class="marca"></span>Planejado</span>
           <span class="real"><span class="marca"></span>Realizado</span>
+          <span class="prio"><span class="marca"></span>Plano · prioritários</span>
+          <span class="nprio"><span class="marca"></span>Plano · não prioritários</span>
         </div>
-        {svg}
+        {_rd_barras_svg(dados)}
       </div>""")
 
-    corpo = ""
-    for l in semanal:
-        plan_txt = br_num(round(l["planejado_sem"])) if l["planejado_sem"] is not None else "—"
-        real_txt = br_num(round(l["realizado_sem"])) if l["realizado_sem"] is not None else "—"
-        saldo_txt = br_num(round(l["saldo_previsto"])) if l["saldo_previsto"] is not None else "—"
-        pct = (l["previsto_acum"] / c["total"] * 100) if (l["previsto_acum"] is not None and c["total"]) else None
-        pct_html = "—"
-        if pct is not None:
-            pct_html = ('<div class="pctwrap"><div class="pctbar">'
-                       f'<i style="width:{min(pct, 100):.1f}%"></i></div>'
-                       f'<span class="pctval">{br_pct(pct, 0)}</span></div>')
-        destaque = ' style="font-weight:800"' if l["semana"] == c["x_atual"] else ""
-        corpo += (
-            f'<tr{destaque}><td class="rotulo">Semana {l["semana"]}</td>'
-            f'<td>{plan_txt}</td><td>{real_txt}</td><td>{saldo_txt}</td><td>{pct_html}</td></tr>')
+    render_html(f"""
+      <div class="gplan-panel cs-painel">
+        <div class="gplan-panel-title">Saldo a montar (rundown)</div>
+        <div class="cs-legenda">
+          <span class="real"><span class="marca"></span>Saldo realizado</span>
+          <span class="tendencia"><span class="marca"></span>Saldo pelo plano ponderado</span>
+          <span class="prazo"><span class="marca"></span>Datas limite</span>
+        </div>
+        {_rd_saldo_svg(dados)}
+      </div>""")
 
+    atual = dados["semana_atual"]
+    corpo = ""
+    for l in dados["linhas"]:
+        def cel(v, classe=""):
+            return (f'<td class="{classe}">{br_num(round(v))}</td>'
+                    if v is not None else f'<td class="{classe}">—</td>')
+        destaque = ' class="agora"' if l["semana"] == atual else ""
+        corpo += (f'<tr{destaque}><td class="rotulo">Semana {l["semana"]}</td>'
+                  + cel(l["real_total"], "num verde")
+                  + cel(l["plan_prio"], "num")
+                  + cel(l["plan_nprio"], "num")
+                  + cel(l["plan_total"], "num forte")
+                  + cel(l["saldo_total"], "num")
+                  + (cel(l["manual_proj"] if l["manual_proj"] is not None
+                         else l["manual_plan"], "num cinza")
+                     if dados["tem_manual"] else "")
+                  + '</tr>')
+
+    col_manual = ('<th>Plano manual<br><span class="sub">Excel</span></th>'
+                  if dados["tem_manual"] else "")
     render_html(
-        '<div class="gplan-panel ct-painel"><div class="gplan-panel-title">Programação semanal'
-        f'<span class="gtbl-muted" style="font-weight:500">{br_num(len(semanal))} semanas'
-        '</span></div><div class="ct-rolo cs-tabela-wrap">'
-        '<table class="cs-tabela"><thead><tr><th>Semana</th><th>Planejado</th>'
-        '<th>Realizado</th><th>Saldo a montar</th><th>% concluído (previsto)</th></tr></thead>'
-        f'<tbody>{corpo}</tbody></table></div></div>')
+        '<div class="gplan-panel ct-painel"><div class="gplan-panel-title">'
+        'Programação semanal<span class="gtbl-muted" style="font-weight:500">'
+        f'{br_num(len(dados["linhas"]))} semanas</span></div>'
+        '<div class="ct-rolo cs-tabela-wrap"><table class="cs-tabela rd-tabela">'
+        '<thead><tr><th>Semana</th><th>Realizado</th><th>Plano<br>'
+        '<span class="sub">prioritários</span></th><th>Plano<br>'
+        '<span class="sub">não prioritários</span></th><th>Plano<br>'
+        '<span class="sub">total</span></th><th>Saldo a montar</th>'
+        f'{col_manual}</tr></thead><tbody>{corpo}</tbody></table></div></div>')
 
     exportar = pd.DataFrame([{
         "SEMANA": f'Semana {l["semana"]}',
-        "PLANEJADO_SEMANA": l["planejado_sem"],
-        "REALIZADO_SEMANA": l["realizado_sem"],
-        "SALDO_A_MONTAR": l["saldo_previsto"],
-    } for l in semanal])
+        "REALIZADO_SEMANA": l["real_total"],
+        "PLANO_PRIORITARIOS": l["plan_prio"],
+        "PLANO_NAO_PRIORITARIOS": l["plan_nprio"],
+        "PLANO_TOTAL": l["plan_total"],
+        "SALDO_A_MONTAR": l["saldo_total"],
+        "PLANO_MANUAL_EXCEL": (l["manual_proj"] if l["manual_proj"] is not None
+                               else l["manual_plan"]),
+    } for l in dados["linhas"]])
     with menu_prog:
         st.download_button(
-            f"Exportar Programação — {escolha}",
+            "Exportar Programação (rundown ponderado)",
             exportar.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
-            file_name=f'programacao_rundown_{chave}.csv', mime="text/csv",
-            key=f"programacao_csv_{chave}", icon=":material/download:",
+            file_name="programacao_rundown_ponderado.csv", mime="text/csv",
+            key="rundown_ponderado_csv", icon=":material/download:",
             type="tertiary", use_container_width=True)
 
 
@@ -14176,9 +14634,9 @@ def render_curva_s(tags: pd.DataFrame, cache_key: str = ""):
     dados dela permitem (ver CURVA_S_PRAZO e curva_s_montar) -- Visão Geral
     traz as duas empilhadas (cartões, gráfico com painel de resumo ao lado,
     tabela semanal); Comparativo cruza as duas numa tabela só; Programação
-    fatia a mesma curva em quantidade por semana (planejado x realizado),
-    pedido do Daniel pra substituir o rundown manual dele -- ver
-    _curva_s_programacao_bloco.
+    é o rundown de verdade -- quantidade por semana com o saldo ponderado
+    pela data limite de cada bloco, no lugar do rundown manual em Excel do
+    Daniel (ver rundown_dados e _rd_programacao).
 
     Sem prazo contratual para aquela curva, a projeção de término aparece em
     "Semana NN" (a numeração própria do cronograma do projeto) -- inventar
@@ -14187,7 +14645,7 @@ def render_curva_s(tags: pd.DataFrame, cache_key: str = ""):
     """
     render_header("Rundown")
     dados = curva_s_dados(tags, cache_key)
-    geral, prio, real_base = dados["geral"], dados["prioritario"], dados["real_base"]
+    geral, prio = dados["geral"], dados["prioritario"]
 
     if not geral["total"]:
         render_html(
@@ -14205,13 +14663,7 @@ def render_curva_s(tags: pd.DataFrame, cache_key: str = ""):
     with aba_comparativo:
         _curva_s_comparativo(geral, prio)
     with aba_programacao:
-        escolha_prog = st.segmented_control(
-            "Curva", ["Geral", "Prioritários"], default="Geral",
-            key="curva_s_prog_escolha", label_visibility="collapsed") or "Geral"
-        if escolha_prog == "Prioritários":
-            _curva_s_programacao_bloco(prio, "Prioritários", "prioritarios", real_base)
-        else:
-            _curva_s_programacao_bloco(geral, "Geral", "geral", real_base)
+        _rd_programacao(tags, cache_key)
 
 
 def render_perfil_lateral():
@@ -14614,7 +15066,7 @@ def main():
                            lambda: render_avanco_fisico(
                                tags, resumo, esperados, lancamento, depara,
                                sigem, cache_key)),
-        title="Avanço Físico", icon=":material/trending_up:",
+        title="Avanço", icon=":material/trending_up:",
         url_path="avanco-fisico")
     curva_s_page = st.Page(
         lambda: _sob_carga("Calculando avanço de montagem por semana",

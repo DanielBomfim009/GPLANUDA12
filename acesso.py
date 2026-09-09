@@ -50,7 +50,7 @@ PERMISSOES = {
     "ver_gitec": "Ver a aba Gitec (medição de campo)",
     "ver_certificacao": "Ver a aba Certificação",
     "ver_planta": "Ver a aba Planta",
-    "ver_avanco_fisico": "Ver a aba Avanço Físico",
+    "ver_avanco_fisico": "Ver a aba Avanço",
     "ver_previsao_medicao": "Ver a aba Previsão Medição",
     "ver_curva_s": "Ver a aba Rundown",
     "ver_valores": "Ver valores em reais",
