@@ -13291,7 +13291,7 @@ def rundown_config(cache_key: str) -> dict:
         "rampa_ini": RUNDOWN_RAMPA_INI, "rampa_fim": RUNDOWN_RAMPA_FIM,
         "piso": RUNDOWN_PISO_FIM, "janela": RUNDOWN_JANELA_BARRAS,
         "cal_semana": {}, "cal_util": {}, "cal_inicio": {},
-        "origem": "código", "feriados": [],
+        "origem": "código", "feriados": [], "curva": {},
     }
     fonte = _fonte_planilha()
     if fonte is None:
@@ -13332,6 +13332,30 @@ def rundown_config(cache_key: str) -> dict:
     cfg["rampa_fim"] = min(max(numero("RAMPA_FIM", RUNDOWN_RAMPA_FIM), 0.0), 0.5)
     cfg["piso"] = min(max(numero("PISO_FIM", RUNDOWN_PISO_FIM), 0.0), 1.0)
     cfg["janela"] = int(max(numero("JANELA_BARRAS", RUNDOWN_JANELA_BARRAS), 1))
+
+    # Curva preenchida a mão: o que o usuário escrever manda no lugar do
+    # cálculo, semana a semana. É o mesmo preenchimento que ele fazia na
+    # planilha "Distribuição de Quantidades" -- célula vazia continua
+    # calculada, célula com número vira o valor da série.
+    try:
+        curva = pd.read_excel(fonte, sheet_name="10_BASE_RUNDOWN_CURVA")
+    except Exception:
+        curva = pd.DataFrame()
+    if not curva.empty and "SEMANA" in curva.columns:
+        for r in curva.to_dict("records"):
+            semana = _semana_num(r.get("SEMANA"))
+            if semana is None:
+                continue
+            entrada = {}
+            for coluna, chave in (("PREVISTO_GERAL", ("geral", "previsto")),
+                                  ("TENDENCIA_GERAL", ("geral", "tendencia")),
+                                  ("PREVISTO_PRIO", ("prioritario", "previsto")),
+                                  ("TENDENCIA_PRIO", ("prioritario", "tendencia"))):
+                v = r.get(coluna)
+                if v is not None and not pd.isna(v):
+                    entrada[chave] = cert_num(v)
+            if entrada:
+                cfg["curva"][semana] = entrada
 
     try:
         cal = pd.read_excel(fonte, sheet_name="10_BASE_RUNDOWN_CAL")
@@ -13490,6 +13514,26 @@ def _rd_curva(saldo: float, dias_uteis: list[int], prod_dia: float,
     return saida
 
 
+def _rd_manual(serie: dict[int, float], cfg: dict, fase: str,
+               qual: str) -> dict[int, float]:
+    """Aplica por cima de uma série calculada o que o usuário digitou na aba
+    CURVA da planilha de configuração.
+
+    Semana sem valor na planilha continua com o número que o app calculou;
+    semana com valor passa a valer o dele. É o que devolve o controle do
+    primeiro preenchimento -- e de qualquer ajuste fino depois -- para quem
+    conhece a obra, sem obrigar a preencher a planilha inteira.
+    """
+    if not cfg.get("curva"):
+        return serie
+    saida = dict(serie)
+    for semana, valores in cfg["curva"].items():
+        v = valores.get((fase, qual))
+        if v is not None and semana in saida:
+            saida[semana] = v
+    return saida
+
+
 def _rd_fase(tags: pd.DataFrame, chave: str, rotulo: str, prod: dict,
              cfg: dict) -> dict:
     """Uma fase inteira, em três séries que não se confundem:
@@ -13533,6 +13577,7 @@ def _rd_fase(tags: pd.DataFrame, chave: str, rotulo: str, prod: dict,
                       for s in semanas_previsto]
     previsto_sem = dict(zip(semanas_previsto,
                             _rd_curva(total, uteis_previsto, 0.0, cfg)))
+    previsto_sem = _rd_manual(previsto_sem, cfg, chave, "previsto")
 
     # ---------------- TENDÊNCIA: o replanejamento ----------------
     # Parte do saldo de HOJE e fecha esse saldo até a MESMA data limite --
@@ -13561,7 +13606,8 @@ def _rd_fase(tags: pd.DataFrame, chave: str, rotulo: str, prod: dict,
         dias_por_semana = [max(_rd_dias_uteis_semana(semana_atual, cfg, desde=hoje), 1)]
         dias_uteis = dias_por_semana[0]
     valores = _rd_curva(saldo, dias_por_semana, media_dia, cfg)
-    tendencia_sem = dict(zip(semanas_futuras, valores))
+    tendencia_sem = _rd_manual(dict(zip(semanas_futuras, valores)), cfg, chave, "tendencia")
+    valores = [tendencia_sem[s] for s in semanas_futuras if s in tendencia_sem]
     uteis = dict(zip(semanas_futuras, dias_por_semana))
 
     # ---------------- as linhas, semana a semana ----------------
