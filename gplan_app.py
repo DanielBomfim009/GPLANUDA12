@@ -9,7 +9,7 @@ import re
 import time
 import unicodedata
 from contextlib import contextmanager
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from urllib.parse import quote
 
 import numpy as np
@@ -445,6 +445,35 @@ def carregar_suprimentos(excel_file: pd.ExcelFile) -> tuple[pd.DataFrame, pd.Dat
         estoque.columns = [str(c).strip() for c in estoque.columns]
 
     return itens, estoque
+
+
+def _fonte_planilha():
+    """A planilha consolidada como algo que o pandas abre -- bytes do
+    Supabase ou o caminho local --, ou None quando não há nenhuma das duas.
+
+    Existe pra quem só precisa de UMA aba (a configuração do rundown, por
+    exemplo) não repetir a escolha de fonte do load_data. Diferente dele,
+    não interrompe a página quando falta: devolve None e quem chamou decide
+    o que fazer, porque uma aba de configuração ausente não é motivo pra
+    derrubar a tela inteira.
+    """
+    client = get_supabase_client()
+    if client is not None:
+        try:
+            return io.BytesIO(client.storage.from_(SUPABASE_BUCKET)
+                              .download(SUPABASE_FILE_PATH))
+        except Exception:
+            return None
+    if not os.path.exists(LOCAL_EXCEL_FALLBACK):
+        return None
+    for tentativa in range(3):
+        try:
+            with open(LOCAL_EXCEL_FALLBACK, "rb") as f:
+                return io.BytesIO(f.read())
+        except PermissionError:
+            if tentativa < 2:
+                time.sleep(1.0)
+    return None
 
 
 @st.cache_data(show_spinner="Carregando planilha...")
@@ -13126,6 +13155,12 @@ def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
 # semanas fechar exatamente o saldo dentro do prazo.
 # =====================================================================
 
+# Os valores abaixo são o PADRÃO: valem enquanto a aba 10_BASE_RUNDOWN não
+# existir no workbook. Quando ela existe, quem manda é a planilha
+# (10_BASE_RUNDOWN.xlsx, aba PARAMETROS) -- ver rundown_config. Assim o
+# usuário muda prazo, âncora ou formato da curva sem tocar no código, e o
+# app continua abrindo antes da primeira atualização das bases.
+
 # Data limite de cada fase. Vem do usuário -- nenhuma base do pipeline
 # guarda prazo contratual.
 RUNDOWN_PRAZO: dict[str, date] = {
@@ -13157,33 +13192,52 @@ RUNDOWN_JANELA_BARRAS = 10
 RUNDOWN_FASES = (("geral", "Geral"), ("prioritario", "Prioritários"))
 
 
-def _rd_inicio_semana(s: int) -> date:
+def _rd_inicio_semana(s: int, cfg: dict) -> date:
     """Segunda-feira em que a semana NN do cronograma começa."""
-    base_semana, base_data = RUNDOWN_ANCORA
+    inicio = cfg["cal_inicio"].get(s)
+    if inicio is not None:
+        return inicio
+    base_semana, base_data = cfg["ancora"]
     return base_data + timedelta(weeks=s - base_semana)
 
 
-def _rd_semana_da_data(d: date) -> int:
+def _rd_semana_da_data(d: date, cfg: dict) -> int:
     """Semana do cronograma em que uma data cai."""
-    base_semana, base_data = RUNDOWN_ANCORA
+    semana = cfg["cal_semana"].get(d)
+    if semana is not None:
+        return semana
+    base_semana, base_data = cfg["ancora"]
     return base_semana + (d - base_data).days // 7
 
 
-def _rd_dias_uteis_semana(s: int, desde: date | None = None,
+def _rd_e_dia_util(d: date, cfg: dict) -> bool:
+    """Se o dia conta como trabalhado.
+
+    A planilha manda: é lá que o usuário marca carnaval, ponto facultativo,
+    feriado municipal ou parada programada, coisas que não dá pra derivar de
+    lei federal. Fora do período que a planilha cobre, cai no cálculo dos
+    feriados nacionais.
+    """
+    marcado = cfg["cal_util"].get(d)
+    if marcado is not None:
+        return marcado
+    return _e_dia_util(d)
+
+
+def _rd_dias_uteis_semana(s: int, cfg: dict, desde: date | None = None,
                           ate: date | None = None) -> int:
-    """Dias úteis de uma semana do cronograma -- fim de semana e feriado
-    nacional fora.
+    """Dias úteis de uma semana do cronograma.
 
     `desde` e `ate` recortam a semana: a semana em curso só conta de hoje
     pra frente, e a semana do prazo só conta até a data limite. Sem esse
     recorte as duas pontas do horizonte receberiam trabalho em dia que já
     passou ou que está depois do prazo.
     """
-    inicio = _rd_inicio_semana(s)
+    inicio = _rd_inicio_semana(s, cfg)
     dias = 0
     for i in range(7):
         d = inicio + timedelta(days=i)
-        if not _e_dia_util(d):
+        if not _rd_e_dia_util(d, cfg):
             continue
         if desde is not None and d < desde:
             continue
@@ -13191,6 +13245,112 @@ def _rd_dias_uteis_semana(s: int, desde: date | None = None,
             continue
         dias += 1
     return dias
+
+
+def _rd_data_br(texto: object) -> date | None:
+    """dd/mm/aaaa da planilha -> date. Aceita o que o Excel devolve como
+    datetime também, que é o caso quando a célula foi formatada como data."""
+    if isinstance(texto, datetime):
+        return texto.date()
+    if isinstance(texto, date):
+        return texto
+    txt = str(texto or "").strip()
+    if not txt:
+        return None
+    for formato in ("%d/%m/%Y", "%Y-%m-%d", "%d/%m/%y"):
+        try:
+            return datetime.strptime(txt[:10], formato).date()
+        except ValueError:
+            continue
+    return None
+
+
+@st.cache_data(show_spinner=False, max_entries=2)
+def rundown_config(cache_key: str) -> dict:
+    """Configuração do rundown: o que vem da planilha do usuário
+    (10_BASE_RUNDOWN.xlsx, virou as abas 10_BASE_RUNDOWN e
+    10_BASE_RUNDOWN_CAL no workbook) por cima do padrão do código.
+
+    Enquanto a planilha não passar pelo pipeline as abas não existem, e aí
+    vale só o padrão -- a tela abre igual, sem erro, com os mesmos números
+    de antes. É por isso que cada leitura aqui tem um valor de reserva em
+    vez de estourar quando falta.
+
+    O CALENDÁRIO é o que dá mais poder ao usuário: é dele que sai quantos
+    dias úteis cada semana tem, e é o peso que reparte o previsto. Marcar
+    dois dias de carnaval como não úteis derruba o previsto daquela semana
+    sozinho, sem tocar em código.
+    """
+    padrao = {
+        "prazos": dict(RUNDOWN_PRAZO), "ancora": RUNDOWN_ANCORA,
+        "rampa_ini": RUNDOWN_RAMPA_INI, "rampa_fim": RUNDOWN_RAMPA_FIM,
+        "piso": RUNDOWN_PISO_FIM, "janela": RUNDOWN_JANELA_BARRAS,
+        "cal_semana": {}, "cal_util": {}, "cal_inicio": {},
+        "origem": "código", "feriados": [],
+    }
+    fonte = _fonte_planilha()
+    if fonte is None:
+        return padrao
+
+    try:
+        parametros = pd.read_excel(fonte, sheet_name="10_BASE_RUNDOWN")
+    except Exception:
+        return padrao
+    valores = {}
+    if not parametros.empty and "PARAMETRO" in parametros.columns:
+        for r in parametros.to_dict("records"):
+            nome = str(r.get("PARAMETRO") or "").strip().upper()
+            if nome:
+                valores[nome] = r.get("VALOR")
+
+    def numero(nome, reserva):
+        try:
+            v = float(str(valores.get(nome, "")).replace(",", "."))
+        except (TypeError, ValueError):
+            return reserva
+        return v if v == v else reserva
+
+    cfg = dict(padrao)
+    cfg["origem"] = "planilha" if valores else "código"
+    for chave, fase in (("PRAZO_GERAL", "geral"), ("PRAZO_PRIORITARIO", "prioritario")):
+        d = _rd_data_br(valores.get(chave))
+        if d is not None:
+            cfg["prazos"][fase] = d
+    ancora_data = _rd_data_br(valores.get("ANCORA_DATA"))
+    ancora_semana = numero("ANCORA_SEMANA", None)
+    if ancora_data is not None and ancora_semana:
+        # a âncora tem que ser a SEGUNDA da semana; se vier um dia do meio
+        # dela, recua sozinho em vez de deslocar a numeração inteira
+        cfg["ancora"] = (int(ancora_semana),
+                         ancora_data - timedelta(days=ancora_data.weekday()))
+    cfg["rampa_ini"] = min(max(numero("RAMPA_INICIO", RUNDOWN_RAMPA_INI), 0.0), 0.5)
+    cfg["rampa_fim"] = min(max(numero("RAMPA_FIM", RUNDOWN_RAMPA_FIM), 0.0), 0.5)
+    cfg["piso"] = min(max(numero("PISO_FIM", RUNDOWN_PISO_FIM), 0.0), 1.0)
+    cfg["janela"] = int(max(numero("JANELA_BARRAS", RUNDOWN_JANELA_BARRAS), 1))
+
+    try:
+        cal = pd.read_excel(fonte, sheet_name="10_BASE_RUNDOWN_CAL")
+    except Exception:
+        return cfg
+    if cal.empty or "DATA" not in cal.columns:
+        return cfg
+    for r in cal.to_dict("records"):
+        d = _rd_data_br(r.get("DATA"))
+        if d is None:
+            continue
+        semana = _semana_num(r.get("SEMANA"))
+        if semana is not None:
+            cfg["cal_semana"][d] = semana
+            anterior = cfg["cal_inicio"].get(semana)
+            if anterior is None or d < anterior:
+                cfg["cal_inicio"][semana] = d
+        util = str(r.get("DIA_UTIL") or "").strip().lower()
+        if util:
+            cfg["cal_util"][d] = util.startswith("s")
+        feriado = str(r.get("FERIADO") or "").strip()
+        if feriado and feriado.lower() != "nan":
+            cfg["feriados"].append((d, feriado))
+    return cfg
 
 
 def _rd_universo(tags: pd.DataFrame, so_prioritarias: bool) -> pd.DataFrame:
@@ -13228,7 +13388,7 @@ def _rd_historico(base: pd.DataFrame) -> dict[int, dict[str, int]]:
     return saida
 
 
-def _rd_produtividade(tags: pd.DataFrame, semana_atual: int) -> dict:
+def _rd_produtividade(tags: pd.DataFrame, semana_atual: int, cfg: dict) -> dict:
     """O que a obra vem entregando, medido no universo completo (misturando
     prioritário e não prioritário).
 
@@ -13247,7 +13407,7 @@ def _rd_produtividade(tags: pd.DataFrame, semana_atual: int) -> dict:
     montado = sum(v["montado"] for v in passado.values())
     programado = sum(v["programado"] for v in passado.values())
     decorridas = max(semana_atual - s_min, 1)
-    dias = sum(_rd_dias_uteis_semana(s) for s in range(s_min, semana_atual)) or 1
+    dias = sum(_rd_dias_uteis_semana(s, cfg) for s in range(s_min, semana_atual)) or 1
     ult4 = sum(v["montado"] for s, v in passado.items() if s >= semana_atual - 4)
     return {
         "media": montado / decorridas,
@@ -13260,7 +13420,8 @@ def _rd_produtividade(tags: pd.DataFrame, semana_atual: int) -> dict:
     }
 
 
-def _rd_curva(saldo: float, dias_uteis: list[int], prod_dia: float) -> list[float]:
+def _rd_curva(saldo: float, dias_uteis: list[int], prod_dia: float,
+              cfg: dict) -> list[float]:
     """Reparte o saldo pelas semanas do horizonte como CURVA, não como
     número fixo repetido.
 
@@ -13290,7 +13451,7 @@ def _rd_curva(saldo: float, dias_uteis: list[int], prod_dia: float) -> list[floa
 
     exigido_dia = saldo / uteis_total
     inicio = 0.15 if not exigido_dia else min(max((prod_dia or 0.0) / exigido_dia, 0.10), 1.0)
-    a, b = RUNDOWN_RAMPA_INI, RUNDOWN_RAMPA_FIM
+    a, b = cfg["rampa_ini"], cfg["rampa_fim"]
 
     pesos = []
     for i, du in enumerate(dias_uteis):
@@ -13298,7 +13459,7 @@ def _rd_curva(saldo: float, dias_uteis: list[int], prod_dia: float) -> list[floa
         if a > 0 and t < a:
             forma = inicio + (1.0 - inicio) * _smootherstep(t / a)
         elif b > 0 and t > 1 - b:
-            forma = 1.0 - (1.0 - RUNDOWN_PISO_FIM) * _smootherstep((t - (1 - b)) / b)
+            forma = 1.0 - (1.0 - cfg["piso"]) * _smootherstep((t - (1 - b)) / b)
         else:
             # O trecho de cruzeiro leva um domo de 5% em vez de ser reto:
             # uma dezena de semanas com exatamente o MESMO número não
@@ -13324,13 +13485,14 @@ def _rd_curva(saldo: float, dias_uteis: list[int], prod_dia: float) -> list[floa
     return saida
 
 
-def _rd_fase(tags: pd.DataFrame, chave: str, rotulo: str, prod: dict) -> dict:
+def _rd_fase(tags: pd.DataFrame, chave: str, rotulo: str, prod: dict,
+             cfg: dict) -> dict:
     """Uma fase inteira: universo, executado semana a semana, curva do que
     falta e os números derivados que a tela mostra."""
     hoje = date.today()
-    semana_atual = _rd_semana_da_data(hoje)
-    prazo = RUNDOWN_PRAZO[chave]
-    semana_prazo = max(_rd_semana_da_data(prazo), semana_atual)
+    semana_atual = _rd_semana_da_data(hoje, cfg)
+    prazo = cfg["prazos"][chave]
+    semana_prazo = max(_rd_semana_da_data(prazo, cfg), semana_atual)
 
     universo = _rd_universo(tags, chave == "prioritario")
     total = float(len(universo))
@@ -13343,11 +13505,11 @@ def _rd_fase(tags: pd.DataFrame, chave: str, rotulo: str, prod: dict) -> dict:
     # a semana em curso conta de hoje pra frente, a do prazo até a data.
     semanas_futuras = list(range(semana_atual, semana_prazo + 1))
     dias_por_semana = [
-        _rd_dias_uteis_semana(s, desde=hoje if s == semana_atual else None,
+        _rd_dias_uteis_semana(s, cfg, desde=hoje if s == semana_atual else None,
                               ate=prazo if s == semana_prazo else None)
         for s in semanas_futuras]
     dias_uteis = sum(dias_por_semana)
-    valores = _rd_curva(saldo, dias_por_semana, prod["media_dia"] or 0.0)
+    valores = _rd_curva(saldo, dias_por_semana, prod["media_dia"] or 0.0, cfg)
     previsto = dict(zip(semanas_futuras, valores))
     uteis = dict(zip(semanas_futuras, dias_por_semana))
 
@@ -13360,7 +13522,7 @@ def _rd_fase(tags: pd.DataFrame, chave: str, rotulo: str, prod: dict) -> dict:
         montado = float(h["montado"]) if h else None
         futuro = s >= semana_atual
         prev = previsto.get(s) if futuro else None
-        du = uteis.get(s) or _rd_dias_uteis_semana(s)
+        du = uteis.get(s) or _rd_dias_uteis_semana(s, cfg)
 
         if futuro:
             saldo_corrente = max(saldo_corrente - (prev or 0.0), 0.0)
@@ -13382,7 +13544,7 @@ def _rd_fase(tags: pd.DataFrame, chave: str, rotulo: str, prod: dict) -> dict:
 
         linhas.append({
             "semana": s, "futuro": futuro,
-            "data": _rd_inicio_semana(s), "dias_uteis": du,
+            "data": _rd_inicio_semana(s, cfg), "dias_uteis": du,
             "programado": programado, "montado": montado, "plano": plano,
             "acumulado": (acumulado_montado if not futuro else None),
             "acumulado_previsto": acum_prev,
@@ -13395,7 +13557,7 @@ def _rd_fase(tags: pd.DataFrame, chave: str, rotulo: str, prod: dict) -> dict:
 
     media = prod["media"] or 0.0
     semanas_no_ritmo = (saldo / media) if media > 0 else None
-    termino_no_ritmo = (_rd_inicio_semana(semana_atual + round(semanas_no_ritmo))
+    termino_no_ritmo = (_rd_inicio_semana(semana_atual + round(semanas_no_ritmo), cfg)
                         if semanas_no_ritmo is not None and semanas_no_ritmo < 520 else None)
     semanas_restantes = max(semana_prazo - semana_atual + 1, 0)
 
@@ -13404,6 +13566,7 @@ def _rd_fase(tags: pd.DataFrame, chave: str, rotulo: str, prod: dict) -> dict:
         "total": total, "montado": montado_total, "saldo": saldo,
         "pct": (montado_total / total * 100) if total else 0.0,
         "semana_atual": semana_atual, "semana_prazo": semana_prazo,
+        "janela": cfg["janela"], "cfg_origem": cfg["origem"],
         "semanas_restantes": semanas_restantes, "dias_uteis": dias_uteis,
         "ritmo_semana": (saldo / semanas_restantes) if semanas_restantes else None,
         "ritmo_dia": (saldo / dias_uteis) if dias_uteis else None,
@@ -13448,10 +13611,13 @@ def _rd_assinatura() -> str:
 
 @st.cache_data(show_spinner=False, max_entries=3)
 def _rundown_dados(tags: pd.DataFrame, cache_key: str, assinatura: str) -> dict:
-    semana_atual = _rd_semana_da_data(date.today())
-    prod = _rd_produtividade(tags, semana_atual)
-    return {chave: _rd_fase(tags, chave, rotulo, prod)
-            for chave, rotulo in RUNDOWN_FASES}
+    cfg = rundown_config(cache_key)
+    semana_atual = _rd_semana_da_data(date.today(), cfg)
+    prod = _rd_produtividade(tags, semana_atual, cfg)
+    fases = {chave: _rd_fase(tags, chave, rotulo, prod, cfg)
+             for chave, rotulo in RUNDOWN_FASES}
+    fases["cfg"] = cfg
+    return fases
 
 
 def rundown_dados(tags: pd.DataFrame, cache_key: str) -> dict:
@@ -13572,9 +13738,10 @@ def _rd_grafico(f: dict) -> str:
     esse segundo eixo a barra semanal (dezenas) sumiria embaixo da curva
     acumulada (milhares).
 
-    As barras ficam só numa janela recente (RUNDOWN_JANELA_BARRAS semanas
-    pra trás): com o histórico inteiro elas viram serrilha, e a leitura
-    que interessa nelas é a das semanas em volta de hoje.
+    As barras ficam só numa janela recente (JANELA_BARRAS da planilha de
+    configuração, 10 semanas por padrão): com o histórico inteiro elas viram
+    serrilha, e a leitura que interessa nelas é a das semanas em volta de
+    hoje.
     """
     linhas = f["linhas"]
     if len(linhas) < 2:
@@ -13582,7 +13749,7 @@ def _rd_grafico(f: dict) -> str:
 
     atual = f["semana_atual"]
     s_min, s_max = linhas[0]["semana"], linhas[-1]["semana"]
-    barras_desde = atual - RUNDOWN_JANELA_BARRAS
+    barras_desde = atual - f.get("janela", RUNDOWN_JANELA_BARRAS)
 
     acum_max = max([l["acumulado"] or 0 for l in linhas]
                    + [l["acumulado_previsto"] or 0 for l in linhas] + [f["total"]])
