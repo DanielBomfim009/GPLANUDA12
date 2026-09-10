@@ -1851,30 +1851,6 @@ def inject_css():
         .cs-rd-legenda .plan .marca { background:var(--text-3); opacity:.5; }
         .cs-rd-legenda .real .marca { background:var(--accent-teal); }
 
-        /* Rundown -- a aba tem UM protagonista, o grafico: a tira de
-           indicadores acima dele e deliberadamente baixa (numero de 19px,
-           nao de 26px) pra curva caber na primeira tela. Grid que se
-           reparte sozinho em vez de coluna fixa: sao 8 indicadores, e em
-           tela estreita eles quebram em 4 e 2 sem apertar o texto. */
-        .rd-tira { display:grid; gap:1px; margin:2px 0 14px;
-                   grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));
-                   background:var(--border-color); border:1px solid var(--border-color);
-                   border-radius:12px; overflow:hidden; }
-        .rd-tira .cel { background:var(--dark-card); padding:11px 13px 12px; min-width:0; }
-        .rd-tira .rot { font-size:9px; font-weight:700; text-transform:uppercase;
-                        letter-spacing:.45px; color:var(--text-3); white-space:nowrap;
-                        overflow:hidden; text-overflow:ellipsis; }
-        .rd-tira .val { font-size:19px; font-weight:800; margin-top:5px; line-height:1.05;
-                        color:var(--text-1); font-variant-numeric:tabular-nums;
-                        white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        .rd-tira .val.verde { color:var(--accent-teal); }
-        .rd-tira .val.azul { color:var(--accent-blue); }
-        .rd-tira .val.ambar { color:var(--accent-amber); }
-        .rd-tira .val.vermelho { color:var(--accent-red); }
-        .rd-tira .val.cinza { color:var(--text-3); }
-        .rd-tira .nota { font-size:10px; color:var(--text-3); margin-top:3px;
-                         white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-
         /* Painel do grafico: cabecalho de uma linha so (legenda a esquerda,
            os dois eixos a direita) pra nao roubar altura da curva. */
         .rd-painel { padding:14px 18px 10px; }
@@ -13815,63 +13791,6 @@ def _rd_num(valor: float | None, casas: int = 1) -> str:
     return f"{valor:,.{casas}f}".replace(",", "@").replace(".", ",").replace("@", ".")
 
 
-def _rd_tira(itens: list[tuple[str, str, str, str]]) -> str:
-    """Tira compacta de indicadores. Deliberadamente mais baixa que o
-    .cs-kpi6 das outras telas: aqui o protagonista é o gráfico, e os
-    números são leitura de apoio -- não podem empurrar a curva pra
-    debaixo da dobra."""
-    return '<div class="rd-tira">' + "".join(
-        f'<div class="cel"><div class="rot">{esc(rot)}</div>'
-        f'<div class="val {classe}">{esc(val)}</div>'
-        f'<div class="nota">{esc(nota)}</div></div>'
-        for rot, val, nota, classe in itens) + '</div>'
-
-
-def _rd_indicadores(f: dict) -> str:
-    """Escopo, prazo e ritmo numa tira só, na ordem em que a pergunta se
-    monta: quanto falta, em quanto tempo, a que ritmo isso dá, e o que a
-    obra vem entregando de fato."""
-    prod = f["prod"]
-    dias = f["dias_vs_prazo"]
-    if f["termino_no_ritmo"] is None:
-        termino = "—"
-        termino_nota = ("ritmo não fecha em 10 anos" if (prod["media"] or 0) > 0
-                        else "sem ritmo medido")
-        termino_cor = "vermelho" if (prod["media"] or 0) > 0 else "cinza"
-    else:
-        termino = f["termino_no_ritmo"].strftime("%d/%m/%Y")
-        termino_nota = (f'{br_num(abs(dias))} dias {"de folga" if dias >= 0 else "além"}'
-                        if dias is not None else "projeção")
-        termino_cor = "verde" if (dias or 0) >= 0 else "vermelho"
-    return _rd_tira([
-        ("Saldo a montar", br_num(round(f["saldo"])),
-         f'de {br_num(round(f["total"]))} · {br_pct(f["pct"], 1)} feito', "ambar"),
-        ("Data limite", f["prazo"].strftime("%d/%m/%Y"),
-         ("PRAZO VENCIDO" if f["prazo_vencido"] else
-          f'{br_num(f["semanas_restantes"])} semanas · {br_num(f["dias_uteis"])} dias úteis'),
-         "vermelho"),
-        ("Tendência / semana", _rd_num(f["ritmo_semana"], 1), "média até o prazo", "azul"),
-        ("Tendência / dia útil", _rd_num(f["ritmo_dia"], 1), "média até o prazo", "azul"),
-        ("Pico da curva", br_num(round(f["pico"])), "semana mais carregada", "azul"),
-        ("Produtividade média", _rd_num(prod["media"], 1),
-         f'últimas 4: {_rd_num(prod["media4"], 1)}/sem', "verde"),
-        ("Aderência", (br_pct(prod["aderencia"], 1) if prod["aderencia"] is not None else "—"),
-         f'{br_num(prod["montado"])} de {br_num(prod["programado"])} programadas', "verde"),
-        # o sinal aqui é a resposta direta a "executei mais ou menos do que
-        # estava previsto até agora": soma tudo que foi programado nas
-        # semanas já vividas e compara com o que fechou
-        # contra a RÉGUA, não contra o que foi programado: é a régua que não
-        # muda, então é ela que diz se a obra está adiantada ou atrasada em
-        # relação ao plano de fechar no prazo
-        ("Real vs previsto",
-         (f'+{br_num(round(f["desvio_previsto"]))}' if f["desvio_previsto"] >= 0
-          else br_num(round(f["desvio_previsto"]))),
-         f'régua previa {br_num(round(f["previsto_hoje"]))} até agora',
-         "verde" if f["desvio_previsto"] >= 0 else "vermelho"),
-        ("Término no ritmo atual", termino, termino_nota, termino_cor),
-    ])
-
-
 def _rd_grafico(f: dict) -> str:
     """O gráfico da aba -- curva acumulada e barras da semana no MESMO
     desenho, cada um no seu eixo.
@@ -14111,15 +14030,14 @@ def _rd_tabela(f: dict) -> pd.DataFrame:
 
 
 def _rd_bloco(f: dict, chave: str) -> None:
-    """Uma fase na tela, de cima pra baixo: tira de indicadores, o gráfico
-    (o item principal da aba, em largura cheia) e a tabela."""
+    """Uma fase na tela, de cima pra baixo: o gráfico (o item principal
+    da aba, em largura cheia) e a tabela."""
     if not f["total"]:
         render_html('<div class="gplan-panel"><div class="cs-vazio">Nenhuma TAG nesta '
                     'fase na 01_BASE_TAGS.</div></div>')
         return
 
     menu = menu_exportar(f"expmenu_rd_{chave}")
-    render_html(_rd_indicadores(f))
     render_html(f"""
       <div class="gplan-panel rd-painel">
         <div class="rd-cab">
