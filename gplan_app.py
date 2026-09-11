@@ -39,7 +39,11 @@ try:
 except Exception:                                   # pragma: no cover
     pass
 
-LOCAL_EXCEL_FALLBACK = os.path.join(
+# GPLAN_PLANILHA aponta outra planilha. Serve para a instância de
+# desenvolvimento (outra porta) ler uma cópia: melhoria se testa fora da
+# 8501, que é a que está em uso, e nenhum teste regrava a planilha dela.
+# Sem a variável, vale o caminho de sempre.
+LOCAL_EXCEL_FALLBACK = os.environ.get("GPLAN_PLANILHA") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..",
     "Controle de Relatório dos Instrumentos", "01_ARQUIVO_ATUAL",
     "CONTROLE_DOCUMENTAL_INSTRUMENTACAO_ATUAL.xlsx",
@@ -476,6 +480,50 @@ def _fonte_planilha():
     return None
 
 
+def cabos_avanco_real(lanc: pd.DataFrame) -> pd.DataFrame:
+    """O avanço de cada circuito passa a ser o "% Avanço REAL" da base.
+
+    Até aqui todo avanço de cabo do sistema era só o LANÇAMENTO: o percentual
+    e o status de lançamento decidiam se o cabo estava pronto. O "% Avanço
+    REAL" junta lançamento, conexão das duas pontas e teste (a planilha pesa
+    75 + 10 + 10 + 5), e é ele que diz se o cabo está concluído (usuário,
+    2026-09-11). Cabo lançado e ainda sem conexão está em 75%: em andamento,
+    não pronto.
+
+    A troca é feita UMA vez, aqui na carga: PCT passa a ser o avanço real,
+    STATUS sai dele (Concluído em 100%, Em Andamento acima de zero, Não
+    Iniciado em zero) e METROS_REAL vira o metro equivalente ao avanço. Assim
+    Certificação, Planta, Avanço e as exportações -- tudo que já lia essas
+    colunas -- passam a usar o avanço real sem cada uma reinventar a regra.
+    O lançamento não some: fica em PCT_LANC, STATUS_LANC e METROS_LANC, e as
+    dicas continuam mostrando quanto metro já foi lançado.
+
+    Planilha sem a coluna (gerada antes do pipeline novo) segue como antes,
+    pelo lançamento.
+    """
+    if "PCT_AVANCO" not in lanc.columns:
+        return lanc
+    av = pd.to_numeric(lanc["PCT_AVANCO"], errors="coerce")
+    if not av.notna().any():
+        return lanc
+    lanc = lanc.copy()
+    previsto = pd.to_numeric(lanc["METROS"], errors="coerce").fillna(0)
+    lanc["PCT_LANC"] = lanc["PCT"]
+    lanc["STATUS_LANC"] = lanc["STATUS"]
+    lanc["METROS_LANC"] = (lanc["METROS_REAL"] if "METROS_REAL" in lanc.columns
+                           else previsto * pd.to_numeric(lanc["PCT"], errors="coerce")
+                           .fillna(0) / 100)
+    # célula vazia na base (6 circuitos hoje, todos sem status): sem avanço
+    av = av.fillna(0.0).clip(0, 100)
+    lanc["PCT"] = av.round(1)
+    lanc["STATUS"] = av.map(lambda v: "Concluído" if v >= 99.5
+                            else "Em Andamento" if v > 0 else "Não Iniciado")
+    # sem arredondar: 7 m a 75% são 5,25 m, e arredondar para 5,2 fazia o
+    # cabo aparecer com 74,3% em vez dos 75% que a base diz
+    lanc["METROS_REAL"] = previsto * av / 100
+    return lanc
+
+
 @st.cache_data(show_spinner="Carregando planilha...")
 def load_data(cache_key: str):
     client = get_supabase_client()
@@ -559,6 +607,9 @@ def load_data(cache_key: str):
                                                 "DE", "PARA", "QTD_TAGS"]))
     # Suprimentos ja vem pronto na combinada -- ver carregar_suprimentos.
     suprimentos_itens, suprimentos_estoque = carregar_suprimentos(excel_file)
+    # o avanço do cabo é o "% Avanço REAL" (lançamento + conexão + teste),
+    # não mais só o lançamento -- ver cabos_avanco_real
+    lancamento = cabos_avanco_real(lancamento)
     resumo = aplicar_regra_aprovados(resumo, esperados)
     return (tags, cabos, tubing, sigem, resumo, esperados, gitec, locacao,
             aux_areas, lancamento, depara, movimentacoes,
@@ -7138,10 +7189,15 @@ def cert_metro_medido(linha) -> float:
     leitura de um cabo específico o metro a mais é fato: a estimativa é que
     estava curta, e esconder isso apaga metade do que há para ver.
     """
-    real = cert_num(linha.get("METROS_REAL"))
+    # com o avanço real, METROS_REAL virou o metro equivalente ao avanço (ver
+    # cabos_avanco_real); o que o campo mediu de lançamento fica em
+    # METROS_LANC, e o percentual de lançamento em PCT_LANC
+    real = cert_num(linha.get("METROS_LANC") if "METROS_LANC" in linha
+                    else linha.get("METROS_REAL"))
     if real > 0:
         return real
-    return round(cert_num(linha.get("METROS")) * cert_num(linha.get("PCT")) / 100, 1)
+    pct = linha.get("PCT_LANC") if "PCT_LANC" in linha else linha.get("PCT")
+    return round(cert_num(linha.get("METROS")) * cert_num(pct) / 100, 1)
 
 
 def cert_status_conjunto(circuitos: list) -> str:
@@ -7249,6 +7305,11 @@ def _cert_circuito(linha, mont: dict) -> dict:
             "pct": round(cert_num(linha["PCT"]), 1),
             "m": cert_num(linha["METROS"]),
             "m_real": cert_metro_real(linha),
+            # o lançamento continua à mostra: o avanço real (pct) decide se o
+            # cabo está pronto, o metro lançado diz quanto já foi puxado
+            "pct_lanc": round(cert_num(linha["PCT_LANC"] if "PCT_LANC" in linha
+                                       else linha["PCT"]), 1),
+            "m_lanc": cert_metro_medido(linha),
             # o circuito de potência traz -P no fim do código; a coluna TIPO não
             # separa os dois -- ela diz o sistema, não a função do cabo
             "pot": bool(re.search(r"-P\d*$", str(linha["CIRCUITO"]).strip(), re.I)),
@@ -7478,6 +7539,8 @@ def cert_circuitos_por_tag(lanc: pd.DataFrame, cache_key: str) -> dict:
             "id": str(r["CIRCUITO"]).strip(), "dst": str(r["DESTINO"]).strip(),
             "status": str(r["STATUS"]).strip(), "pct": round(cert_num(r["PCT"]), 1),
             "m": cert_num(r["METROS"]), "m_real": cert_metro_real(r),
+            "pct_lanc": round(cert_num(r["PCT_LANC"] if "PCT_LANC" in r else r["PCT"]), 1),
+            "m_lanc": cert_metro_medido(r),
             "pot": bool(re.search(r"-P\d*$", str(r["CIRCUITO"]).strip(), re.I)),
             "fibra": str(r["CIRCUITO"]).strip().upper().startswith("CFO")})
     for cs in saida.values():
@@ -7723,7 +7786,10 @@ def cert_paineis(lanc: pd.DataFrame, cache_key: str) -> dict:
                           # status da base, metragem à parte -- ver
                           # cert_status_conjunto
                           "status": cert_status_conjunto(proprios),
-                          "pct": round(m_real / m * 100, 1) if m else 0.0,
+                          # % pelo avanço real (é ele que decide pronto);
+                          # m_real segue sendo o metro LANÇADO, para a tabela
+                          "pct": (round(sum(cert_metro_real(c) for c in proprios)
+                                        / m * 100, 1) if m else 0.0),
                           "m": m, "m_real": m_real,
                           # distancia ate o painel/caixa -- e o que da a ordem
                           # fisica do laco (ver ordem_tags mais abaixo)
@@ -7816,7 +7882,8 @@ def cert_paineis(lanc: pd.DataFrame, cache_key: str) -> dict:
                 "cabo": pronto_t,
                 "cabo_cadeia": pronto_t,
                 "status": cert_status_conjunto(linhas),
-                "pct": round(m_real_t / m_t * 100, 1) if m_t else 0.0,
+                "pct": (round(sum(cert_metro_real(rr) for rr in linhas)
+                              / m_t * 100, 1) if m_t else 0.0),
                 "m": m_t, "m_real": m_real_t,
                 "prof": 0,
             }
@@ -8159,7 +8226,9 @@ def cert_agrupar(circuitos: list) -> list:
         else:
             status = cs[0]["status"]
         saida.append({**cs[0], "id": f"{len(cs)} circuitos", "status": status,
-                      "pct": pct, "m": total, "m_real": real, "circuitos": cs})
+                      "pct": pct, "m": total, "m_real": real,
+                      "m_lanc": sum(c.get("m_lanc", c["m_real"]) for c in cs),
+                      "circuitos": cs})
     return sorted(saida, key=lambda c: c["org"])
 
 
@@ -8293,8 +8362,9 @@ const percurso = c => c.de && c.para ? [c.de, c.para]
 function dicaCabo(c, papel) {
   const t = cls(c.status), [a, b] = percurso(c);
   return cab(papel || 'cabo', c.id) + dl('situação', c.status, t) +
-    (c.pct > 0 && c.pct < 100 ? dl('lançado', br(c.pct, 1) + '%', t) : '') +
-    dl('lançado', br(c.m_real === undefined ? c.m * c.pct / 100 : c.m_real) +
+    (c.pct > 0 && c.pct < 100 ? dl('avanço', br(c.pct, 1) + '%', t) : '') +
+    dl('lançado', br(c.m_lanc !== undefined ? c.m_lanc
+                     : c.m_real === undefined ? c.m * c.pct / 100 : c.m_real) +
        ' de ' + br(c.m) + ' m') + dl('disciplina', c.disc) +
     dl('percurso', esc(a) + ' → ' + esc(b)) +
     (a !== c.org ? `<div class='obs'>na planilha: <b>ORIGEM</b> ${esc(c.org)} ·
@@ -8316,7 +8386,8 @@ function dicaTag(r) {
           → ${esc(c.dst || '')}</b></i>
       <b style='color:var(--${cls(c.status)})'>${c.status}<b
         style='color:var(--t2);font-weight:600;display:block;font-size:10px'>
-        ${br(c.m_real)} de ${br(c.m)} m</b></b></div>`).join('') + '</div>';
+        ${br(c.pct, 0)}% · ${br(c.m_lanc !== undefined ? c.m_lanc : c.m_real)} de
+        ${br(c.m)} m lançados</b></b></div>`).join('') + '</div>';
   return cab('instrumento', r.org) +
     dl('certificação', r.rot, r.tom === 'ok' ? 'ok' : r.tom === 'warn' ? 'and'
        : r.tom === 'crit' ? 'nao' : 'roxo') +
@@ -8324,7 +8395,8 @@ function dicaTag(r) {
     dl('montagem', nomeMont(r.mont), corMont(r.mont)) +
     dl('cabo', r.status + (r.pct > 0 && r.pct < 100 ? ' · ' + br(r.pct, 1) + '%' : ''),
        cls(r.status)) +
-    dl('lançado', br(r.m_real) + ' de ' + br(r.m) + ' m') +
+    dl('lançado', br(r.m_lanc !== undefined ? r.m_lanc : r.m_real) + ' de '
+       + br(r.m) + ' m') +
     (r.pai ? dl('pendura em', esc(r.pai)) : '') +
     (r.seg ? dl('caixa', esc(r.seg)) : '') + lista +
     (r.ancora ? "<div class='solta'>clique para abrir a ficha da TAG</div>" : '') +
@@ -8347,7 +8419,7 @@ function tomGrupo(l) {
 function calha(d, l, w) {
   const n = l.filter(feito).length, t = tomGrupo(l);
   const dica = `<div class='h'>calha de derivação</div>
-    <div class='n'>${n} de ${l.length} lançados</div>
+    <div class='n'>${n} de ${l.length} concluídos</div>
     <div class='obs'>a calha não é um circuito da planilha: a cor dela é o
       consolidado dos ramais que descem daqui</div>`;
   return `<path d="${d}" stroke="var(--${t})" stroke-width="${w}" fill="none"
@@ -9401,7 +9473,9 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
         m = sum(cert_num(c["METROS"]) for c in proprios)
         # medido sem teto: o metro a mais que o previsto e fato para ler
         m_real = sum(cert_metro_medido(c) for c in proprios)
-        pct = round(m_real / m * 100, 1) if m else 0.0
+        # % pelo avanço real; m_real segue sendo o metro lançado (sem teto)
+        pct = (round(sum(cert_metro_real(c) for c in proprios) / m * 100, 1)
+               if m else 0.0)
         pronto = all(cert_num(c["PCT"]) >= 99.5 for c in proprios)
         # Quase todo instrumento tem DOIS cabos próprios -- sinal e potência
         # (-P) --, cada um podendo estar num estágio diferente. Resumir os
@@ -9422,7 +9496,8 @@ def cert_panorama(lanc: pd.DataFrame, mont: dict, cache_key: str) -> dict:
                 pernas.append({
                     "pot": pot_flag,
                     "status": cert_status_conjunto(do_tipo),
-                    "pct": round(mr / mt * 100, 1) if mt else 0.0,
+                    "pct": (round(sum(cert_metro_real(c) for c in do_tipo)
+                                  / mt * 100, 1) if mt else 0.0),
                     "pronto": all(cert_num(c["PCT"]) >= 99.5 for c in do_tipo),
                 })
         return {"cabo_tag": pronto, "pct_tag": pct,
@@ -9917,7 +9992,7 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
           <div class="s">com cadeia de cabo na base</div></div>
         <div class="pl-kpi"><div class="r">Avanço do cabo</div>
           <div class="v andando">{br_pct(pct_lanc)}</div>
-          <div class="s">{br_num(int(lancado_filtro))} de {br_num(int(metros_filtro))} m</div>
+          <div class="s">{br_num(int(lancado_filtro))} de {br_num(int(metros_filtro))} m · lançamento, conexão e teste</div>
           <div class="pl-barra"><i class="andando" style="width:{pct_lanc:.1f}%"></i></div></div>
         <div class="pl-kpi"><div class="r">Montadas travadas</div>
           <div class="v">{br_num(montadas_travadas)}</div>
@@ -9947,8 +10022,9 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
             # pendência -- usar só a cadeia "vencedora" do veredito escondia
             # a pendência do outro cabo inteira.
             for c in por_tag[tag].get("cadeia_uniao") or por_tag[tag].get("cadeia", []):
-                # so o que ainda falta lancar -- montagem do instrumento e
-                # outra pendencia, essa exportacao e so sobre o cabo
+                # so o que ainda nao esta concluido pelo avanco real -- falta
+                # lancar, conectar ou testar. Montagem do instrumento e outra
+                # pendencia, essa exportacao e so sobre o cabo
                 if cert_num(c["PCT"]) >= 99.5:
                     continue
                 cid = str(c["CIRCUITO"]).strip()
@@ -9957,15 +10033,17 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                     "DESTINO": str(c["DESTINO"]).strip(),
                     "DISCIPLINA": str(c["DISCIPLINA"]).strip(),
                     "STATUS": str(c["STATUS"]).strip(),
-                    "PCT": round(cert_num(c["PCT"]), 1),
+                    "PCT_AVANCO_REAL": round(cert_num(c["PCT"]), 1),
+                    "PCT_LANCAMENTO": round(cert_num(c["PCT_LANC"] if "PCT_LANC" in c
+                                                     else c["PCT"]), 1),
                     "METROS": cert_num(c["METROS"]),
-                    "METROS_REAL": cert_metro_real(c),
+                    "METROS_LANCADOS": cert_metro_medido(c),
                     "TAGS": set(),
                 })
                 linha["TAGS"].add(tag)
         linhas_export = sorted(
             ({**v, "TAGS": ", ".join(sorted(v["TAGS"]))} for v in circuitos_export.values()),
-            key=lambda v: (v["PCT"], v["CIRCUITO"]))
+            key=lambda v: (v["PCT_AVANCO_REAL"], v["CIRCUITO"]))
         if not prefixos:
             st.caption("Digite ao menos um prefixo (ex.: AST, OST).")
         elif not alvo_export:
@@ -10564,6 +10642,7 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
             r["circuitos"] = cs
             r["m"] = sum(c["m"] for c in cs)
             r["m_real"] = sum(c["m_real"] for c in cs)
+            r["m_lanc"] = sum(c.get("m_lanc", c["m_real"]) for c in cs)
             r["pct"] = round(r["m_real"] / r["m"] * 100, 1) if r["m"] else 0.0
             r["status"] = ("Concluído" if all(c["pct"] >= 99.5 for c in cs)
                            else "Em Andamento" if any(c["pct"] > 0 for c in cs)
@@ -10633,8 +10712,8 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     render_html("""
       <div class="ct-leg">
         <span style="font-weight:800;color:var(--text-2);letter-spacing:.3px">CABO</span>
-        <span><i style="background:var(--accent-teal)"></i>lançado</span>
-        <span><i style="background:var(--accent-amber)"></i>em lançamento</span>
+        <span><i style="background:var(--accent-teal)"></i>concluído</span>
+        <span><i style="background:var(--accent-amber)"></i>em andamento</span>
         <span><i style="background:repeating-linear-gradient(90deg,
           var(--accent-red) 0 6px,transparent 6px 11px)"></i>não iniciado</span>
         <span><i style="background:var(--accent-purple)"></i>sem circuito cadastrado</span>
