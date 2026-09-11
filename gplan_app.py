@@ -3231,6 +3231,14 @@ def inject_css():
         .gr-panel .gplan-panel-title { margin-bottom:16px; font-size:13px; }
         .gr-row { margin-bottom:13px; }
         .gr-row:last-child { margin-bottom:0; }
+        /* a lista traz o nivel inteiro e rola dentro do card: a altura e a
+           de quando eram so 5 -- o sexto aparece cortado, avisando que ha
+           mais -- e o resto se ve rolando */
+        .gr-lista { max-height:290px; overflow-y:auto; padding-right:6px; }
+        .gr-panel .gplan-panel-title { display:flex; justify-content:space-between;
+                                       align-items:baseline; gap:8px; }
+        .gr-conta { font-size:10.5px; font-weight:600; color:var(--text-3);
+                    white-space:nowrap; text-transform:none; letter-spacing:0; }
         .gr-top { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:5px; gap:8px; }
         .gr-nome { font-size:11.5px; font-weight:600; color:var(--text-1); white-space:nowrap;
                    overflow:hidden; text-overflow:ellipsis; }
@@ -3725,7 +3733,12 @@ def inject_css():
            Trilho de largura fixa e o metro ao lado -- com 142 segmentos a
            lista e um ranking, e o numero e quem da a escala. */
         .cs-lista { max-height:330px; overflow-y:auto; padding-right:4px; }
-        .cs-lin { display:grid; grid-template-columns:104px 1fr 150px;
+        /* nome de malha e mais comprido que o de segmento (MI-YST-121100 x
+           MB-RTU-03): a primeira coluna alarga so neste card */
+        .cs-malha .cs-lin { grid-template-columns:140px 1fr 186px; }
+        /* 186px na coluna do numero: "100,0% · 28/28 TAGs montadas" nao cabia
+           em 150 e o "s" final saia cortado -- lia-se "TAGs montada" */
+        .cs-lin { display:grid; grid-template-columns:104px 1fr 186px;
                   gap:12px; align-items:center; padding:5px 0; }
         .cs-lin + .cs-lin { border-top:1px solid var(--border-color); }
         .cs-seg { font-size:12px; font-weight:700; color:var(--text-2);
@@ -7522,6 +7535,55 @@ def cert_metros_uniao(da_ponta: dict, metros: dict, nomes) -> tuple[float, float
     return (sum(metros[c][0] for c in ids), sum(metros[c][1] for c in ids))
 
 
+def cert_avanco_malhas(universo, visiveis: set, por_tag: dict, atrib: dict,
+                       da_ponta: dict, metros: dict) -> list[tuple[str, dict]]:
+    """Avanço geral de cada malha, na conta do "Avanço geral por segmento".
+
+    O cabo da malha pesa 1 unidade (a porcentagem dele) e cada TAG pesa
+    outra (100 se montada, 0 se não); a média simples é quanto da malha
+    inteira, cabo e instrumento, já fechou.
+
+    O cabo de uma malha é o que sai das TAGs dela e das caixas onde elas
+    chegam -- o mesmo "TAGs + caixas" do segmento, só que recortado no que
+    é da malha. A caixa entra porque é por ela que o cabo chega ao painel:
+    sem ela uma malha fieldbus aparecia pronta com o tronco por lançar, que
+    foi o defeito já corrigido no segmento. Cada circuito entra uma vez por
+    malha (união de ids, ver cert_circuitos_por_ponta); um tronco
+    compartilhado conta inteiro em cada malha que passa por ele, porque ela
+    não certifica sem ele.
+
+    Entra só quem está no universo (TAG com cadeia de cabo), e só as malhas
+    em `visiveis`: o filtro escolhe QUAIS malhas aparecem, o número de cada
+    uma sai da malha inteira -- mesma regra do segmento.
+    """
+    malhas: dict[str, dict] = {}
+    for tag in universo:
+        v = atrib.get(tag, {})
+        nome = v.get("MALHA", "")
+        if nome not in visiveis:
+            continue
+        mm = malhas.setdefault(nome, {"tags": 0, "montadas": 0,
+                                      "caixas": set(), "circ": set()})
+        mm["tags"] += 1
+        if por_tag[tag]["montada"]:
+            mm["montadas"] += 1
+        mm["circ"] |= da_ponta.get(tag, set())
+        cx = v.get("CFF", "")
+        if cx and cx in da_ponta:
+            mm["caixas"].add(cx)
+    for mm in malhas.values():
+        for cx in mm["caixas"]:
+            mm["circ"] |= da_ponta.get(cx, set())
+        mm["m"] = sum(metros[c][0] for c in mm["circ"])
+        mm["real"] = sum(metros[c][1] for c in mm["circ"])
+        p_cabo = mm["real"] / mm["m"] * 100 if mm["m"] else 0.0
+        mm["geral"] = (p_cabo + 100 * mm["montadas"]) / (1 + mm["tags"])
+    # do mais adiantado ao menos; empate desempata pela malha maior, que é
+    # a que pesa mais na obra
+    return sorted(malhas.items(),
+                  key=lambda kv: (-kv[1]["geral"], -(1 + kv[1]["tags"])))
+
+
 # Os quatro campos da 01_BASE_TAGS que recortam a Certificação. A ordem é a
 # da cadeia física, do painel para a ponta: painel -> caixa -> segmento H1 ->
 # malha. CFF e PAINEL só existem na planilha depois do pipeline que os
@@ -8052,8 +8114,8 @@ def cert_cadeia(alvo: str, lanc: pd.DataFrame, mont: dict) -> dict:
                            "mont": mont.get(x, {}).get("mont", "")}
                           for i, x in enumerate(segs)],
             "ligacoes": ligacoes,
-            "ramais": cert_agrupar(
-                [{**_cert_circuito(r, mont), "seg": raiz} for r, raiz in ins]),
+            "ramais": cert_pendurados(cert_agrupar(
+                [{**_cert_circuito(r, mont), "seg": raiz} for r, raiz in ins])),
         }
 
     sai = d[org == alvo]
@@ -8068,7 +8130,7 @@ def cert_cadeia(alvo: str, lanc: pd.DataFrame, mont: dict) -> dict:
         "eletrica": eletrica(painel),
         "tronco": [_cert_circuito(r, mont) for _, r in sai.iterrows()],
         "segmentos": [], "ligacoes": [],
-        "ramais": cert_agrupar([_cert_circuito(r, mont) for r, _ in ent]),
+        "ramais": cert_pendurados(cert_agrupar([_cert_circuito(r, mont) for r, _ in ent])),
     }
 
 
@@ -8099,6 +8161,95 @@ def cert_agrupar(circuitos: list) -> list:
         saida.append({**cs[0], "id": f"{len(cs)} circuitos", "status": status,
                       "pct": pct, "m": total, "m_real": real, "circuitos": cs})
     return sorted(saida, key=lambda c: c["org"])
+
+
+# Espaço entre um cartão e o que pendura nele, e o recuo dos filhos para a
+# direita. Os mesmos números estão no JS da cena (VAO, RECUO): se mudarem lá,
+# mudam aqui -- cert_altura depende deles para a moldura não cortar o desenho.
+CERT_VAO, CERT_RECUO = 18, 30
+
+
+def cert_pendurados(ramais: list) -> list:
+    """Marca em cada ramal de quem ele pendura, quando não é da caixa.
+
+    A cadeia já trazia os instrumentos que chegam na caixa POR TRÁS de outro
+    instrumento -- o TE-120100 tem cabo até o TJT-12-0024, e só o TJT tem
+    cabo até a CFF-12-0055B. Mas a cena distribuía todos numa grade só,
+    pendurados na calha da caixa: o TE aparecia no barramento e o TJT numa
+    fileira de baixo, com a calha atravessando o cartão do FIT de cima --
+    lia-se "caixa -> FIT -> TJT", que não existe. São 288 circuitos assim na
+    base (245 via TJT), em 62 caixas.
+
+    A regra: se algum cabo do instrumento chega numa caixa, ele é da caixa
+    ("pai" vazio). Senão, pendura no instrumento aonde o cabo dele chega. A
+    busca é por camadas, a partir da caixa, e por isso não fecha ciclo: o
+    laço HV da CJD-S-12-0003, em que um HV liga no outro, fica todo direto,
+    porque cada HV também tem o seu cabo até a caixa. Quem não é alcançado
+    fica direto na caixa -- desenho nenhum pode sumir com um instrumento.
+    """
+    grupos: dict[str, list] = {}
+    for r in ramais:
+        grupos.setdefault(r.get("seg", ""), []).append(r)
+    for lista in grupos.values():
+        do_grupo = {r["org"] for r in lista}
+        destinos = {r["org"]: [str(c.get("dst", "")).strip()
+                               for c in (r.get("circuitos") or [r])]
+                    for r in lista}
+        alcancado: set = set()
+        for r in lista:
+            ds = [d for d in destinos[r["org"]] if d and d != "nan"]
+            # chega numa caixa, ou numa ponta que não está neste desenho:
+            # não há em quem pendurar, então é da caixa
+            if not ds or any(cert_nivel(d) >= 1 or d not in do_grupo for d in ds):
+                r["pai"] = ""
+                alcancado.add(r["org"])
+        mudou = True
+        while mudou:
+            mudou = False
+            for r in lista:
+                if r["org"] in alcancado:
+                    continue
+                pais = sorted(d for d in destinos[r["org"]]
+                              if d in alcancado and d != r["org"])
+                if pais:
+                    r["pai"] = pais[0]
+                    alcancado.add(r["org"])
+                    mudou = True
+        for r in lista:
+            if r["org"] not in alcancado:
+                r["pai"] = ""
+    return ramais
+
+
+def _cert_arvore(lista: list) -> dict:
+    """Os ramais de UMA caixa como árvore: quem pendura nela (diretos) e, de
+    cada instrumento, quem pendura nele. Mesma regra do JS da cena."""
+    orgs = {r["org"] for r in lista}
+    filhos: dict[str, list] = {}
+    diretos = []
+    for r in lista:
+        pai = r.get("pai") or ""
+        if pai and pai in orgs and pai != r["org"]:
+            filhos.setdefault(pai, []).append(r)
+        else:
+            diretos.append(r)
+
+    def prof(r, d=0):
+        if d > 20:
+            return 1
+        return 1 + max((prof(k, d + 1) for k in filhos.get(r["org"], [])), default=0)
+
+    fundo = (max(prof(r) for r in diretos) - 1) if diretos else 0
+    return {"diretos": diretos, "filhos": filhos, "fundo": fundo}
+
+
+def _cert_alt_sub(r: dict, filhos: dict, d: int = 0) -> float:
+    """Altura, em px da cena, do cartão e de tudo que pendura nele."""
+    alt = 52 + (11 if r.get("fseg") else 0)
+    if d > 20:
+        return alt
+    return alt + sum(CERT_VAO + _cert_alt_sub(k, filhos, d + 1)
+                     for k in filhos.get(r["org"], []))
 
 
 CERT_ROTULO = {"ok": "Apto", "warn": "Predecessora em andamento",
@@ -8174,6 +8325,7 @@ function dicaTag(r) {
     dl('cabo', r.status + (r.pct > 0 && r.pct < 100 ? ' · ' + br(r.pct, 1) + '%' : ''),
        cls(r.status)) +
     dl('lançado', br(r.m_real) + ' de ' + br(r.m) + ' m') +
+    (r.pai ? dl('pendura em', esc(r.pai)) : '') +
     (r.seg ? dl('caixa', esc(r.seg)) : '') + lista +
     (r.ancora ? "<div class='solta'>clique para abrir a ficha da TAG</div>" : '') +
     (r.como && r.como !== 'exato'
@@ -8428,7 +8580,26 @@ function cena(c) {
   const R = c.ramais, T = c.tronco, E = c.eletrica, S = c.segmentos;
   const grupos = R.reduce((a, r) => {
     const k = r.seg || c.caixa; (a[k] = a[k] || []).push(r); return a; }, {});
-  const maiorGrupo = Math.max(1, ...Object.values(grupos).map(l => l.length));
+  // Quem pendura em quem, dentro de cada caixa. O "pai" vem do servidor
+  // (cert_pendurados): vazio = o cabo chega na caixa; preenchido = chega em
+  // OUTRO instrumento (TE -> TJT -> caixa). A grade só distribui os diretos;
+  // o resto desce pendurado no pai. Contar todo mundo como direto era o que
+  // punha o TE no barramento da caixa e o TJT numa fileira de baixo.
+  const arv = {};
+  Object.entries(grupos).forEach(([k, l]) => {
+    const orgs = new Set(l.map(r => r.org));
+    const filhos = {}, diretos = [];
+    l.forEach(r => {
+      if (r.pai && orgs.has(r.pai) && r.pai !== r.org)
+        (filhos[r.pai] = filhos[r.pai] || []).push(r);
+      else diretos.push(r);
+    });
+    const prof = (r, d = 0) => d > 20 ? 1
+      : 1 + Math.max(0, ...(filhos[r.org] || []).map(x => prof(x, d + 1)));
+    const fundo = diretos.length ? Math.max(...diretos.map(r => prof(r))) - 1 : 0;
+    arv[k] = {diretos, filhos, fundo};
+  });
+  const maiorGrupo = Math.max(1, ...Object.values(arv).map(a => a.diretos.length));
   const ff = c.tipo === 'cff';
   const colsMax = ff ? 3 : Math.min(12, Math.max(2, Math.ceil(Math.sqrt(maiorGrupo * 1.9))));
   const filMax = Math.ceil(maiorGrupo / colsMax);
@@ -8447,6 +8618,42 @@ function cena(c) {
   const base = ff ? 150 : 190;
   const p = [], nos = [], xPain = 150, xPrim = 400;
   let xFim = xPrim + 200;
+  // o pé do desenho, medido enquanto desenha: com árvore embaixo de um
+  // instrumento a altura não sai mais de uma conta de fileiras fixas
+  let yMax = 0;
+
+  // Embaixo de um cartão, quem pendura nele: uma espinha sai do pé do cartão
+  // e cada filho entra nela pelo PRÓPRIO cabo -- o que a planilha registra
+  // dele até o pai, com a cor do estado dele. Um abaixo do outro, recuados
+  // para a direita, como numa árvore: lado a lado eles invadiriam a coluna
+  // vizinha. VAO e RECUO são os mesmos CERT_VAO e CERT_RECUO do Python.
+  const VAO = 18, RECUO = 30;
+  const altCartao = r => 52 + (r.fseg ? 11 : 0);
+  const altSub = (r, fil, d = 0) => altCartao(r) + (d > 20 ? 0
+    : (fil[r.org] || []).reduce((s, k) => s + VAO + altSub(k, fil, d + 1), 0));
+  function desce(r, xc, yc, fil, d = 0) {
+    const pe = yc - 30 + altCartao(r);
+    yMax = Math.max(yMax, pe);
+    const kids = fil[r.org] || [];
+    if (!kids.length || d > 20) return;
+    const xs = xc - RECUO, xk = xc + RECUO;
+    let topo = pe, ultimo = pe;
+    const tocos = [];
+    kids.forEach(k => {
+      const yk = topo + VAO + 30, ys = yk - 4;
+      tocos.push([k, topo, ys, yk]);
+      topo = yk - 30 + altSub(k, fil, d + 1);
+      ultimo = ys;
+    });
+    p.push(calha(`M${xs} ${pe} V${ultimo}`, kids, 2.4));
+    tocos.forEach(([k, de, ys, yk]) => {
+      p.push(fio(`M${xs} ${ys} H${xk - 36}`, k, 2, 'cabo até ' + esc(r.base || r.org)));
+      p.push(malhaDoCabo(xs - 24, de, ys, k));
+      p.push(cartao(xk, yk, k));
+      xFim = Math.max(xFim, xk + 50);
+      desce(k, xk, yk, fil, d + 1);
+    });
+  }
 
   if (c.tipo === 'painel') {
     // uma faixa por caixa: o cartao dela e, na mesma linha, os instrumentos que
@@ -8670,30 +8877,50 @@ function cena(c) {
         p.push(`<text x="${(de + x) / 2}" y="${base - 4}" text-anchor="middle"
           class="rot-tk" font-size="7.5">TRONCO · ${br(cabo.m)} m</text>`);
       }
-      const lista = grupos[sg.nome] || [];
-      if (!lista.length) return;
-      const cols = Math.min(3, lista.length), fil = Math.ceil(lista.length / cols);
-      const px = passoX + 6, yBar = base + yRail, xDesce = x + 48;
+      const A = arv[sg.nome];
+      if (!A || !A.diretos.length) return;
+      const lista = A.diretos;
+      // a coluna alarga quando alguém pendura em instrumento: a espinha e o
+      // recuo dos filhos ocupam o vão; larga demais, cai para duas colunas
+      // para não invadir a caixa vizinha (elas ficam a 430 px uma da outra)
+      const px = A.fundo ? Math.min(210, 132 + (A.fundo - 1) * RECUO) : passoX + 6;
+      const cols = Math.min(px <= 140 ? 3 : 2, lista.length);
+      const fil = Math.ceil(lista.length / cols);
+      const yBar = base + yRail, xDesce = x + 48;
       // a grade nasce centrada sob a caixa: com uma coluna só, o cartão fica
       // embaixo da descida em vez de 44 px ao lado dela
       const xIni = xDesce - (cols - 1) * px / 2;
+      // A calha que liga as fileiras corre POR FORA, à esquerda da primeira
+      // coluna. Pela coluna ela passava por dentro dos cartões de cima, e o
+      // da fileira de baixo parecia pendurado no de cima -- foi assim que o
+      // TJT-12-0024 "saía" do FIT-120029 na CFF-12-0055B.
+      const xLig = xIni - 50;
+      // cada fileira desce o quanto a árvore mais funda da de cima pede
+      const yFil = [yBar];
+      for (let f = 1; f < fil; f++) {
+        const acima = lista.slice((f - 1) * cols, f * cols);
+        yFil.push(yFil[f - 1] + queda - 30
+                  + Math.max(...acima.map(r => altSub(r, A.filhos))) + VAO);
+      }
       p.push(calha(`M${xDesce} ${base + 98} V${yBar}`, lista, 3.4));
-      if (fil > 1) p.push(calha(`M${xIni} ${yBar} V${yBar + (fil - 1) * fila}`, lista, 2.8));
+      if (fil > 1) p.push(calha(`M${xLig} ${yBar} V${yFil[fil - 1]}`, lista, 2.8));
       for (let f = 0; f < fil; f++) {
         const fatia = lista.slice(f * cols, (f + 1) * cols);
         // a calha vai da descida ate a ultima coluna: quando os dois coincidem
         // ela some, e era esse o buraco entre a caixa e o cabo
-        const a = Math.min(xIni, xDesce), z2 = Math.max(xIni + (fatia.length - 1) * px, xDesce);
-        p.push(calha(`M${a} ${yBar + f * fila} H${z2}`, fatia, 2.8));
+        const a = Math.min(fil > 1 ? xLig : xIni, xDesce);
+        const z2 = Math.max(xIni + (fatia.length - 1) * px, xDesce);
+        p.push(calha(`M${a} ${yFil[f]} H${z2}`, fatia, 2.8));
       }
       lista.forEach((r, k) => {
         const fl = Math.floor(k / cols);
-        const xi = xIni + (k % cols) * px, yi = yBar + fl * fila + queda;
-        p.push(fio(zigue(xi, yBar + fl * fila, xi, yi - 25, Math.min(9, queda / 12)),
+        const xi = xIni + (k % cols) * px, yi = yFil[fl] + queda;
+        p.push(fio(zigue(xi, yFil[fl], xi, yi - 25, Math.min(9, queda / 12)),
                    r, 2, 'ramal até o instrumento'));
-        p.push(malhaDoCabo(xi, yBar + fl * fila, yi - 25, r));
+        p.push(malhaDoCabo(xi, yFil[fl], yi - 25, r));
         p.push(cartao(xi, yi, r));
         xFim = Math.max(xFim, xi + 60);
+        desce(r, xi, yi, A.filhos);
       });
     });
     xFim = Math.max(xFim, xPrim + (S.length - 1) * 430 + 195);
@@ -8717,33 +8944,43 @@ function cena(c) {
       });
     }
     nos.forEach(no => {
-      const lista = grupos[no.nome] || [];
-      if (!lista.length) return;
+      const A = arv[no.nome];
+      if (!A || !A.diretos.length) return;
+      const lista = A.diretos;
       const colunas = Math.min(12, Math.max(2, Math.ceil(Math.sqrt(lista.length * 1.9))));
       const fileiras = Math.ceil(lista.length / colunas);
+      // a coluna alarga quando alguém pendura em instrumento (ver fieldbus)
+      const pX = A.fundo ? Math.max(passoX, 132 + (A.fundo - 1) * RECUO) : passoX;
       const x0 = no.x + 96, y0 = no.y + 28, xBar = x0 - 40;
+      const yFil = [y0];
+      for (let f = 1; f < fileiras; f++) {
+        const acima = lista.slice((f - 1) * colunas, f * colunas);
+        yFil.push(yFil[f - 1] + queda - 30
+                  + Math.max(...acima.map(r => altSub(r, A.filhos))) + VAO);
+      }
       // a bandeja sai da caixa, desce por trás das fileiras e serve uma calha
       // para cada uma. O ramal colorido é só o trecho do instrumento.
       p.push(calha(`M${no.x + 40} ${no.y + 28} H${xBar}`, lista, 3.4));
-      p.push(calha(`M${xBar} ${y0} V${y0 + (fileiras - 1) * fila}`, lista, 2.8));
+      p.push(calha(`M${xBar} ${y0} V${yFil[fileiras - 1]}`, lista, 2.8));
       for (let f = 0; f < fileiras; f++) {
         const fatia = lista.slice(f * colunas, (f + 1) * colunas);
-        p.push(calha(`M${xBar} ${y0 + f * fila}
-                      H${Math.max(x0 + (fatia.length - 1) * passoX + 26, xBar + 30)}`,
+        p.push(calha(`M${xBar} ${yFil[f]}
+                      H${Math.max(x0 + (fatia.length - 1) * pX + 26, xBar + 30)}`,
                      fatia, 2.8));
       }
       lista.forEach((r, i) => {
-        const xi = x0 + (i % colunas) * passoX + 26;
-        const yi = y0 + Math.floor(i / colunas) * fila + queda;
-        p.push(fio(zigue(xi, y0 + Math.floor(i / colunas) * fila, xi, yi - 25,
+        const f = Math.floor(i / colunas);
+        const xi = x0 + (i % colunas) * pX + 26, yi = yFil[f] + queda;
+        p.push(fio(zigue(xi, yFil[f], xi, yi - 25,
                          Math.min(9, queda / 12)), r, 2, 'ramal até o instrumento'));
-        p.push(malhaDoCabo(xi, y0 + Math.floor(i / colunas) * fila, yi - 25, r));
+        p.push(malhaDoCabo(xi, yFil[f], yi - 25, r));
         p.push(cartao(xi, yi, r));
         xFim = Math.max(xFim, xi + 50);
+        desce(r, xi, yi, A.filhos);
       });
     });
   }
-  return `<svg class="cena" viewBox="0 0 ${Math.max(xFim + 40, 1100)} ${ALT}" role="img"
+  return `<svg class="cena" viewBox="0 0 ${Math.max(xFim + 40, 1100)} ${Math.max(ALT, Math.ceil(yMax + 54))}" role="img"
     aria-label="Trajeto físico: a elétrica alimenta o painel ${esc(String(c.painel))},
     o tronco segue até ${esc(c.caixa)} e os instrumentos derivam das caixas">
     ${p.join('')}</svg>`;
@@ -9501,11 +9738,18 @@ def cert_altura(cad: dict, largura_px: int = 1320) -> int:
     deixava meia tela de vazio e uma de 60 nascia cortada. As contas aqui são
     as mesmas do desenho -- se mudarem lá, mudam aqui, e é por isso que os
     números estão nomeados dos dois lados.
+
+    A grade só distribui quem pendura na CAIXA; quem pendura em outro
+    instrumento desce embaixo dele (cert_pendurados), e a fileira fica tão
+    alta quanto a árvore mais funda dela. Por isso o pé do desenho é medido
+    fileira a fileira, com as mesmas contas da cena -- a fórmula antiga só
+    via fileiras de altura fixa.
     """
     grupos: dict[str, list] = {}
     for r in cad["ramais"]:
         grupos.setdefault(r.get("seg") or cad["caixa"], []).append(r)
-    maior = max((len(v) for v in grupos.values()), default=1)
+    arv = {k: _cert_arvore(v) for k, v in grupos.items()}
+    maior = max((len(a["diretos"]) for a in arv.values()), default=1) or 1
     ff = cad["tipo"] == "cff"
     cols = 3 if ff else min(12, max(2, math.ceil(math.sqrt(maior * 1.9))))
     fileiras = math.ceil(maior / cols)
@@ -9517,6 +9761,27 @@ def cert_altura(cad: dict, largura_px: int = 1320) -> int:
     rot = 11 if any(r.get("fseg") for r in cad["ramais"]) else 0
     alt = ((150 + 146 + queda + (fileiras - 1) * fila + 76 + rot) if ff
            else max(460, 190 + 28 + queda + (fileiras - 1) * fila + 76 + rot))
+    # o pé real, com as árvores: yBar/y0 e o passo das fileiras são os da cena
+    base = 150 if ff else 190
+    y_max = 0.0
+    for a in arv.values():
+        lista = a["diretos"]
+        if not lista:
+            continue
+        if ff:
+            px = (min(210, 132 + (a["fundo"] - 1) * CERT_RECUO) if a["fundo"]
+                  else passo_x + 6)
+            c = min(3 if px <= 140 else 2, len(lista))
+            y = base + 146
+        else:
+            c = min(12, max(2, math.ceil(math.sqrt(len(lista) * 1.9))))
+            y = base + 28
+        for f in range(math.ceil(len(lista) / c)):
+            fatia = lista[f * c:(f + 1) * c]
+            pe = y + queda - 30 + max(_cert_alt_sub(r, a["filhos"]) for r in fatia)
+            y_max = max(y_max, pe)
+            y = pe + CERT_VAO
+    alt = max(alt, math.ceil(y_max + 54))
     if ff:
         larg = max(400 + (len(cad["segmentos"]) - 1) * 430 + 195,
                    400 + (min(3, maior) - 1) * (passo_x + 6) + 64, 1100)
@@ -9533,7 +9798,17 @@ def cert_altura(cad: dict, largura_px: int = 1320) -> int:
     # dos instrumentos ficavam invisiveis, achados numa auditoria em
     # 2026-09-02. 1600 cobre o pior caso real da base (1203px) com folga
     # para a base crescer sem cortar de novo.
-    return int(min(1600, max(360, largura_px * alt / larg + 46)))
+    #
+    # A largura estimada aqui pode ficar ABAIXO da real quando uma caixa tem
+    # árvore (a coluna alarga): isso só sobra folga embaixo, nunca corta --
+    # a cena mais larga encolhe mais na mesma moldura.
+    #
+    # Teto 2200 (era 1600) desde 2026-09-11: com a cascata desenhada em árvore
+    # (cert_pendurados), a cadeia de UPS e baterias empilha na vertical -- a
+    # CJS-12001 (15 dos 16 ramais pendurados em instrumento) pede 1824px e as
+    # CJ-12001 a 12005 pedem 1656px. Com 1600 o pé da CJ-12001 sumia 56px. A
+    # auditoria das 275 caixas não achou nenhuma acima de 2000.
+    return int(min(2200, max(360, largura_px * alt / larg + 46)))
 
 
 def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataFrame,
@@ -9777,6 +10052,10 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
 
     tags_no_filtro = sorted(t for t in universo_f if cabe(por_tag[t]))
 
+    # os dois cards do avanço geral -- por malha e por segmento -- saem lado
+    # a lado no fim; cada um pode faltar se a base não trouxer a coluna
+    painel_malha = painel_geral = ""
+
     # Avanço por segmento. Fica depois dos filtros de propósito: escolhido um
     # painel, o gráfico compara os segmentos DELE -- é a pergunta que a aba
     # não respondia, e que obrigava a abrir caixa por caixa.
@@ -9832,43 +10111,6 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
             s["m"] = sum(metros_circ[c][0] for c in s["circ"])
             s["real"] = sum(metros_circ[c][1] for c in s["circ"])
         if segs:
-            # Do mais adiantado para o menos, sem separar concluído de não
-            # iniciado: é o ranking que Daniel pediu, cabo e geral na mesma
-            # ordem. Empate no percentual desempata pelo maior previsto -- é
-            # o tamanho que diz quanto aquele número pesa na obra.
-            def por_avanco(kv):
-                s = kv[1]
-                p = s["real"] / s["m"] * 100 if s["m"] else 0.0
-                return (-p, -s["m"])
-
-            ordem = sorted(segs.items(), key=por_avanco)
-            andando = sum(1 for _, s in ordem
-                          if s["m"] and 0 < s["real"] / s["m"] * 100 < 99.5)
-            prontos = sum(1 for _, s in ordem
-                          if s["m"] and s["real"] / s["m"] * 100 >= 99.5)
-            # O metro já vem capado no previsto pelo cert_metro_real, que é a
-            # mesma fonte do cartão "Avanço do cabo" -- então este percentual
-            # não passa de 100 e não é uma segunda resposta para a pergunta
-            # que o cartão já responde.
-            linhas_seg = []
-            for nome_seg, s in ordem:
-                p = s["real"] / s["m"] * 100 if s["m"] else 0.0
-                linhas_seg.append(
-                    f'<div class="cs-lin"><span class="cs-seg">{esc(nome_seg)}</span>'
-                    f'<div class="cs-trilho"><i class="{classe_avanco(p)}" '
-                    f'style="width:{min(max(p, 0), 100):.1f}%"></i></div>'
-                    f'<span class="cs-num"><b class="{classe_avanco(p)}">{br_pct(p)}</b>'
-                    f' · {br_num(int(s["real"]))}/{br_num(int(s["m"]))} m'
-                    f' · {br_num(len(s["caixas"]))} cx'
-                    f' · {br_num(s["tags"])} TAG{"s" if s["tags"] > 1 else ""}</span></div>')
-            painel_cabo = (
-                '<div class="gplan-panel pl-pn"><div class="gplan-panel-title">'
-                'Avanço do cabo por segmento'
-                f'<span class="pl-res">{br_num(len(ordem))} '
-                f'segmento{"s" if len(ordem) > 1 else ""} · '
-                f'<b class="andando">{br_num(andando)}</b> em andamento · '
-                f'<b class="feito">{br_num(prontos)}</b> com cabo pronto'
-                f'</span></div><div class="cs-lista">{"".join(linhas_seg)}</div></div>')
 
             # Avanço geral: o cabo do segmento pesa 1 unidade (a própria
             # porcentagem dele) e cada TAG pesa outra (100 se montada, 0 se
@@ -9911,7 +10153,45 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                 f'{"s" if prontos_geral > 1 else ""}'
                 f'</span></div><div class="cs-lista">{"".join(linhas_geral)}</div></div>')
 
-            render_html(f'<div class="cs-duas">{painel_cabo}{painel_geral}</div>')
+    # Avanço geral por MALHA, no lugar do antigo "Avanço do cabo por
+    # segmento" (usuário, 2026-09-11) -- mesma conta do avanço geral por
+    # segmento, recortada por malha (ver cert_avanco_malhas). Fica fora do
+    # bloco do segmento porque malha sem fieldbus não tem segmento, e o card
+    # sumiria junto com ele.
+    if any(c == "MALHA" for c, _ in campos):
+        vis_malha = {atrib[t]["MALHA"] for t in universo_f
+                     if atrib.get(t, {}).get("MALHA")}
+        ordem_malha = cert_avanco_malhas(universo, vis_malha, por_tag, atrib,
+                                         circ_da_ponta, metros_circ)
+        if ordem_malha:
+            andando_m = sum(1 for _, mm in ordem_malha if 0 < mm["geral"] < 99.5)
+            prontas_m = sum(1 for _, mm in ordem_malha if mm["geral"] >= 99.5)
+            linhas_malha = []
+            for nome_malha, mm in ordem_malha:
+                p = mm["geral"]
+                linhas_malha.append(
+                    f'<div class="cs-lin"><span class="cs-seg">{esc(nome_malha)}</span>'
+                    f'<div class="cs-trilho"><i class="{classe_avanco(p)}" '
+                    f'style="width:{min(max(p, 0), 100):.1f}%"></i></div>'
+                    f'<span class="cs-num"><b class="{classe_avanco(p)}">{br_pct(p)}</b>'
+                    f' · {br_num(mm["montadas"])}/{br_num(mm["tags"])}'
+                    f' TAG{"s" if mm["tags"] != 1 else ""} montada'
+                    f'{"s" if mm["montadas"] != 1 else ""}</span></div>')
+            painel_malha = (
+                '<div class="gplan-panel pl-pn"><div class="gplan-panel-title">'
+                'Avanço geral por malha'
+                f'<span class="pl-res">{br_num(len(ordem_malha))} '
+                f'malha{"s" if len(ordem_malha) > 1 else ""} · '
+                f'<b class="andando">{br_num(andando_m)}</b> em andamento · '
+                f'<b class="feito">{br_num(prontas_m)}</b> completa'
+                f'{"s" if prontas_m > 1 else ""}'
+                f'</span></div><div class="cs-lista cs-malha">'
+                f'{"".join(linhas_malha)}</div></div>')
+    if painel_malha and painel_geral:
+        render_html(f'<div class="cs-duas">{painel_malha}{painel_geral}</div>')
+    elif painel_malha or painel_geral:
+        render_html(painel_malha or painel_geral)
+
     # Um recorte vazio não pode apagar a tela: "TAG apta" hoje tem zero, e a
     # aba inteira sumia junto. A busca cai de volta para todas, e quem explica
     # o vazio é a tabela, no lugar dela.
@@ -11199,21 +11479,25 @@ def pill_prioridade(v: object) -> str:
     return f'<span class="gtbl-badge {tom}">{esc(v)}</span>'
 
 
-MIN_TAGS_GRAFICO = 5
-
-
 def grafico_avanco(titulo: str, g: pd.DataFrame, coluna: str,
-                   rotulo_sub: str = "", limite: int = 5) -> str:
-    """Barras dos mais avancados, para indicar por onde comecar.
+                   rotulo_sub: str = "", rotulo_itens: str = "grupos") -> str:
+    """O nível inteiro, do mais avançado ao menos, numa lista que rola.
 
-    Exige MIN_TAGS_GRAFICO: sem isso o ranking enche de pacotes de 1 TAG, que
-    sobem por acaso e nao representam trabalho relevante.
+    Eram só os 5 mais avançados, e ainda com um mínimo de 5 TAGs por grupo
+    pra entrar -- em Malha isso escondia 1.521 das 1.581. O usuário quer ver
+    todos (2026-09-11): a lista traz o nível inteiro e o card mantém a
+    altura de antes, o resto se vê rolando dentro dele.
+
+    Empate no percentual põe o grupo com mais TAGs na frente. É o que
+    impede um pacote de 1 TAG a 100% de passar à frente de um de 40 --
+    que era o motivo do mínimo antigo, e continua resolvido sem esconder
+    ninguém.
     """
-    validos = g[~g[coluna].apply(vazio) & (g["tags"] >= MIN_TAGS_GRAFICO)]
-    dados = validos.nlargest(limite, "avanco")
+    validos = g[~g[coluna].apply(vazio)]
+    dados = validos.sort_values(["avanco", "tags"], ascending=[False, False])
     if dados.empty:
         return (f'<div class="gplan-panel gr-panel"><div class="gplan-panel-title">{esc(titulo)}</div>'
-                f'<div class="gtbl-empty">Nenhum grupo com {MIN_TAGS_GRAFICO}+ tags.</div></div>')
+                f'<div class="gtbl-empty">Nenhum grupo neste recorte.</div></div>')
     linhas = ""
     for _, r in dados.iterrows():
         pct = r["avanco"]
@@ -11231,10 +11515,13 @@ def grafico_avanco(titulo: str, g: pd.DataFrame, coluna: str,
               <div class="gr-sub">{quant} · prioridade {esc(r['prioridade'])}</div>
             </div>
         """
+    n = len(dados)
+    itens = rotulo_itens[:-1] if (n == 1 and rotulo_itens.endswith("s")) else rotulo_itens
     return (
         '<div class="gplan-panel gr-panel">'
-        f'<div class="gplan-panel-title">{esc(titulo)}</div>'
-        f"{linhas}</div>"
+        f'<div class="gplan-panel-title">{esc(titulo)}'
+        f'<span class="gr-conta">{br_num(n)} {esc(itens)}</span></div>'
+        f'<div class="gr-lista">{linhas}</div></div>'
     )
 
 
@@ -11810,7 +12097,7 @@ def _tabela_tags(sub: pd.DataFrame, com_modal: bool = True) -> str:
 
 
 def _graficos(df: pd.DataFrame, esperados: pd.DataFrame):
-    """Os quatro recortes mais avancados: onde ha mais chance de fechar rapido.
+    """Os quatro níveis, cada um inteiro, do mais avançado ao menos.
 
     Um grid CSS unico, e nao st.columns: cada coluna do Streamlit empilha de
     forma independente, entao com poucos itens as colunas ficavam com alturas
@@ -11818,12 +12105,13 @@ def _graficos(df: pd.DataFrame, esperados: pd.DataFrame):
     """
     blocos = "".join([
         grafico_avanco("Fases mais avançadas", agrega_nivel(df, esperados, "FASE", subnivel="SOP"),
-                       "FASE", rotulo_sub="SOP"),
+                       "FASE", rotulo_sub="SOP", rotulo_itens="fases"),
         grafico_avanco("SOP mais avançados", agrega_nivel(df, esperados, "SOP", subnivel="SSOP"),
-                       "SOP", rotulo_sub="SSOP"),
+                       "SOP", rotulo_sub="SSOP", rotulo_itens="SOPs"),
         grafico_avanco("SSOP mais avançados", agrega_nivel(df, esperados, "SSOP", subnivel="MALHA"),
-                       "SSOP", rotulo_sub="malhas"),
-        grafico_avanco("Malhas mais avançadas", agrega_nivel(df, esperados, "MALHA"), "MALHA"),
+                       "SSOP", rotulo_sub="malhas", rotulo_itens="SSOPs"),
+        grafico_avanco("Malhas mais avançadas", agrega_nivel(df, esperados, "MALHA"), "MALHA",
+                       rotulo_itens="malhas"),
     ])
     render_html(f'<div class="gr-grid">{blocos}</div>')
 
