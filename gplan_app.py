@@ -1856,7 +1856,7 @@ def inject_css():
         .rd-painel { padding:14px 18px 10px; }
         .rd-cab { display:flex; justify-content:space-between; align-items:center;
                   gap:16px; flex-wrap:wrap; margin-bottom:6px; }
-        .rd-legenda { display:flex; gap:15px; flex-wrap:wrap; font-size:11.5px;
+        .rd-legenda { display:flex; gap:18px; flex-wrap:wrap; font-size:13px;
                       color:var(--text-2); }
         .rd-legenda span.m { display:inline-block; margin-right:5px; vertical-align:middle; }
         .rd-legenda .l-real .m, .rd-legenda .l-prev .m, .rd-legenda .l-tend .m {
@@ -1865,37 +1865,49 @@ def inject_css():
         .rd-legenda .l-prev .m { border-color:var(--text-3); border-top-style:solid; }
         .rd-legenda .l-tend .m { border-top-style:dashed; border-color:var(--accent-amber); }
         .rd-l-prog { stroke:var(--text-3); stroke-width:2; opacity:.75; }
-        .rd-legenda .b-prog .m, .rd-legenda .b-mont .m, .rd-legenda .b-prev .m {
+        .rd-legenda .b-prev .m, .rd-legenda .b-real .m {
                       width:9px; height:11px; border-radius:2px; vertical-align:-1px; }
-        .rd-legenda .b-prog .m { background:var(--text-3); opacity:.55; }
-        .rd-legenda .b-mont .m { background:var(--accent-teal); }
-        .rd-legenda .b-prev .m { background:var(--accent-blue); }
-        .rd-eixos { display:flex; gap:14px; font-size:10px; font-weight:700;
+        .rd-legenda .b-prev .m { background:var(--text-3); opacity:.55; }
+        .rd-legenda .b-real .m { background:var(--accent-teal); }
+        .rd-eixos { display:flex; gap:14px; font-size:12px; font-weight:700;
                     text-transform:uppercase; letter-spacing:.4px; color:var(--text-3); }
-        .rd-svg { width:100%; height:auto; display:block; }
-        .rd-eixo-esq { font-size:9.5px; fill:var(--text-3); }
-        .rd-eixo-dir { font-size:9.5px; fill:var(--accent-blue); opacity:.85; }
-        .rd-eixo-legenda { font-size:9.5px; fill:var(--text-3); opacity:.7; }
-        .rd-b-prog { fill:var(--text-3); opacity:.5; }
-        .rd-b-mont { fill:var(--accent-teal); opacity:.62; }
-        .rd-b-mont.ok { opacity:1; }
-        .rd-b-prev { fill:var(--accent-blue); opacity:.75; }
+        /* o desenho tem largura propria (ver _rd_grafico) e o painel rola:
+           espremido na largura da tela os rotulos se embaralhavam */
+        .rd-rolo { overflow-x:auto; overflow-y:hidden; padding-bottom:4px; }
+        .rd-svg { display:block; max-width:none; }
+        .rd-eixo-esq { font-size:12px; fill:var(--text-3); }
+        .rd-eixo-dir { font-size:12px; fill:var(--accent-blue); opacity:.85; }
+        .rd-eixo-legenda { font-size:12px; fill:var(--text-3); opacity:.7; }
+        .rd-svg .cs-rotulo-x { font-size:13px; font-weight:600; }
+        .rd-svg .cs-hoje-rotulo, .rd-svg .cs-prazo-rotulo { font-size:13px; }
+        .rd-svg .cs-linha { stroke-width:3px; }
+        .rd-b-prev { fill:var(--text-3); opacity:.5; }
+        .rd-b-real { fill:var(--accent-teal); opacity:.62; }
+        .rd-b-real.ok { opacity:1; }
+        /* valor de pe em cima da barra: em ~54 semanas nao ha largura
+           pra numero deitado, e ele e o principal da leitura semanal */
+        .rd-vlr-barra { font-size:10.5px; font-weight:700; fill:var(--text-2);
+                        paint-order:stroke; stroke:var(--dark-card);
+                        stroke-width:3px; stroke-linejoin:round; }
         .rd-pt-real { fill:var(--accent-teal); stroke:var(--dark-card); stroke-width:1.2; }
         .rd-pt-tend { fill:var(--accent-amber); stroke:var(--dark-card); stroke-width:1.2; }
-        .rd-l-prev { stroke:var(--text-3); stroke-width:2; opacity:.85; }
-        .rd-vlr-tend { fill:var(--accent-amber); }
+        .rd-l-prev { stroke:var(--text-3); stroke-width:3; opacity:.85; }
         /* halo da cor do painel atras do numero: ele cai em cima das
            barras da semana, e sem isso some no meio delas */
-        .rd-vlr-real, .rd-vlr-prev, .rd-vlr-tend { font-size:10px; font-weight:800;
-                      paint-order:stroke; stroke:var(--dark-card); stroke-width:3.5px;
-                      stroke-linejoin:round; }
+        .rd-vlr-acum { font-size:11px; font-weight:800; paint-order:stroke;
+                       stroke:var(--dark-card); stroke-width:3.2px;
+                       stroke-linejoin:round; }
         .rd-vlr-real { fill:var(--accent-teal); }
         .rd-vlr-prev { fill:var(--text-2); }
+        .rd-vlr-tend { fill:var(--accent-amber); }
         .rd-pt-prev { fill:var(--text-3); stroke:var(--dark-card); stroke-width:1.2; }
-        .rd-b-prog:hover, .rd-b-mont:hover, .rd-b-prev:hover { opacity:1; }
+        .rd-b-prev:hover, .rd-b-real:hover { opacity:1; }
         .rd-pt-real:hover, .rd-pt-prev:hover { r:4.5; }
 
-        .rd-tabela th .sub { display:block; font-size:9px; font-weight:600;
+        .rd-tabela { font-size:14px; }
+        .rd-tabela th { font-size:11.5px; }
+        .rd-tabela td { padding:10px 16px; }
+        .rd-tabela th .sub { display:block; font-size:10px; font-weight:600;
                              text-transform:none; letter-spacing:0; color:var(--text-3); }
         .rd-tabela td.num { text-align:right; }
         .rd-tabela td.num.verde { color:var(--accent-teal); font-weight:700; }
@@ -13107,33 +13119,37 @@ def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
 
 
 # =====================================================================
-# Rundown -- quanto programar por semana pra fechar cada fase na data.
+# Rundown -- quanto falta montar, semana a semana, até zerar no prazo.
 #
-# A pergunta que a tela responde (usuário, 2026-09-09): "saber quanto vou
-# precisar programar por semana, pra que eu consiga atingir o objetivo
-# final que é a data limite".
+# O MODELO É DO USUÁRIO, e as quantidades são dele (2026-09-10): "irei
+# fazer manual todo preenchimento". Quem digita as três séries semanais é
+# ele, na aba CURVA da 10_BASE_RUNDOWN. Nada aqui distribui quantidade
+# sozinho -- a versão anterior calculava a curva a partir de saldo, prazo
+# e produtividade, e foi justamente isso que ele mandou tirar.
 #
-# EXECUTADO (semana atual e anteriores) sai da 01_BASE_TAGS cruzando
-# SEMANA_PROGRAMADA com STATUS_MONTAGEM -- a semana diz quando a TAG
-# entrou na programação, o status diz se fechou. É o número que o usuário
-# confere na mão: na S62 foram programadas 89 e montadas 63.
+# O ÚNICO automático é o que ele pediu que fosse: "a contagem e ponderação
+# do quantitativo total em cima dos realizado". Ou seja, o app conta o
+# universo da fase na 01_BASE_TAGS e desce esse total contra o realizado,
+# semana a semana. Daí sair rundown: começa na S42 com as 5.026 pendentes
+# e cai até zero, em vez de subir de zero a 100%.
 #
-# PREVISTO (semanas futuras) sai de três fatores, nessa ordem:
-#   1. o SALDO da fase (o que ainda não foi montado);
-#   2. o PRAZO da fase, medido em dias ÚTEIS (fim de semana e feriado
-#      nacional fora -- ver _e_dia_util);
-#   3. a PRODUTIVIDADE média já demonstrada, que é onde a curva começa.
+# As três séries, e o que separa uma da outra:
 #
-# A produtividade é sempre medida no universo COMPLETO, misturando
-# prioritário e não prioritário -- regra do usuário: é a mesma equipe
-# montando, então a capacidade demonstrada vale integralmente pra
-# qualquer recorte. Se o time entrega 31/semana misturado, entrega
-# 31/semana só de prioritário quando focar neles.
+#   PREVISTO   a meta fixa que ele definiu pra fechar cada prazo. Não se
+#              mexe sozinha e não olha o que foi executado -- é a régua.
 #
-# A distribuição NÃO é um número fixo repetido: é curva, suave nas duas
-# pontas (rampa de mobilização no início, desmobilização no fim, platô no
-# meio) -- ver _rd_curva. O platô sai da área: é o que faz a soma das
-# semanas fechar exatamente o saldo dentro do prazo.
+#   REALIZADO  o que a obra fez na semana. Vale o que ele lançou; onde
+#              ainda não lançou, vale o montado da 01_BASE_TAGS
+#              (SEMANA_PROGRAMADA x STATUS_MONTAGEM), pra série não abrir
+#              buraco na semana que ele não chegou a preencher.
+#
+#   TENDÊNCIA  continua de onde o REALIZADO parou -- do último lançamento,
+#              não de uma data do calendário. Quando a produção passa do
+#              previsto, é ela que antecipa o prazo.
+#
+# E PROGRAMADO não é PREVISTO: previsto é a meta, programado é o que de
+# fato entrou na programação da semana. Programar acima do previsto é o
+# caminho de antecipar, então as duas colunas convivem na tabela.
 # =====================================================================
 
 # Os valores abaixo são o PADRÃO: valem enquanto a aba 10_BASE_RUNDOWN não
@@ -13325,8 +13341,10 @@ def rundown_config(cache_key: str) -> dict:
             entrada = {}
             for coluna, chave in (("PREVISTO_GERAL", ("geral", "previsto")),
                                   ("TENDENCIA_GERAL", ("geral", "tendencia")),
+                                  ("REALIZADO_GERAL", ("geral", "realizado")),
                                   ("PREVISTO_PRIO", ("prioritario", "previsto")),
-                                  ("TENDENCIA_PRIO", ("prioritario", "tendencia"))):
+                                  ("TENDENCIA_PRIO", ("prioritario", "tendencia")),
+                                  ("REALIZADO_PRIO", ("prioritario", "realizado"))):
                 v = r.get(coluna)
                 if v is not None and not pd.isna(v):
                     entrada[chave] = cert_num(v)
@@ -13425,265 +13443,116 @@ def _rd_produtividade(tags: pd.DataFrame, semana_atual: int, cfg: dict) -> dict:
     }
 
 
-def _rd_curva(saldo: float, dias_uteis: list[int], prod_dia: float,
-              cfg: dict) -> list[float]:
-    """Reparte o saldo pelas semanas do horizonte como CURVA, não como
-    número fixo repetido.
-
-    Duas coisas decidem o tamanho de cada semana:
-
-    1. a FORMA -- sobe da intensidade de hoje até um platô, fica, e desce
-       até zero, as duas rampas em smootherstep, sem degrau em canto nenhum;
-    2. os DIAS ÚTEIS daquela semana -- semana de feriado tem menos dia,
-       então recebe menos trabalho, e as duas pontas do horizonte (a semana
-       em curso e a do prazo, ambas parciais) idem.
-
-    O peso de cada semana é o produto dos dois, e o previsto é o saldo
-    repartido por esses pesos. Por ser proporcional, a soma fecha o saldo
-    exato qualquer que seja o formato -- e nenhuma semana sai igual à outra,
-    porque o calendário nunca dá duas semanas idênticas.
-
-    A altura de partida da rampa é a razão entre o que a obra entrega hoje
-    por dia útil e o que a data exige por dia útil: entregando 6/dia contra
-    29/dia exigidos, a curva começa em ~21% do platô e sobe de lá.
-    """
-    n = len(dias_uteis)
-    if saldo <= 0 or n == 0:
-        return [0.0] * n
-    uteis_total = sum(dias_uteis)
-    if uteis_total <= 0:
-        return [0.0] * n
-
-    exigido_dia = saldo / uteis_total
-    inicio = 0.15 if not exigido_dia else min(max((prod_dia or 0.0) / exigido_dia, 0.10), 1.0)
-    a, b = cfg["rampa_ini"], cfg["rampa_fim"]
-
-    pesos = []
-    for i, du in enumerate(dias_uteis):
-        t = (i + 0.5) / n
-        if a > 0 and t < a:
-            forma = inicio + (1.0 - inicio) * _smootherstep(t / a)
-        elif b > 0 and t > 1 - b:
-            forma = 1.0 - (1.0 - cfg["piso"]) * _smootherstep((t - (1 - b)) / b)
-        else:
-            # O trecho de cruzeiro leva um domo de 5% em vez de ser reto:
-            # uma dezena de semanas com exatamente o MESMO número não
-            # existe em obra nenhuma, e era o que mais destoava na versão
-            # anterior. Cinco por cento não mexe no pico nem no prazo --
-            # só desmancha a repetição.
-            u = (t - a) / max(1 - a - b, 1e-9)
-            forma = 0.95 + 0.05 * math.sin(math.pi * u)
-        pesos.append(max(forma, 0.0) * du)
-
-    soma = sum(pesos)
-    if soma <= 0:
-        return [saldo / n] * n
-    # diferença de acumulados arredondados: a soma fecha o saldo exato, em
-    # vez de escorrer dezenas de instrumentos no arredondamento semana a
-    # semana ao longo de todo o horizonte.
-    saida, corrido, anterior = [], 0.0, 0.0
-    for p in pesos:
-        corrido += p
-        acumulado = round(saldo * corrido / soma)
-        saida.append(float(acumulado - anterior))
-        anterior = acumulado
-    return saida
-
-
-def _rd_manual(serie: dict[int, float], cfg: dict, fase: str,
-               qual: str) -> dict[int, float]:
-    """Aplica por cima de uma série calculada o que o usuário digitou na aba
-    CURVA da planilha de configuração.
-
-    Semana sem valor na planilha continua com o número que o app calculou;
-    semana com valor passa a valer o dele. É o que devolve o controle do
-    primeiro preenchimento -- e de qualquer ajuste fino depois -- para quem
-    conhece a obra, sem obrigar a preencher a planilha inteira.
-    """
-    if not cfg.get("curva"):
-        return serie
-    saida = dict(serie)
-    for semana, valores in cfg["curva"].items():
-        v = valores.get((fase, qual))
-        if v is not None and semana in saida:
-            saida[semana] = v
-    return saida
-
-
 def _rd_fase(tags: pd.DataFrame, chave: str, rotulo: str, prod: dict,
              cfg: dict) -> dict:
-    """Uma fase inteira, em três séries que não se confundem:
+    """Uma fase inteira, nas três séries que o usuário mantém à mão.
 
-    PREVISTO é a linha de referência e NÃO MUDA por hipótese nenhuma. Vai da
-    primeira semana do cronograma até a data limite, distribuindo o TOTAL da
-    fase -- não o saldo. É gerada do início ao fim com um objetivo só:
-    fechar 100% no prazo. Por não olhar o que foi executado, ela serve de
-    régua: é contra ela que se mede adiantamento e atraso.
+    Os valores SEMANAIS das três séries saem todos da aba CURVA da
+    10_BASE_RUNDOWN. Nada aqui inventa quantidade: o que o app faz é só o
+    que ele pediu que fosse automático -- contar o universo da fase e
+    ponderar esse total contra o realizado, semana a semana, pra virar
+    rundown (parte do total pendente e desce até zero).
 
-    REAL é o executado acumulado, semana a semana, até hoje.
+    PREVISTO é a meta fixa que ele definiu pra fechar cada prazo.
+    REALIZADO é o que a obra fez na semana: o que ele lançou e, onde ainda
+    não lançou, o que a 01_BASE_TAGS registra como montado naquela semana.
+    TENDÊNCIA continua de onde o realizado parou -- por isso ela começa
+    depois do último lançamento, e não numa data do calendário. É ela que
+    antecipa o prazo quando a produção passa do previsto.
 
-    TENDÊNCIA continua o real de hoje em diante, no ritmo que a obra vem
-    demonstrando. É a junção REAL + TENDÊNCIA que se move a cada semana
-    reportada, enquanto o Previsto fica parado -- e a distância entre as
-    duas na data limite é o tamanho do problema.
-
-    A régua e a projeção usam a mesma _rd_curva (rampas suaves e peso por
-    dia útil), então nenhuma das duas inventa semana igual à outra nem
-    ignora feriado.
+    PROGRAMADO não é PREVISTO. Previsto é a meta; programado é o que de
+    fato entrou na programação da semana, e pode ser maior de propósito --
+    é assim que se antecipa. Os dois convivem na tabela lado a lado.
     """
     hoje = date.today()
     semana_atual = _rd_semana_da_data(hoje, cfg)
     prazo = cfg["prazos"][chave]
-    semana_prazo = max(_rd_semana_da_data(prazo, cfg), semana_atual)
+    semana_prazo = _rd_semana_da_data(prazo, cfg)
 
     universo = _rd_universo(tags, chave == "prioritario")
     total = float(len(universo))
-    montado_total = float((universo["STATUS_MONTAGEM"].astype(str).str.strip()
-                           == "Montado").sum()) if "STATUS_MONTAGEM" in universo.columns else 0.0
-    saldo = max(total - montado_total, 0.0)
     hist = _rd_historico(universo)
-    s_ini = min(hist) if hist else semana_atual
+    curva = cfg.get("curva") or {}
+    QUAIS = ("previsto", "tendencia", "realizado")
 
-    # ---------------- PREVISTO: a régua, do início ao prazo ----------------
-    # Distribui o total sobre TODAS as semanas do cronograma, inclusive as
-    # que já passaram. Começa baixo (10% do platô, mobilização) porque no
-    # início de obra ninguém monta no ritmo de cruzeiro.
-    semanas_previsto = list(range(s_ini, semana_prazo + 1))
-    uteis_previsto = [_rd_dias_uteis_semana(s, cfg, ate=prazo if s == semana_prazo else None)
-                      for s in semanas_previsto]
-    previsto_sem = dict(zip(semanas_previsto,
-                            _rd_curva(total, uteis_previsto, 0.0, cfg)))
-    previsto_sem = _rd_manual(previsto_sem, cfg, chave, "previsto")
+    def manual(s: int, qual: str) -> float | None:
+        v = curva.get(s, {}).get((chave, qual))
+        return None if v is None else float(v)
 
-    # ---------------- TENDÊNCIA: o replanejamento ----------------
-    # Parte do saldo de HOJE e fecha esse saldo até a MESMA data limite --
-    # exatamente o que o usuário digitava na coluna Tendência da planilha
-    # "Distribuição de Quantidades": não é "onde vou chegar no ritmo atual",
-    # é "como redistribuir o que falta para ainda terminar na data". Por
-    # isso ela zera no prazo, como a régua, só que partindo de onde a obra
-    # está de verdade. É a série que se move a cada semana reportada.
-    media_dia = prod["media_dia"] or 0.0
-    semanas_futuras = list(range(semana_atual, semana_prazo + 1))
-    dias_por_semana = [
-        _rd_dias_uteis_semana(s, cfg, desde=hoje if s == semana_atual else None,
-                              ate=prazo if s == semana_prazo else None)
-        for s in semanas_futuras]
-    dias_uteis = sum(dias_por_semana)
+    def realizado(s: int) -> float | None:
+        """O lançamento do usuário manda. Onde ele ainda não lançou, vale o
+        que a base de tags registra -- assim a série não abre buraco na
+        semana que ele não chegou a preencher."""
+        v = manual(s, "realizado")
+        if v is not None:
+            return v
+        h = hist.get(s)
+        return float(h["montado"]) if h else None
 
-    # Prazo vencido (ou sem nenhum dia útil até ele): não há horizonte para
-    # diluir coisa nenhuma, e o recorte "até o prazo" zera todas as semanas.
-    # Sem este ramo a curva devolvia só zeros, o necessário sumia da tela e o
-    # saldo nunca chegava a zero -- o rundown ficava mudo justamente quando
-    # mais importa. O saldo inteiro passa a cair na semana em curso, que é a
-    # leitura honesta de "isto já era para estar pronto".
-    prazo_vencido = dias_uteis <= 0
-    if prazo_vencido:
-        semanas_futuras = [semana_atual]
-        dias_por_semana = [max(_rd_dias_uteis_semana(semana_atual, cfg, desde=hoje), 1)]
-        dias_uteis = dias_por_semana[0]
-    valores = _rd_curva(saldo, dias_por_semana, media_dia, cfg)
-    tendencia_sem = _rd_manual(dict(zip(semanas_futuras, valores)), cfg, chave, "tendencia")
-    valores = [tendencia_sem[s] for s in semanas_futuras if s in tendencia_sem]
-    uteis = dict(zip(semanas_futuras, dias_por_semana))
+    # --- a janela desenhada: da primeira semana com dado até o prazo ---
+    com_dado = [s for s, v in curva.items()
+                if any(v.get((chave, q)) is not None for q in QUAIS)]
+    s_ini = min(list(hist) + com_dado, default=semana_atual)
+    s_fim = max(semana_prazo, s_ini)
 
-    # ---------------- as linhas, semana a semana ----------------
-    # O horizonte desenhado para na data limite, mesmo quando a tendência
-    # atravessa e só fecha muito depois (no ritmo de hoje, o Geral fecharia
-    # perto da S200). Esticar o eixo até lá achataria as três curvas na
-    # faixa que interessa; o quanto a tendência passa do prazo já está no
-    # cartão "Término no ritmo atual", e o vão entre ela e a régua NA DATA
-    # LIMITE é o que o desenho precisa mostrar.
-    s_fim = semana_prazo
+    # --- até onde vai o REAL ---
+    # A fronteira é o último lançamento, não a data de hoje: é isso que
+    # define onde a tendência pega. O teto em semana_atual existe porque
+    # semana futura com programação na base traria montado 0 e empurraria
+    # a fronteira pra frente, cortando a tendência antes da hora.
+    ultima_real = max((s for s in range(s_ini, min(semana_atual, s_fim) + 1)
+                       if realizado(s) is not None), default=None)
+
     linhas = []
-    acumulado_montado = acumulado_programado = acumulado_previsto = 0.0
-    acumulado_tendencia = montado_total
-    saldo_corrente = saldo
+    ac_prev = ac_real = 0.0
+    saldo_corrente = total          # onde a tendência emenda quando o real acaba
     for s in range(s_ini, s_fim + 1):
         h = hist.get(s, {})
         programado = float(h["programado"]) if h else None
-        montado = float(h["montado"]) if h else None
-        futuro = s >= semana_atual
-        prev = previsto_sem.get(s)
-        tend = tendencia_sem.get(s) if futuro else None
-        du = uteis.get(s) or _rd_dias_uteis_semana(s, cfg)
+        prev = manual(s, "previsto")
+        e_real = ultima_real is not None and s <= ultima_real
+        real = realizado(s) if e_real else None
+        tend = manual(s, "tendencia") if not e_real else None
 
-        acumulado_previsto += (prev or 0.0)
-        if futuro:
-            acumulado_tendencia = min(acumulado_tendencia + (tend or 0.0), total)
-            saldo_fim = max(total - acumulado_tendencia, 0.0)
-            acum_real = None
-            acum_tend = acumulado_tendencia
+        ac_prev += (prev or 0.0)
+        saldo_previsto = max(total - ac_prev, 0.0)
+
+        if e_real:
+            ac_real += (real or 0.0)
+            saldo_corrente = max(total - ac_real, 0.0)
+            saldo_real, saldo_tendencia = saldo_corrente, None
         else:
-            acumulado_montado += (montado or 0.0)
-            acumulado_programado += (programado or 0.0)
-            saldo_fim = total - acumulado_montado
-            acum_real, acum_tend = acumulado_montado, None
-
-        # O que a semana pedia, numa coluna só, pra barra do gráfico poder
-        # comparar sempre a mesma coisa com o realizado: no passado e na
-        # semana em curso é o que estava PROGRAMADO (o plano que existia
-        # naquele momento); daí pra frente é o necessário, que é o plano que
-        # passa a existir. Sem unificar, a semana em curso ficava sem par de
-        # comparação no desenho.
-        plano = programado if (not futuro or s == semana_atual) else tend
-        if plano is None and futuro:
-            plano = tend
+            saldo_corrente = max(saldo_corrente - (tend or 0.0), 0.0)
+            saldo_real, saldo_tendencia = None, saldo_corrente
 
         linhas.append({
-            "semana": s, "futuro": futuro,
-            "data": _rd_inicio_semana(s, cfg), "dias_uteis": du,
-            "programado": programado, "montado": montado, "plano": plano,
-            "acumulado": acum_real,
-            "acumulado_programado": (acumulado_programado if not futuro else None),
-            "acumulado_previsto": (acumulado_previsto if prev is not None
-                                   or s <= semana_prazo else None),
-            "acumulado_tendencia": acum_tend,
-            # quanto o executado está acima (ou abaixo) da RÉGUA na mesma
-            # semana -- é o que responde "já executei mais que o previsto?"
-            "desvio_previsto": ((acumulado_montado - acumulado_previsto)
-                                if not futuro else None),
-            "desvio": ((acumulado_montado - acumulado_programado)
-                       if not futuro else None),
-            "aderencia": ((montado / programado * 100)
-                          if (programado and montado is not None) else None),
-            "previsto": prev, "tendencia": tend,
-            "saldo_previsto": max(total - acumulado_previsto, 0.0),
-            "tendencia_dia": ((tend / du) if (tend and du) else None),
-            "saldo": saldo_fim,
+            "semana": s, "data": _rd_inicio_semana(s, cfg),
+            "futuro": not e_real,
+            # MONTADO é o REALIZADO da planilha, não a contagem da base:
+            # tudo o que a curva mostra é o que ele lançou à mão (usuário,
+            # 2026-09-10). A base entra só como reserva, dentro de
+            # realizado(), quando a célula da semana está vazia. Antes esta
+            # coluna vinha direto do hist e contradizia a barra do gráfico
+            # na mesma semana -- S63 mostrava 32 aqui e 125 lá.
+            "programado": programado, "montado": real,
+            "aderencia": ((real / programado * 100)
+                          if (programado and real is not None) else None),
+            "previsto": prev, "realizado": real, "tendencia": tend,
+            "saldo_previsto": saldo_previsto,
+            "saldo_real": saldo_real,
+            "saldo_tendencia": saldo_tendencia,
+            "saldo": saldo_corrente,
         })
-
-    # ---------------- números derivados ----------------
-    media = prod["media"] or 0.0
-    semanas_no_ritmo = (saldo / media) if media > 0 else None
-    termino_no_ritmo = (_rd_inicio_semana(semana_atual + round(semanas_no_ritmo), cfg)
-                        if semanas_no_ritmo is not None and semanas_no_ritmo < 520 else None)
-    semanas_restantes = max(semana_prazo - semana_atual + 1, 0)
-    # a régua na semana de hoje é o que separa adiantado de atrasado
-    previsto_hoje = next((l["acumulado_previsto"] for l in linhas
-                          if l["semana"] == semana_atual - 1), None)
-    if previsto_hoje is None:
-        previsto_hoje = next((l["acumulado_previsto"] for l in linhas
-                              if l["semana"] == semana_atual), 0.0) or 0.0
 
     return {
         "chave": chave, "rotulo": rotulo, "prazo": prazo,
-        "total": total, "montado": montado_total, "saldo": saldo,
-        "pct": (montado_total / total * 100) if total else 0.0,
+        "total": total, "realizado_total": ac_real,
+        "previsto_total": ac_prev,
+        "saldo": max(total - ac_real, 0.0),
+        "pct": (ac_real / total * 100) if total else 0.0,
         "semana_atual": semana_atual, "semana_prazo": semana_prazo,
-        "janela": cfg["janela"], "cfg_origem": cfg["origem"],
-        "prazo_vencido": prazo_vencido,
-        "programado_hist": acumulado_programado,
-        "desvio": acumulado_montado - acumulado_programado,
-        "previsto_hoje": previsto_hoje,
-        "desvio_previsto": acumulado_montado - previsto_hoje,
-        "semanas_restantes": semanas_restantes, "dias_uteis": dias_uteis,
-        "ritmo_semana": (saldo / semanas_restantes) if semanas_restantes else None,
-        "ritmo_dia": (saldo / dias_uteis) if dias_uteis else None,
-        "pico": max(valores) if valores else 0.0,
-        "prod": prod,
-        "termino_no_ritmo": termino_no_ritmo,
-        "dias_vs_prazo": ((prazo - termino_no_ritmo).days
-                          if termino_no_ritmo is not None else None),
+        "s_ini": s_ini, "ultima_real": ultima_real,
+        "cfg_origem": cfg["origem"], "prod": prod,
         "linhas": linhas,
     }
 
@@ -13708,7 +13577,7 @@ def _rd_assinatura() -> str:
     dentro (que faria a chave mudar a cada run e o cache nunca pegar).
     """
     partes = []
-    for f in (_rd_fase, _rd_curva, _rd_historico, _rd_produtividade):
+    for f in (_rd_fase, _rd_historico, _rd_produtividade):
         codigo = f.__code__
         partes.append(codigo.co_code.hex())
         partes.append(repr([c for c in codigo.co_consts
@@ -13733,15 +13602,6 @@ def rundown_dados(tags: pd.DataFrame, cache_key: str) -> dict:
     """As duas fases do rundown, com a produtividade medida uma vez só no
     universo completo e reaproveitada nas duas (ver _rd_produtividade)."""
     return _rundown_dados(tags, cache_key, _rd_assinatura())
-
-
-def _smootherstep(t: float) -> float:
-    """Perlin's smootherstep: S suave entre 0 e 1, derivada zero nas duas
-    pontas -- arranca devagar, acelera no meio, desacelera perto do alvo. E
-    a forma que faz a curva parecer de fato um "S", em vez da reta crua que
-    uma interpolacao linear desenha entre dois pontos."""
-    t = max(0.0, min(1.0, t))
-    return t * t * t * (t * (t * 6 - 15) + 10)
 
 
 def _pascoa(ano: int) -> date:
@@ -13792,42 +13652,39 @@ def _rd_num(valor: float | None, casas: int = 1) -> str:
 
 
 def _rd_grafico(f: dict) -> str:
-    """O gráfico da aba -- curva acumulada e barras da semana no MESMO
-    desenho, cada um no seu eixo.
+    """O gráfico da aba: as três curvas acumuladas e as barras da semana no
+    MESMO desenho, cada grupo no seu eixo.
 
-    Eixo da ESQUERDA, as curvas acumuladas: montado (cheia, com área) e
-    previsto (tracejada), com um ponto em cada semana pra dar de ler
-    quantitativo e semana. Cobre o histórico inteiro, desde a primeira
-    semana programada.
+    Eixo da ESQUERDA, as curvas em SALDO A MONTAR -- começam no total
+    pendente da fase e descem até zero. São três: previsto (a meta fixa),
+    real (o que já caiu) e tendência (que emenda no último ponto do real e
+    segue dali). Cada semana tem uma bolinha nas três, e o acumulado sai no
+    tooltip dela.
 
-    Eixo da DIREITA, as barras: o que aconteceu ou está planejado NAQUELA
-    semana -- programado e montado no passado, previsto no futuro. Sem
-    esse segundo eixo a barra semanal (dezenas) sumiria embaixo da curva
-    acumulada (milhares).
-
-    As barras ficam só numa janela recente (JANELA_BARRAS da planilha de
-    configuração, 10 semanas por padrão): com o histórico inteiro elas viram
-    serrilha, e a leitura que interessa nelas é a das semanas em volta de
-    hoje.
+    Eixo da DIREITA, as barras: previsto e realizado DAQUELA semana, lado a
+    lado, do começo do cronograma até o fim da fase. Sem o segundo eixo a
+    barra semanal (dezenas) sumiria embaixo da curva acumulada (milhares).
+    O valor vai escrito em cada barra e em cada ponto das três curvas, e
+    repetido no tooltip. Pra caber número deitado em ~54 semanas o desenho
+    NÃO se espreme na largura do painel: tem largura própria, calculada a
+    partir do número de semanas, e o painel rola de lado. Espremido, os
+    rótulos precisavam se escalonar em duas alturas e o resultado ficava
+    embaralhado (usuário, 2026-09-10) -- é preferível rolar.
     """
     linhas = f["linhas"]
     if len(linhas) < 2:
         return '<div class="cs-vazio">Sem semanas suficientes para desenhar.</div>'
 
-    atual = f["semana_atual"]
+    ultima_real = f["ultima_real"]
     s_min, s_max = linhas[0]["semana"], linhas[-1]["semana"]
-    barras_desde = atual - f.get("janela", RUNDOWN_JANELA_BARRAS)
 
-    # eixo do saldo: começa no total e desce até zero -- é a leitura do
-    # rundown (contagem regressiva do que falta), a mesma do modelo que o
-    # usuário mantinha à mão
     acum_max = (f["total"] * 1.06) or 1.0
-    sem_max = max([v for l in linhas if l["semana"] >= barras_desde
-                   for v in (l["plano"], l["montado"]) if v] or [1.0])
-    sem_max = (sem_max * 1.35) or 1.0
+    sem_max = max([v for l in linhas
+                   for v in (l["previsto"], l["realizado"]) if v] or [1.0]) * 1.30
 
-    LARG, ALT = 1080, 430
-    PAD_ESQ, PAD_DIR, PAD_CIMA, PAD_BAIXO = 58, 52, 30, 44
+    PAD_ESQ, PAD_DIR, PAD_CIMA, PAD_BAIXO = 74, 66, 40, 56
+    LARG = PAD_ESQ + PAD_DIR + max(38 * (s_max - s_min), 900)
+    ALT = 560
     area_larg, area_alt = LARG - PAD_ESQ - PAD_DIR, ALT - PAD_CIMA - PAD_BAIXO
     base_y = PAD_CIMA + area_alt
     passo = area_larg / max(s_max - s_min, 1)
@@ -13853,110 +13710,104 @@ def _rd_grafico(f: dict) -> str:
                   f'<text x="{LARG-PAD_DIR+9}" y="{yy+4:.1f}" text-anchor="start" '
                   f'class="rd-eixo-dir">{br_num(round(frac * sem_max))}</text>')
 
-    # --- barras da semana (atrás das curvas) ---
-    # Sempre o mesmo par, lado a lado: o que a semana PEDIA e o que ela
-    # ENTREGOU. É o que responde de relance se a execução está alcançando o
-    # previsto daquela semana -- a curva acumulada sozinha esconde isso,
-    # porque um atraso de uma semana some no total acumulado.
-    visiveis = [l for l in linhas if l["semana"] >= barras_desde]
-    larg_barra = max(2.5, min(10.0, passo * 0.34))
+    # --- barras da semana (atrás das curvas), o cronograma inteiro ---
+    larg_barra = max(3.0, min(13.0, passo * 0.36))
     barras = ""
-    for l in visiveis:
+
+    def _barra(cx: float, valor: float, classe: str, titulo: str,
+               ancora: str, tx: float) -> str:
+        # O número fica deitado em cima da barra e cresce PRA FORA do centro
+        # da semana -- previsto pra esquerda, realizado pra direita. Centrado
+        # em cada barra os dois se sobrepunham, porque as barras do par ficam
+        # a poucos pixels uma da outra.
+        topo = y_sem(valor)
+        ty = topo - 4
+        return (f'<rect x="{cx:.1f}" y="{topo:.1f}" width="{larg_barra:.1f}" '
+                f'height="{(base_y - topo):.1f}" class="{classe}">'
+                f'<title>{titulo}</title></rect>'
+                f'<text x="{tx:.1f}" y="{ty:.1f}" class="rd-vlr-barra" '
+                f'text-anchor="{ancora}">{br_num(round(valor))}</text>')
+
+    for l in linhas:
         cx = x(l["semana"])
-        plano, feito_sem = l["plano"] or 0, l["montado"]
-        if plano > 0:
-            classe = "rd-b-prev" if l["futuro"] else "rd-b-prog"
-            rotulo = "tendência" if (l["futuro"] and l["semana"] != atual) else "programado"
-            barras += (f'<rect x="{cx - larg_barra - 0.5:.1f}" y="{y_sem(plano):.1f}" '
-                       f'width="{larg_barra:.1f}" height="{(base_y - y_sem(plano)):.1f}" '
-                       f'class="{classe}"><title>S{l["semana"]} · {rotulo} '
-                       f'{br_num(round(plano))} · {l["dias_uteis"]} dias úteis</title></rect>')
-        if feito_sem:
-            atinge = plano and feito_sem >= plano
-            barras += (f'<rect x="{cx + 0.5:.1f}" y="{y_sem(feito_sem):.1f}" '
-                       f'width="{larg_barra:.1f}" height="{(base_y - y_sem(feito_sem)):.1f}" '
-                       f'class="rd-b-mont{" ok" if atinge else ""}">'
-                       f'<title>S{l["semana"]} · montado {br_num(round(feito_sem))}'
-                       + (f' de {br_num(round(plano))} ({br_pct(feito_sem/plano*100, 0)})'
-                          if plano else "") + '</title></rect>')
+        prev, real = l["previsto"], l["realizado"]
+        if prev:
+            barras += _barra(cx - larg_barra - 0.8, prev, "rd-b-prev",
+                             f'S{l["semana"]} · previsto {br_num(round(prev))}',
+                             "end", cx - 1.6)
+        if real:
+            # cheia quando a semana alcançou o previsto: é a leitura de
+            # relance que a barra existe pra dar
+            atinge = prev and real >= prev
+            barras += _barra(cx + 0.8, real, f'rd-b-real{" ok" if atinge else ""}',
+                             f'S{l["semana"]} · realizado {br_num(round(real))}'
+                             + (f' de {br_num(round(prev))} '
+                                f'({br_pct(real / prev * 100, 0)})' if prev else ""),
+                             "start", cx + 1.6)
 
-    # --- curvas acumuladas + pontos ---
-    # As três séries em SALDO A MONTAR, descendo até zero.
-    # PREVISTO: a régua, do início ao prazo. Não muda com o que foi
-    # executado -- é contra ela que se lê adiantamento e atraso.
-    prev = [(l["semana"], l["saldo_previsto"])
-            for l in linhas if l["saldo_previsto"] is not None]
-    # REAL até hoje, e a TENDÊNCIA emendada nele: a tendência começa
-    # exatamente onde o real parou, para as duas formarem uma linha
-    # contínua em vez de um degrau.
-    feito = [(l["semana"], l["saldo"]) for l in linhas if l["acumulado"] is not None]
-    tend = [(l["semana"], l["saldo"]) for l in linhas if l["futuro"]]
-    if feito and tend:
-        tend = [feito[-1]] + tend
+    # --- as três curvas acumuladas ---
+    prev_pts = [(l["semana"], l["saldo_previsto"]) for l in linhas]
+    real_pts = [(l["semana"], l["saldo_real"])
+                for l in linhas if l["saldo_real"] is not None]
+    tend_pts = [(l["semana"], l["saldo_tendencia"])
+                for l in linhas if l["saldo_tendencia"] is not None]
+    # a tendência começa exatamente onde o real parou, pra as duas formarem
+    # uma linha contínua em vez de um degrau
+    if real_pts and tend_pts:
+        tend_pts = [real_pts[-1]] + tend_pts
 
-    def caminho(pts):
+    def caminho(pts) -> str:
         return " ".join(f"{'M' if i == 0 else 'L'}{x(s):.1f},{y_acum(v):.1f}"
                         for i, (s, v) in enumerate(pts))
 
     curvas = ""
-    if len(prev) > 1:
-        curvas += f'<path d="{caminho(prev)}" class="cs-linha rd-l-prev"/>'
-    if len(feito) > 1:
-        curvas += f'<path d="{caminho(feito)}" class="cs-linha cs-real"/>'
-    if len(tend) > 1:
-        curvas += f'<path d="{caminho(tend)}" class="cs-linha cs-tendencia"/>'
+    for pts, classe in ((prev_pts, "rd-l-prev"), (real_pts, "cs-real"),
+                        (tend_pts, "cs-tendencia")):
+        if len(pts) > 1:
+            curvas += f'<path d="{caminho(pts)}" class="cs-linha {classe}"/>'
 
-    # Um ponto por semana em cada série, com o acumulado escrito de tantas
-    # em tantas semanas. Escrever em TODAS apagaria o desenho (são 50+), e
-    # não escrever nenhuma obrigaria a passar o mouse ponto a ponto pra ler
-    # o número -- o valor aparece a cada `passo_valor` semanas e sempre nas
-    # pontas que importam: hoje e a data limite.
-    passo_valor = max(2, round((s_max - s_min) / 9))
+    # --- bolinha e acumulado escrito, semana a semana, nas três curvas ---
+    # Em cada semana são só DOIS rótulos, nunca três: real e tendência não
+    # existem na mesma semana (uma termina onde a outra começa). O previsto
+    # fica ACIMA do ponto e o outro ABAIXO, pra os dois não brigarem pelo
+    # mesmo pedaço de tela quando as curvas se encostam. O tooltip continua,
+    # que é onde o número segue legível se a semana ficar estreita demais.
+    def _ponto(l: dict, valor: float, classe: str, cor: str, rotulo: str,
+               acima: bool = True) -> str:
+        px, py = x(l["semana"]), y_acum(valor)
+        ty = (py - 9) if acima else (py + 17)
+        return (f'<circle cx="{px:.1f}" cy="{py:.1f}" r="3.4" class="{classe}">'
+                f'<title>S{l["semana"]} · {l["data"].strftime("%d/%m/%y")} · '
+                f'{rotulo} {br_num(round(valor))}</title></circle>'
+                f'<text x="{px:.1f}" y="{ty:.1f}" class="rd-vlr-acum {cor}" '
+                f'text-anchor="middle">{br_num(round(valor))}</text>')
+
     pontos = ""
-
-    def _ponto(l, valor, classe, classe_valor, rotulo, mostrar, acima=True):
-        alvo = f'<circle cx="{x(l["semana"]):.1f}" cy="{y_acum(valor):.1f}" r="2.6" '               f'class="{classe}"><title>S{l["semana"]} · '               f'{l["data"].strftime("%d/%m/%y")} · {rotulo} '               f'{br_num(round(valor))}</title></circle>'
-        if mostrar:
-            # abaixo da linha o texto desce 15px (a altura da fonte mais a
-            # folga), e nunca passa do rodapé da área de desenho
-            yy = (y_acum(valor) - 9) if acima else min(y_acum(valor) + 15, base_y - 3)
-            alvo += (f'<text x="{x(l["semana"]):.1f}" y="{yy:.1f}" '
-                     f'text-anchor="middle" class="{classe_valor}">'
-                     f'{br_num(round(valor))}</text>')
-        return alvo
-
-    ultima_real = max((l["semana"] for l in linhas if l["acumulado"] is not None),
-                      default=None)
     for l in linhas:
-        marco = (l["semana"] - s_min) % passo_valor == 0
-        if l["saldo_previsto"] is not None:
-            pontos += _ponto(l, l["saldo_previsto"], "rd-pt-prev", "rd-vlr-prev",
-                             "saldo pelo previsto",
-                             marco or l["semana"] == f["semana_prazo"])
-        if l["acumulado"] is not None:
-            pontos += _ponto(l, l["saldo"], "rd-pt-real", "rd-vlr-real",
-                             "saldo real",
-                             marco or l["semana"] == ultima_real, acima=False)
-        elif l["futuro"]:
-            pontos += _ponto(l, l["saldo"], "rd-pt-tend", "rd-vlr-tend",
-                             "saldo pela tendência", marco, acima=False)
+        pontos += _ponto(l, l["saldo_previsto"], "rd-pt-prev", "rd-vlr-prev",
+                         "saldo pelo previsto")
+        if l["saldo_real"] is not None:
+            pontos += _ponto(l, l["saldo_real"], "rd-pt-real", "rd-vlr-real",
+                             "saldo real", acima=False)
+        if l["saldo_tendencia"] is not None:
+            pontos += _ponto(l, l["saldo_tendencia"], "rd-pt-tend", "rd-vlr-tend",
+                             "saldo pela tendência", acima=False)
 
-    # --- marcadores de hoje e do prazo ---
+    # --- marcadores: onde o real parou e onde é o prazo ---
     marcas = ""
-    if s_min <= atual <= s_max:
-        hx = x(atual)
+    if ultima_real is not None and s_min <= ultima_real <= s_max:
+        hx = x(ultima_real)
         marcas += (f'<line x1="{hx:.1f}" y1="{PAD_CIMA-6}" x2="{hx:.1f}" y2="{base_y}" '
                    f'class="cs-hoje-linha"/>'
                    f'<text x="{hx:.1f}" y="{PAD_CIMA-11}" text-anchor="middle" '
-                   f'class="cs-hoje-rotulo">S{atual}</text>')
+                   f'class="cs-hoje-rotulo">S{ultima_real}</text>')
     px = x(f["semana_prazo"])
     marcas += (f'<line x1="{px:.1f}" y1="{PAD_CIMA-6}" x2="{px:.1f}" y2="{base_y}" '
                f'class="cs-prazo-linha"/>'
                f'<text x="{px:.1f}" y="{PAD_CIMA-11}" text-anchor="end" '
                f'class="cs-prazo-rotulo">{esc(f["prazo"].strftime("%d/%m/%Y"))}</text>')
 
-    # --- rótulos do eixo X, um a cada N semanas ---
-    rotulos, passo_rot = "", max(1, round((s_max - s_min) / 13))
+    rotulos, passo_rot = "", max(1, round((s_max - s_min) / 27))
     for s in range(s_min, s_max + 1, passo_rot):
         rotulos += (f'<text x="{x(s):.1f}" y="{ALT-24}" text-anchor="middle" '
                     f'class="cs-rotulo-x">S{s}</text>')
@@ -13966,41 +13817,48 @@ def _rd_grafico(f: dict) -> str:
                 f'<text x="{LARG-PAD_DIR}" y="{ALT-7}" text-anchor="end" '
                 f'class="rd-eixo-legenda">{fim.strftime("%b/%y")}</text>')
 
-    return (f'<svg viewBox="0 0 {LARG} {ALT}" class="rd-svg" role="img" '
+    return (f'<div class="rd-rolo"><svg viewBox="0 0 {LARG} {ALT}" '
+            f'width="{LARG}" height="{ALT}" class="rd-svg" role="img" '
             f'aria-label="Rundown acumulado e quantidade por semana">'
-            f'{grade}{barras}{curvas}{pontos}{marcas}{rotulos}</svg>')
+            f'{grade}{barras}{curvas}{pontos}{marcas}{rotulos}</svg></div>')
 
 
 def _rd_tabela(f: dict) -> pd.DataFrame:
-    """Semana a semana: quando começa, quantos dias úteis tem, o que foi
-    programado e montado, o previsto e o previsto por dia útil, e o saldo
-    caindo. Devolve o DataFrame da exportação."""
+    """Semana a semana, só o que se lê de fato: o que foi programado e o
+    que fechou (com a porcentagem entre os dois), o previsto e a tendência
+    que o usuário mantém à mão, e o saldo caindo.
+
+    PROGRAMADO e PREVISTO são colunas diferentes de propósito: previsto é a
+    meta fixa da fase, programado é o que entrou na programação daquela
+    semana. Programar acima do previsto é o caminho de antecipar o prazo, e
+    isso só aparece se as duas colunas convivem.
+
+    Devolve o DataFrame da exportação.
+    """
     corpo = ""
     for l in f["linhas"]:
-        def cel(v, classe="num", inteiro=True):
+        def cel(v, classe="num"):
             # célula vazia sai neutra: um traço pintado de verde ou azul
             # sugere um valor que não existe naquela semana.
             if v is None:
                 return '<td class="num vazia">—</td>'
-            return f'<td class="{classe}">{br_num(round(v)) if inteiro else _rd_num(v, 1)}</td>'
+            return f'<td class="{classe}">{br_num(round(v))}</td>'
 
         if l["aderencia"] is not None:
             cor = ("verde" if l["aderencia"] >= 90
                    else "ambar" if l["aderencia"] >= 60 else "vermelho")
-            ader = (f'<td class="num"><div class="pctwrap"><div class="pctbar">'
-                    f'<i class="{cor}" style="width:{min(l["aderencia"], 100):.1f}%"></i></div>'
-                    f'<span class="pctval">{br_pct(l["aderencia"], 0)}</span></div></td>')
+            pct = (f'<td class="num"><div class="pctwrap"><div class="pctbar">'
+                   f'<i class="{cor}" style="width:{min(l["aderencia"], 100):.1f}%"></i></div>'
+                   f'<span class="pctval">{br_pct(l["aderencia"], 0)}</span></div></td>')
         else:
-            ader = '<td class="num vazia">—</td>'
+            pct = '<td class="num vazia">—</td>'
 
-        classe = (' class="agora"' if l["semana"] == f["semana_atual"]
+        classe = (' class="agora"' if l["semana"] == f["ultima_real"]
                   else ' class="futuro"' if l["futuro"] else "")
         corpo += (f'<tr{classe}><td class="rotulo">S{l["semana"]}</td>'
-                  f'<td class="num cinza">{l["data"].strftime("%d/%m/%y")}</td>'
-                  + cel(l["programado"]) + cel(l["montado"], "num verde") + ader
+                  + cel(l["programado"]) + cel(l["montado"], "num verde") + pct
                   + cel(l["previsto"], "num cinza")
                   + cel(l["tendencia"], "num azul")
-                  + cel(l["tendencia_dia"], "num azul", inteiro=False)
                   + cel(l["saldo"], "num forte") + '</tr>')
 
     render_html(
@@ -14008,23 +13866,19 @@ def _rd_tabela(f: dict) -> pd.DataFrame:
         f'Semana a semana<span class="gtbl-muted" style="font-weight:500">'
         f'{br_num(len(f["linhas"]))} semanas</span></div>'
         '<div class="ct-rolo cs-tabela-wrap"><table class="cs-tabela rd-tabela"><thead><tr>'
-        '<th>Semana</th><th>Início</th>'
-        '<th>Programado</th><th>Montado</th><th>Aderência</th>'
-        '<th>Previsto<br><span class="sub">régua</span></th>'
-        '<th>Tendência</th>'
-        '<th>Tendência<br><span class="sub">por dia útil</span></th>'
-        '<th>Saldo</th>'
+        '<th>Semana</th><th>Programado</th><th>Montado</th>'
+        '<th>%<br><span class="sub">montado / programado</span></th>'
+        '<th>Previsto</th><th>Tendência</th><th>Saldo</th>'
         f'</tr></thead><tbody>{corpo}</tbody></table></div></div>')
 
     return pd.DataFrame([{
         "SEMANA": f'Semana {l["semana"]}',
-        "INICIO": l["data"].strftime("%d/%m/%Y"),
-        "DIAS_UTEIS": l["dias_uteis"],
-        "PROGRAMADO": l["programado"], "MONTADO": l["montado"],
-        "ADERENCIA_PCT": (round(l["aderencia"], 1) if l["aderencia"] is not None else None),
-        "PREVISTO_REGUA": l["previsto"],
+        "PROGRAMADO": l["programado"],
+        "MONTADO": l["montado"],
+        "PCT_MONTADO_PROGRAMADO": (round(l["aderencia"], 1)
+                                   if l["aderencia"] is not None else None),
+        "PREVISTO": l["previsto"],
         "TENDENCIA": l["tendencia"],
-        "TENDENCIA_DIA_UTIL": (round(l["tendencia_dia"], 2) if l["tendencia_dia"] else None),
         "SALDO_A_MONTAR": round(l["saldo"]),
     } for l in f["linhas"]])
 
@@ -14042,12 +13896,11 @@ def _rd_bloco(f: dict, chave: str) -> None:
       <div class="gplan-panel rd-painel">
         <div class="rd-cab">
           <div class="rd-legenda">
-            <span class="l-prev"><span class="m"></span>Previsto (régua fixa)</span>
-            <span class="l-real"><span class="m"></span>Saldo real</span>
-            <span class="l-tend"><span class="m"></span>Tendência (fecha no prazo)</span>
-            <span class="b-prog"><span class="m"></span>Programado na semana</span>
-            <span class="b-prev"><span class="m"></span>Tendência na semana</span>
-            <span class="b-mont"><span class="m"></span>Montado na semana</span>
+            <span class="l-prev"><span class="m"></span>Previsto acumulado</span>
+            <span class="l-real"><span class="m"></span>Real acumulado</span>
+            <span class="l-tend"><span class="m"></span>Tendência acumulada</span>
+            <span class="b-prev"><span class="m"></span>Previsto na semana</span>
+            <span class="b-real"><span class="m"></span>Realizado na semana</span>
           </div>
           <div class="rd-eixos">
             <span>← saldo a montar</span><span>por semana →</span>
@@ -14071,10 +13924,11 @@ def render_curva_s(tags: pd.DataFrame, cache_key: str = ""):
     limite. Uma aba por fase -- Geral (todas as TAGs não canceladas) e
     Prioritários (SSOP Prioritário = SIM) --, cada uma com o seu prazo.
 
-    O executado vem da 01_BASE_TAGS (SEMANA_PROGRAMADA x STATUS_MONTAGEM);
-    o previsto, de uma curva que parte da produtividade demonstrada, pesa
-    cada semana pelos dias úteis dela e fecha o saldo dentro do prazo. Ver
-    rundown_dados e _rd_curva.
+    As quantidades semanais das três séries -- previsto, realizado e
+    tendência -- vêm preenchidas à mão na aba CURVA da 10_BASE_RUNDOWN.
+    O app conta o universo de cada fase e pondera esse total contra o
+    realizado, virando rundown: parte do pendente e desce até zero. Ver
+    rundown_dados e _rd_fase.
     """
     render_header("Rundown")
     dados = rundown_dados(tags, cache_key)
