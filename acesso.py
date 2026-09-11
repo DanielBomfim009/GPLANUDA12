@@ -53,6 +53,7 @@ PERMISSOES = {
     "ver_avanco_fisico": "Ver a aba Avanço",
     "ver_previsao_medicao": "Ver a aba Previsão Medição",
     "ver_curva_s": "Ver a aba Rundown",
+    "atualizar_bases": "Atualizar as bases (aba Bases)",
     "ver_valores": "Ver valores em reais",
     "administrar": "Criar, editar e remover logins",
 }
@@ -90,7 +91,8 @@ SECOES_PERMISSAO = [
     ("Visão geral", ["ver_dashboard", "ver_suprimentos", "ver_progresso", "ver_pesquisa"]),
     ("Documentação", ["ver_relatorios", "ver_sigem", "ver_atualizacao"]),
     ("Avanço", ["ver_gitec", "ver_planta", "ver_certificacao", "ver_avanco_fisico"]),
-    ("Administração", ["ver_previsao_medicao", "ver_curva_s", "administrar"]),
+    ("Administração", ["ver_previsao_medicao", "ver_curva_s", "atualizar_bases",
+                       "administrar"]),
 ]
 # Nao e aba nenhuma -- e um detalhe DENTRO das paginas (mostrar R$ ou nao),
 # por isso fica de fora das pastas.

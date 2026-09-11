@@ -10,6 +10,7 @@ import time
 import unicodedata
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from urllib.parse import quote
 
 import numpy as np
@@ -18,6 +19,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import acesso
+import area_bases
 
 # Este Python foi instalado sem bundle de CA nenhum -- ssl.get_default_verify_
 # paths() devolve cafile None e o caminho do OpenSSL nem existe --, e por isso
@@ -3724,6 +3726,171 @@ def inject_css():
                          background:rgba(var(--rgb-tinta),.06); border-radius:5px;
                          padding:2px 7px; }
         .ac-perms span.vazio { color:var(--text-3); font-style:italic; }
+        /* Aba Bases (Administracao): a lista de pastas, o caminho de uma
+           carga em tres telas e o acompanhamento da execucao. Mesmos
+           tokens e o mesmo desenho de cartao da aba Acessos. */
+        .bs-intro { font-size:13px; color:var(--text-2); margin:2px 0 12px; max-width:78ch;
+                    line-height:1.5; }
+        .bs-mono { font-family:ui-monospace,Consolas,monospace; }
+        .bs-sub { font-size:10px; font-weight:750; letter-spacing:.5px; text-transform:uppercase;
+                  color:var(--text-3); margin:16px 0 8px; }
+        .bs-faixa { display:flex; flex-wrap:wrap; margin:0 0 18px; border-radius:12px;
+                    border:1px solid var(--border-color); background:var(--dark-card-2); }
+        .bs-faixa > div { display:flex; flex-direction:column; gap:2px; padding:10px 16px;
+                          min-width:0; flex:1 1 220px; border-left:1px solid var(--border-color); }
+        .bs-faixa > div:first-child { border-left:0; }
+        .bs-faixa span { font-size:9.5px; font-weight:700; letter-spacing:.5px;
+                         text-transform:uppercase; color:var(--text-3); }
+        .bs-faixa b { font-size:13.5px; font-weight:750; color:var(--text-1);
+                      font-variant-numeric:tabular-nums; overflow:hidden;
+                      text-overflow:ellipsis; white-space:nowrap; }
+        .bs-faixa i { font-style:normal; font-size:11px; color:var(--text-3); }
+        .bs-card { background:var(--dark-card); border:1px solid var(--border-color);
+                   border-radius:13px; padding:12px 14px; margin-bottom:6px; min-height:136px;
+                   display:flex; flex-direction:column; gap:7px; }
+        .bs-card-top { display:flex; align-items:center; gap:10px; min-width:0; }
+        .bs-cod { flex:none; width:34px; height:34px; border-radius:9px; display:grid;
+                  place-items:center; font-size:13px; font-weight:800; color:var(--txt-teal);
+                  background:rgba(var(--rgb-teal),.13); font-variant-numeric:tabular-nums; }
+        .bs-card-id { min-width:0; display:flex; flex-direction:column; line-height:1.3; }
+        .bs-card-id b { font-size:13.5px; font-weight:750; color:var(--text-1); }
+        .bs-card-id i { font-style:normal; font-size:10.5px; color:var(--text-3);
+                        font-family:ui-monospace,Consolas,monospace;
+                        overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .bs-meta { font-size:11.5px; color:var(--text-2); font-variant-numeric:tabular-nums; }
+        .bs-pills, .bs-chips, .bs-situ { display:flex; flex-wrap:wrap; gap:5px; }
+        .bs-chips { margin:0 0 12px; }
+        .bs-pill { font-size:9.5px; font-weight:750; letter-spacing:.4px; text-transform:uppercase;
+                   border-radius:5px; padding:2px 7px; white-space:nowrap; }
+        .bs-pill.teal { color:var(--txt-teal); background:rgba(var(--rgb-teal),.14); }
+        .bs-pill.azul { color:var(--txt-azul); background:rgba(var(--rgb-azul),.14); }
+        .bs-pill.ambar { color:var(--txt-ambar); background:rgba(var(--rgb-ambar),.16); }
+        .bs-pill.vermelho { color:var(--txt-vermelho); background:rgba(var(--rgb-vermelho),.13); }
+        .bs-pill.roxo { color:var(--txt-roxo); background:rgba(var(--rgb-roxo),.14); }
+        .bs-pill.cinza { color:var(--text-3); background:rgba(var(--rgb-tinta),.07); }
+        .bs-extras { font-size:10.5px; color:var(--text-3); margin-top:auto; }
+        .bs-migalha { font-size:11.5px; color:var(--text-3); margin:0 0 6px; }
+        .bs-migalha b { color:var(--text-2); font-weight:650; }
+        .bs-titulo { display:flex; align-items:center; gap:10px; }
+        .bs-titulo h3 { margin:0; padding:0; font-size:19px; font-weight:800; color:var(--text-1); }
+        .bs-passos { display:flex; flex-wrap:wrap; gap:6px; margin:4px 0 14px;
+                     counter-reset:passo; }
+        .bs-passos span { counter-increment:passo; display:inline-flex; align-items:center;
+                          gap:7px; font-size:11.5px; font-weight:650; color:var(--text-3);
+                          padding:4px 12px 4px 5px; border-radius:99px;
+                          border:1px solid var(--border-color); }
+        .bs-passos span::before { content:counter(passo); width:18px; height:18px;
+                                  border-radius:50%; display:grid; place-items:center;
+                                  font-size:10px; font-weight:800;
+                                  background:rgba(var(--rgb-tinta),.08); }
+        .bs-passos span.feito { color:var(--text-2); }
+        .bs-passos span.feito::before { content:"✓"; color:var(--sobre-cor);
+                                        background:var(--accent-teal); }
+        .bs-passos span.agora { color:var(--txt-teal); border-color:rgba(var(--rgb-teal),.5);
+                                background:rgba(var(--rgb-teal),.08); }
+        .bs-passos span.agora::before { color:var(--sobre-cor); background:var(--accent-teal); }
+        .bs-passos span.pulado { opacity:.55; text-decoration:line-through; }
+        .bs-caixa { background:var(--dark-card); border:1px solid var(--border-color);
+                    border-radius:13px; padding:14px 16px; margin:0 0 12px; }
+        .bs-caixa h4 { margin:0 0 10px; padding:0; font-size:11px; font-weight:800;
+                       letter-spacing:.5px; text-transform:uppercase; color:var(--text-3); }
+        .bs-arquivo { display:flex; align-items:center; gap:12px; min-width:0; }
+        .bs-ext { flex:none; font-size:10px; font-weight:800; letter-spacing:.5px;
+                  text-transform:uppercase; color:var(--sobre-cor); background:var(--accent-teal);
+                  border-radius:6px; padding:6px 7px; }
+        .bs-arquivo b { display:block; font-size:13.5px; color:var(--text-1);
+                        overflow-wrap:anywhere; }
+        .bs-arquivo i { font-style:normal; font-size:11px; color:var(--text-3); }
+        .bs-kv { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+                 gap:10px 22px; }
+        .bs-kv-solta { margin:4px 0 6px; }
+        .bs-kv div { display:flex; flex-direction:column; gap:2px; min-width:0; }
+        .bs-kv span { font-size:9.5px; font-weight:700; letter-spacing:.5px;
+                      text-transform:uppercase; color:var(--text-3); }
+        .bs-kv b { font-size:13px; font-weight:700; color:var(--text-1);
+                   font-variant-numeric:tabular-nums; }
+        .bs-kv b.alerta { color:var(--txt-ambar); }
+        .bs-kv b.ok { color:var(--txt-teal); }
+        .bs-kv i { font-style:normal; font-size:10.5px; color:var(--text-3); }
+        .bs-previa-rolo { overflow-x:auto; border:1px solid var(--border-color);
+                          border-radius:10px; margin-bottom:10px; }
+        .bs-previa { border-collapse:collapse; font-size:11.5px; min-width:100%; margin:0; }
+        .bs-previa th, .bs-previa td { padding:6px 10px; text-align:left; white-space:nowrap;
+                                       border:0; border-bottom:1px solid var(--border-color); }
+        .bs-previa th { font-size:10px; font-weight:750; color:var(--text-2);
+                        background:rgba(var(--rgb-tinta),.05); }
+        .bs-previa td { color:var(--text-1); font-variant-numeric:tabular-nums; }
+        .bs-previa .n { color:var(--text-3); font-size:10px; width:1%; }
+        .bs-previa tr:last-child td { border-bottom:0; }
+        .bs-grade-cab { display:grid; grid-template-columns:2.3fr 2.6fr 3.1fr 1.8fr; gap:16px;
+                        font-size:9.5px; font-weight:700; letter-spacing:.5px;
+                        text-transform:uppercase; color:var(--text-3); padding:0 2px 6px;
+                        border-bottom:1px solid var(--border-color); margin-bottom:4px; }
+        .bs-campo { display:flex; flex-direction:column; line-height:1.3; }
+        .bs-campo b { font-size:12.5px; font-weight:700; color:var(--text-1); }
+        .bs-campo b em { font-style:normal; font-size:9px; font-weight:750; letter-spacing:.3px;
+                         text-transform:uppercase; color:var(--txt-ambar); margin-left:6px; }
+        .bs-campo i { font-style:normal; font-size:10.5px; color:var(--text-3); }
+        .bs-amostra { font-size:11px; color:var(--text-2); overflow:hidden;
+                      text-overflow:ellipsis; white-space:nowrap;
+                      font-family:ui-monospace,Consolas,monospace; }
+        .bs-amostra.vazia { color:var(--text-3); font-style:italic; font-family:inherit; }
+        .bs-nota { font-size:10.5px; color:var(--text-3); margin-top:2px; line-height:1.45; }
+        .bs-nota-solta { margin:10px 0; font-size:11.5px; }
+        .bs-lista-cols { display:flex; flex-wrap:wrap; gap:5px; }
+        .bs-lista-cols span { font-size:10.5px; color:var(--text-2);
+                              background:rgba(var(--rgb-tinta),.06); border-radius:5px;
+                              padding:2px 7px; }
+        .bs-etapas { display:flex; flex-direction:column; }
+        .bs-etapa { display:grid; grid-template-columns:20px 1fr auto; gap:12px;
+                    align-items:center; padding:9px 2px;
+                    border-bottom:1px solid var(--border-color); }
+        .bs-etapa:last-child { border-bottom:0; }
+        .bs-etapa b { display:block; font-size:12.5px; font-weight:700; color:var(--text-1); }
+        .bs-etapa i { font-style:normal; font-size:10.5px; color:var(--text-3);
+                      overflow-wrap:anywhere; }
+        .bs-etapa em { font-style:normal; font-size:11px; font-weight:650; color:var(--text-3);
+                       font-variant-numeric:tabular-nums; white-space:nowrap; }
+        .bs-marca { position:relative; width:18px; height:18px; border-radius:50%;
+                    box-sizing:border-box; border:2px solid rgba(var(--rgb-tinta),.22); }
+        .bs-etapa.feita .bs-marca { border:0; background:var(--accent-teal); }
+        .bs-etapa.feita .bs-marca::after { content:"✓"; position:absolute; inset:0;
+                                           display:grid; place-items:center; font-size:11px;
+                                           font-weight:800; color:var(--sobre-cor); }
+        .bs-etapa.feita em { color:var(--txt-teal); }
+        .bs-etapa.agora .bs-marca { border-color:var(--accent-teal);
+                                    border-right-color:transparent;
+                                    animation:bs-gira .9s linear infinite; }
+        .bs-etapa.agora b { color:var(--txt-teal); }
+        .bs-etapa.erro .bs-marca { border:0; background:var(--accent-red); }
+        .bs-etapa.erro em { color:var(--txt-vermelho); }
+        .bs-etapa.pulada { opacity:.6; }
+        @keyframes bs-gira { to { transform:rotate(360deg); } }
+        @media (prefers-reduced-motion: reduce) {
+          .bs-etapa.agora .bs-marca { animation:none; border-right-color:var(--accent-teal); }
+        }
+        .bs-log { font-family:ui-monospace,Consolas,monospace; font-size:11px; line-height:1.5;
+                  color:var(--text-2); background:rgba(var(--rgb-tinta),.05);
+                  border:1px solid var(--border-color); border-radius:10px; padding:10px 12px;
+                  margin:10px 0 0; white-space:pre-wrap; overflow-wrap:anywhere;
+                  max-height:260px; overflow-y:auto; }
+        .bs-faixa-ok, .bs-faixa-aviso, .bs-faixa-erro { border-radius:12px; padding:12px 16px;
+                  margin:0 0 12px; font-size:13.5px; font-weight:700; }
+        .bs-faixa-ok { color:var(--txt-teal); background:rgba(var(--rgb-teal),.1);
+                       border:1px solid rgba(var(--rgb-teal),.35); }
+        .bs-faixa-aviso { color:var(--txt-ambar); background:rgba(var(--rgb-ambar),.1);
+                          border:1px solid rgba(var(--rgb-ambar),.35); }
+        .bs-faixa-erro { color:var(--txt-vermelho); background:rgba(var(--rgb-vermelho),.09);
+                         border:1px solid rgba(var(--rgb-vermelho),.35); }
+        .bs-faixa-ok small, .bs-faixa-aviso small, .bs-faixa-erro small {
+                  display:block; margin-top:4px; font-size:12px; font-weight:500;
+                  color:var(--text-2); }
+        .bs-vazio { font-size:12px; color:var(--text-3); padding:6px 2px; }
+        .bs-versao { display:flex; align-items:center; gap:10px; min-width:0; }
+        .bs-versao .bs-cod { width:28px; height:28px; font-size:11.5px; }
+        .bs-versao b { display:block; font-family:ui-monospace,Consolas,monospace;
+                       font-size:12px; font-weight:650; color:var(--text-1); }
+        .bs-versao i { font-style:normal; font-size:10.5px; color:var(--text-3); }
         /* Bloco de permissao por pasta (Novo/Editar login) -- pedido do
            Daniel, 2026-09-08: "definir pasta por pasta o que pode
            visualizar o login". Cada pasta e o mesmo agrupamento do menu
@@ -14619,6 +14786,772 @@ def render_acessos():
                 dialogo_editar_login(u["id"])
 
 
+# ==========================================================================
+#  Bases (Administração) -- carregar uma base por vez
+# ==========================================================================
+# O que mexe em arquivo fica no area_bases.py; aqui só a tela. A página só
+# entra no menu onde a pasta das bases existe -- o Gplan que roda no
+# computador de quem mantém as bases -- e para quem pode "atualizar_bases".
+# O caminho de uma carga segue o mockup aprovado em 11/09/2026: a pasta da
+# base, a nova versão, as colunas (só quando precisa) e conferir e aplicar.
+# A atualização roda numa thread do area_bases; a página só acompanha, e por
+# isso trocar de aba no meio não interrompe nada.
+# session_state: "bs_*" é o estado da carga (some ao voltar para a lista de
+# bases); "bsw_*" são os widgets.
+
+BS_IMPACTO = {"principal": ("Base principal", "ambar"),
+              "resumo": ("+ resumo por TAG", "azul"),
+              "leve": ("Só esta base", "teal")}
+BS_COMO = {"salvo": ("mapeamento salvo", "teal"),
+           "nome": ("pelo nome", "teal"),
+           "sugestao": ("nome parecido · confira", "ambar"),
+           "nao_usar": ("não usar", "cinza"),
+           "": ("sem coluna", "cinza")}
+BS_CABECALHO = {"detectado": "encontrada pelo nome das colunas",
+                "salvo": "a mesma do mapeamento salvo",
+                "escolhido": "escolhida por você",
+                "fixo": "nesta base o Gplan lê sempre esta linha",
+                "padrão": "a de sempre: nenhuma linha com os nomes conhecidos"}
+BS_NAO_USAR = "— não usar —"
+BS_PASSOS = (("arquivo", "Nova versão"), ("colunas", "Relacionar colunas"),
+             ("conferir", "Conferir e aplicar"))
+
+
+def _bs_quando(valor) -> str:
+    if valor is None:
+        return "—"
+    if isinstance(valor, (int, float)):
+        valor = datetime.fromtimestamp(valor)
+    return valor.strftime("%d/%m %H:%M")
+
+
+def _bs_tamanho(n: int) -> str:
+    if n >= 1_048_576:
+        return f"{n / 1_048_576:.1f} MB".replace(".", ",")
+    return f"{max(1, round(n / 1024))} KB"
+
+
+def _bs_duracao(seg) -> str:
+    seg = int(round(seg or 0))
+    m, s = divmod(seg, 60)
+    return f"{m} min {s:02d} s" if m else f"{s} s"
+
+
+def _bs_pill(texto: str, cor: str) -> str:
+    return f'<span class="bs-pill {cor}">{esc(texto)}</span>'
+
+
+def _bs_publicador():
+    """Quem sobe a planilha para o Supabase no fim da atualização -- o envio
+    que até aqui era feito à mão depois do ATUALIZAR_TUDO. None onde não há
+    Supabase (a instância de teste, que lê do disco). O cliente é criado
+    aqui, na execução da página, e não na thread da atualização: é aqui que
+    os secrets do Streamlit estão ao alcance."""
+    cliente = get_supabase_client()
+    if cliente is None:
+        return None
+
+    def publicar(planilha) -> str:
+        cliente.storage.from_(SUPABASE_BUCKET).update(
+            SUPABASE_FILE_PATH, Path(planilha).read_bytes(),
+            {"content-type": "application/vnd.openxmlformats-officedocument"
+                             ".spreadsheetml.sheet", "upsert": "true"})
+        return "publicada"
+    return publicar
+
+
+def _bs_usuario() -> str:
+    u = st.session_state.get("gplan_usuario") or {}
+    return u.get("email") or u.get("nome") or ""
+
+
+def _bs_limpar(tudo: bool = False) -> None:
+    """Esquece a carga que estava na tela: o arquivo, a leitura e as
+    escolhas. Com tudo=True, volta também para a lista de bases. O contador
+    do upload só cresce: é ele que dá ao campo de arquivo uma chave nova, e
+    com ela o campo volta vazio."""
+    fica = {"bs_visto", "bs_acompanhou", "bs_up_n"} | (set() if tudo else {"bs_base"})
+    for k in [k for k in st.session_state if k.startswith("bs_") and k not in fica]:
+        del st.session_state[k]
+    st.session_state["bs_up_n"] = st.session_state.get("bs_up_n", 0) + 1
+
+
+def _bs_abrir(codigo: str, arq: dict | None = None) -> None:
+    _bs_limpar(tudo=True)
+    st.session_state.update(bs_base=codigo, bs_etapa="arquivo")
+    if arq is not None:
+        st.session_state["bs_arq"] = arq
+    st.rerun()
+
+
+def _bs_ir(etapa: str) -> None:
+    st.session_state["bs_etapa"] = etapa
+    if etapa == "conferir":
+        st.session_state.pop("bs_cmp", None)      # as escolhas podem ter mudado
+    st.rerun()
+
+
+def _bs_arq_de(nome: str, dados: bytes, origem: str) -> dict:
+    return {"nome": nome, "ext": Path(nome).suffix.lower(), "dados": dados,
+            "tamanho": len(dados), "hash": hashlib.sha1(dados).hexdigest()[:12],
+            "origem": origem}
+
+
+def render_bases():
+    """Administração › Bases: uma pasta por base, para carregar só a que
+    mudou. O Gplan troca o arquivo, refaz o que depende dele e publica."""
+    render_header("Bases")
+    if not area_bases.disponivel():
+        render_html('<div class="gtbl-empty">A pasta das bases não está nesta máquina. '
+                    'Esta página funciona no Gplan que roda no computador de quem mantém '
+                    'as bases.</div>')
+        return
+    planilha = Path(LOCAL_EXCEL_FALLBACK)
+    tarefa = area_bases.tarefa_atual()
+    if tarefa is not None and tarefa.rodando:
+        _bs_acompanhar()
+        return
+    # o resultado abre sozinho para quem acompanhou a atualização (disparou ou
+    # abriu a aba enquanto rodava) e, para os demais, só se ela acabou há
+    # menos de 10 min: sem isso toda sessão nova -- recarregar a página,
+    # entrar de novo -- caía no resultado de horas atrás em vez da lista
+    if (tarefa is not None and st.session_state.get("bs_visto") != tarefa.id
+            and (st.session_state.get("bs_acompanhou") == tarefa.id
+                 or tarefa.terminou_ha() < 600)):
+        _bs_resultado(tarefa, planilha)
+        return
+    b = area_bases.POR_CODIGO.get(st.session_state.get("bs_base"))
+    if b is None:
+        _bs_visao(planilha)
+    else:
+        _bs_fluxo(b, planilha)
+
+
+# ------------------------------------------------------------ tela 1: a lista
+def _bs_visao(planilha: Path):
+    ult = area_bases.ultima_execucao()
+    try:
+        carimbo = planilha.stat().st_mtime
+    except OSError:
+        carimbo = 0.0
+    cont = area_bases.contagens(planilha)
+
+    def rodada(r, rotulo):
+        if not r:
+            return f'<div><span>{rotulo}</span><b>—</b><i>nada no registro</i></div>'
+        fim = r.get("fim_resumo") or r["fim"]
+        extra = f' · base {esc(r["bases"])}' if r.get("bases") else ""
+        return (f'<div><span>{rotulo}</span>'
+                f'<b>{r["inicio"]:%d/%m · %H:%M} → {fim:%H:%M}</b>'
+                f'<i>{_bs_duracao((fim - r["inicio"]).total_seconds())}{extra}</i></div>')
+
+    c1, c2, c3 = st.columns([6, 1.4, 1.7], vertical_alignment="center")
+    with c1:
+        render_html('<p class="bs-intro">Carregue só a base que mudou. O Gplan refaz apenas '
+                    'o que depende dela e publica a planilha sozinho.</p>')
+    historico = st.session_state.get("bs_hist", False)
+    # botão, e não st.toggle: o toggle saía sem rótulo com o tema do app
+    if c2.button("Fechar histórico" if historico else "Histórico", key="bsw_hist_bt",
+                 icon=":material/history:", use_container_width=True):
+        st.session_state["bs_hist"] = not historico
+        st.rerun()
+    if c3.button("Atualizar tudo", key="bsw_tudo", icon=":material/sync:",
+                 use_container_width=True):
+        _bs_dialogo_tudo(planilha)
+    pasta = area_bases.entrada_dir()
+    teste = " · cópia de teste" if os.environ.get("GPLAN_BASES_DIR") else ""
+    render_html('<div class="bs-faixa">'
+                + rodada(ult.get("completa"), "Última atualização completa")
+                + rodada(ult.get("individual"), "Última atualização individual")
+                + f'<div><span>Pasta das bases{teste}</span>'
+                  f'<b class="bs-mono" title="{esc(str(pasta))}">'
+                  f'{esc(pasta.parent.name)} › {esc(pasta.name)}</b>'
+                  '<i>o Atualizar tudo e o CMD leem daqui</i></div></div>')
+    if historico:
+        _bs_historico()
+    for i in range(0, len(area_bases.BASES), 3):
+        cols = st.columns(3)
+        for b, col in zip(area_bases.BASES[i:i + 3], cols):
+            with col:
+                render_html(_bs_cartao(b, cont, carimbo))
+                if st.button("Carregar", key=f"bsw_abre_{b.codigo}", use_container_width=True):
+                    _bs_abrir(b.codigo)
+
+
+def _bs_cartao(b, cont: dict, carimbo_planilha: float) -> str:
+    atual = area_bases.arquivo_atual(b)
+    n = cont.get(b.abas_sistema[0])
+    no_sistema = f"{br_num(n)} {b.unidade} no sistema" if n is not None else "fora do sistema"
+    if atual is None:
+        estado = _bs_pill("arquivo não está na pasta", "vermelho")
+        meta, nome_arq = no_sistema, b.arquivo
+    else:
+        s = atual.stat()
+        # a planilha é gravada no fim de toda importação: base mais nova que
+        # ela foi mexida depois da última vez que entrou no sistema
+        mudou = carimbo_planilha and s.st_mtime > carimbo_planilha + 60
+        estado = (_bs_pill("mudou depois da última importação", "ambar") if mudou
+                  else _bs_pill("em dia", "teal"))
+        meta = f"{no_sistema} · arquivo de {_bs_quando(s.st_mtime)} · {_bs_tamanho(s.st_size)}"
+        nome_arq = atual.name
+    extras = []
+    if b.fixa:
+        extras.append("leiaute fixo")
+    elif area_bases.mapeamento_salvo(b):
+        extras.append("colunas relacionadas")
+    nv = len(area_bases.versoes(b))
+    if nv:
+        extras.append("1 versão guardada" if nv == 1 else f"{nv} versões guardadas")
+    return ('<div class="bs-card"><div class="bs-card-top">'
+            f'<span class="bs-cod">{b.codigo}</span><div class="bs-card-id">'
+            f'<b>{esc(b.nome)}</b><i>{esc(nome_arq)}</i></div></div>'
+            f'<div class="bs-meta">{esc(meta)}</div>'
+            f'<div class="bs-pills">{_bs_pill(*BS_IMPACTO[b.impacto])}{estado}</div>'
+            + (f'<div class="bs-extras">{" · ".join(esc(x) for x in extras)}</div>'
+               if extras else "")
+            + "</div>")
+
+
+def _bs_linha_versao(b, p: Path) -> str:
+    s = p.stat()
+    return (f'<div class="bs-versao"><span class="bs-cod">{b.codigo}</span><div>'
+            f'<b>{esc(p.name)}</b><i>{esc(b.nome)} · {_bs_tamanho(s.st_size)} · '
+            f'arquivo de {_bs_quando(s.st_mtime)}</i></div></div>')
+
+
+def _bs_versoes(lista) -> None:
+    """Uma linha por versão guardada, com o botão que a traz de volta: ela
+    entra no mesmo caminho de uma carga nova, com conferência e tudo."""
+    for b, p in lista:
+        c1, c2 = st.columns([6, 1.7], vertical_alignment="center")
+        with c1:
+            render_html(_bs_linha_versao(b, p))
+        if c2.button("Voltar para esta versão", key=f"bsw_v_{b.codigo}_{p.name}",
+                     use_container_width=True):
+            _bs_abrir(b.codigo, _bs_arq_de(
+                f"{b.stem}{p.suffix.lower()}", p.read_bytes(),
+                f"versão guardada ({p.name})"))
+
+
+def _bs_historico():
+    itens = [(b, p) for b in area_bases.BASES for p in area_bases.versoes(b)]
+    with st.container(border=True):
+        if not itens:
+            render_html('<div class="bs-vazio">Nenhuma versão guardada ainda. A cada carga, a '
+                        'versão que sai de uso vai para 03_HISTORICO_IMPORTACOES, numa pasta por '
+                        'base, e ficam as 5 últimas de cada uma.</div>')
+            return
+        _bs_versoes(itens)
+
+
+@st.dialog("Atualizar tudo", width="large")
+def _bs_dialogo_tudo(planilha: Path):
+    publicar = _bs_publicador()
+    render_html('<p class="bs-intro">O mesmo que o ATUALIZAR_TUDO.cmd: recalcula as 11 bases no '
+                'Excel, importa todas e refaz o resumo por TAG. Use quando várias bases mudaram; '
+                'para uma só, carregue na pasta dela.</p>'
+                + _bs_etapas(area_bases.etapas_de_tudo(publicar is not None)))
+    st.caption("Feche as bases e a planilha no Excel antes: base aberta é pulada no passo 1, e "
+               "aí a atualização para, como no CMD.")
+    if st.button("Atualizar as 11 bases", key="bsw_tudo_ok", type="primary",
+                 use_container_width=True):
+        try:
+            area_bases.iniciar_tudo(planilha, publicar)
+        except area_bases.Ocupado as erro:
+            st.error(str(erro))
+            return
+        st.rerun()
+
+
+# ------------------------------------------------------ o caminho de uma carga
+def _bs_fluxo(b, planilha: Path):
+    etapa = st.session_state.get("bs_etapa", "arquivo")
+    c1, c2 = st.columns([6, 1.3], vertical_alignment="center")
+    with c1:
+        render_html(f'<div class="bs-migalha">Administração › Bases › '
+                    f'<b>{b.codigo} · {esc(b.nome)}</b></div>'
+                    f'<div class="bs-titulo"><span class="bs-cod">{b.codigo}</span>'
+                    f'<h3>{esc(b.nome)}</h3>{_bs_pill(*BS_IMPACTO[b.impacto])}</div>')
+    if c2.button("← Bases", key="bsw_voltar_bases", use_container_width=True):
+        _bs_limpar(tudo=True)
+        st.rerun()
+    if st.session_state.get("bs_modo") == "reprocessar":
+        _bs_conferir(b, planilha, None, reprocessar=True)
+        return
+    if st.session_state.get("bs_arq") is None:
+        _bs_escolher(b)
+        return
+    an = _bs_analise(b)
+    render_html(_bs_passos(b, etapa))
+    if an.erro:
+        st.error(an.erro)
+        if st.button("Trocar arquivo", key="bsw_trocar_erro"):
+            _bs_limpar()
+            st.rerun()
+        return
+    if etapa == "colunas" and b.mapeavel:
+        _bs_colunas(b, an)
+    elif etapa == "conferir":
+        _bs_conferir(b, planilha, an)
+    else:
+        _bs_nova_versao(b, an)
+
+
+def _bs_passos(b, etapa: str) -> str:
+    ordem = [k for k, _ in BS_PASSOS]
+    agora = ordem.index(etapa) if etapa in ordem else 0
+    itens = []
+    for i, (k, rotulo) in enumerate(BS_PASSOS):
+        cls = "agora" if i == agora else ("feito" if i < agora else "")
+        if k == "colunas" and not b.mapeavel:
+            cls, rotulo = "pulado", "Colunas · leiaute fixo"
+        itens.append(f'<span class="{cls}">{esc(rotulo)}</span>')
+    # div e span, e não ol/li: a lista do markdown do Streamlit tem estilo
+    # próprio e empilhava as pílulas uma embaixo da outra
+    return '<div class="bs-passos">' + "".join(itens) + "</div>"
+
+
+def _bs_analise(b):
+    """A leitura do arquivo carregado, refeita só quando o arquivo, a aba ou
+    a linha do cabeçalho mudam. Junto vêm as sugestões de coluna."""
+    arq = st.session_state["bs_arq"]
+    chave = (arq["hash"], st.session_state.get("bs_aba"), st.session_state.get("bs_cab"))
+    if st.session_state.get("bs_an_chave") != chave:
+        with st.spinner("Lendo o arquivo..."):
+            an = area_bases.analisar(b, arq["dados"], aba=chave[1], cabecalho=chave[2])
+        sug = area_bases.sugerir(b, an.colunas) if b.mapeavel and not an.erro else []
+        st.session_state.update(bs_an=an, bs_an_chave=chave, bs_sug=sug,
+                                bs_esc={s["campo"].padrao: s["coluna"] for s in sug})
+        st.session_state.pop("bs_cmp", None)
+    return st.session_state["bs_an"]
+
+
+def _bs_escolher(b):
+    """Antes do arquivo: a versão em uso, o campo de carga, a opção de
+    importar o que já está na pasta e as versões guardadas."""
+    atual = area_bases.arquivo_atual(b)
+    if atual is not None:
+        s = atual.stat()
+        render_html('<div class="bs-caixa"><h4>Versão em uso</h4><div class="bs-arquivo">'
+                    f'<span class="bs-ext">{esc(atual.suffix.lstrip("."))}</span><div>'
+                    f'<b class="bs-mono">{esc(atual.name)}</b>'
+                    f'<i>{_bs_tamanho(s.st_size)} · arquivo de {_bs_quando(s.st_mtime)} · '
+                    f'atualizar esta base refaz {esc(b.refaz)}</i></div></div></div>')
+    else:
+        render_html('<div class="bs-caixa"><h4>Versão em uso</h4><div class="bs-vazio">'
+                    f'{esc(b.arquivo)} não está na pasta. A primeira carga cria o arquivo.'
+                    '</div></div>')
+    if b.fixa:
+        render_html(f'<p class="bs-intro">{esc(b.fixa)}</p>')
+    tipos = sorted({e.lstrip(".") for e in b.extensoes}
+                   | {e.lstrip(".").upper() for e in b.extensoes})
+    up = st.file_uploader(f"Nova versão de {b.stem}", type=tipos,
+                          key=f"bsw_up_{b.codigo}_{st.session_state.get('bs_up_n', 0)}",
+                          help="A versão em uso continua valendo até você aplicar a nova.")
+    if up is not None:
+        st.session_state["bs_arq"] = _bs_arq_de(up.name, up.getvalue(), "carregado agora")
+        st.session_state["bs_etapa"] = "arquivo"
+        st.rerun()
+    if atual is not None:
+        c1, c2 = st.columns([1.5, 3], vertical_alignment="center")
+        if c1.button("Importar a versão da pasta", key="bsw_reproc", use_container_width=True):
+            st.session_state.update(bs_modo="reprocessar", bs_etapa="conferir")
+            st.rerun()
+        c2.caption("Para quando você editou o arquivo direto na pasta (o Rundown é preenchido "
+                   "assim): importa o que está lá, sem carregar nada.")
+    guardadas = area_bases.versoes(b)
+    if guardadas:
+        render_html('<div class="bs-sub">Versões guardadas</div>')
+        _bs_versoes([(b, p) for p in guardadas])
+
+
+def _bs_kv_formulas(an) -> str:
+    if not an.formulas:
+        return '<div><span>Fórmulas</span><b>nenhuma nas primeiras linhas</b></div>'
+    if not an.sem_valor:
+        return ('<div><span>Fórmulas</span><b class="ok">todas com valor salvo pelo Excel</b>'
+                f'<i>{br_num(an.formulas)} nas primeiras 300 linhas</i></div>')
+    return (f'<div><span>Fórmulas</span><b class="alerta">{br_num(an.sem_valor)} sem valor '
+            f'salvo</b><i>de {br_num(an.formulas)} · deixe "Recalcular no Excel" marcado ao '
+            'aplicar</i></div>')
+
+
+def _bs_previa(b, an) -> str:
+    """As primeiras linhas de dado nas colunas dos campos obrigatórios -- para
+    ver se a linha do cabeçalho e as colunas são mesmo aquelas. Linha vazia
+    nessas colunas (subtítulo, linha de apoio, como as da 11) não entra."""
+    escolhas = st.session_state.get("bs_esc") or {}
+    cols = [c for c in (escolhas.get(f.padrao) for f in b.campos if f.obrigatorio) if c][:5]
+    cols += [c for c in an.colunas if c and c not in cols][:max(0, 5 - len(cols))]
+    if not cols:
+        return ""
+    idx = [an.colunas.index(c) for c in cols]
+    linhas = [(n, vals) for n, vals in an.primeiras
+              if any(i < len(vals) and vals[i] for i in idx)][:3]
+    if not linhas:
+        return ""
+    cab = f'<th class="n">{an.cabecalho}</th>' + "".join(f"<th>{esc(c)}</th>" for c in cols)
+    corpo = "".join(
+        f'<tr><td class="n">{n}</td>'
+        + "".join(f"<td>{esc(vals[i] if i < len(vals) else '')}</td>" for i in idx) + "</tr>"
+        for n, vals in linhas)
+    return ('<div class="bs-sub">Prévia</div><div class="bs-previa-rolo">'
+            f'<table class="bs-previa"><thead><tr>{cab}</tr></thead>'
+            f'<tbody>{corpo}</tbody></table></div>')
+
+
+def _bs_nova_versao(b, an):
+    arq = st.session_state["bs_arq"]
+    atual = area_bases.arquivo_atual(b)
+    em_uso = (f" · a versão em uso é de {_bs_quando(atual.stat().st_mtime)}" if atual
+              else " · a pasta ainda não tem esta base")
+    render_html('<p class="bs-intro">A versão em uso continua valendo até você aplicar esta '
+                '— e aí ela vai para o histórico da pasta.</p>')
+    c1, c2 = st.columns([6, 1.3], vertical_alignment="center")
+    with c1:
+        render_html('<div class="bs-arquivo">'
+                    f'<span class="bs-ext">{esc(arq["ext"].lstrip("."))}</span><div>'
+                    f'<b class="bs-mono">{esc(arq["nome"])}</b>'
+                    f'<i>{_bs_tamanho(arq["tamanho"])} · {esc(arq["origem"])}{em_uso}</i>'
+                    '</div></div>')
+    if c2.button("Trocar arquivo", key="bsw_trocar", use_container_width=True):
+        _bs_limpar()
+        st.rerun()
+    if b.fixa:
+        abas = "".join(
+            f'<div><span>Aba {esc(a)}</span>'
+            + ('<b class="alerta">não encontrada</b>' if a in an.faltam_abas
+               else '<b class="ok">encontrada</b>') + '</div>'
+            for a in b.abas_exigidas)
+        render_html('<div class="bs-caixa"><h4>Leiaute</h4><div class="bs-kv">' + abas
+                    + f'<div><span>Conteúdo</span><b>{br_num(an.linhas)} {esc(b.unidade)}</b></div>'
+                    + _bs_kv_formulas(an)
+                    + f'</div><div class="bs-nota">{esc(b.fixa)}</div></div>')
+    else:
+        c1, c2 = st.columns([3, 1.4])
+        if b.aba_fixa:
+            c1.selectbox("Aba com os dados", [an.aba], disabled=True,
+                         key=f"bsw_abafixa_{arq['hash']}",
+                         help="Nesta base o Gplan lê sempre esta aba, pelo nome.")
+        else:
+            nova = c1.selectbox("Aba com os dados", an.abas, index=an.abas.index(an.aba),
+                                key=f"bsw_aba_{arq['hash']}")
+            if nova != an.aba:
+                st.session_state["bs_aba"] = nova
+                st.session_state.pop("bs_cab", None)
+                st.rerun()
+        cab = c2.number_input("Linha do cabeçalho", min_value=1, max_value=500,
+                              value=int(an.cabecalho), step=1, disabled=b.cabecalho_fixo,
+                              key=f"bsw_cab_{arq['hash']}_{an.aba}")
+        if int(cab) != an.cabecalho:
+            st.session_state["bs_cab"] = int(cab)
+            st.rerun()
+        n_col = sum(1 for c in an.colunas if c)
+        render_html('<div class="bs-kv bs-kv-solta">'
+                    f'<div><span>Cabeçalho</span><b>linha {an.cabecalho}</b>'
+                    f'<i>{esc(BS_CABECALHO.get(an.cabecalho_como, ""))}</i></div>'
+                    f'<div><span>Conteúdo</span><b>{br_num(an.linhas)} linhas de dados · '
+                    f'{n_col} colunas</b></div>' + _bs_kv_formulas(an) + '</div>'
+                    + _bs_previa(b, an))
+    motivo = area_bases.precisa_colunas(b, an, st.session_state.get("bs_sug") or [])
+    if an.faltam_abas:
+        st.error(f"Falta a aba {', '.join(an.faltam_abas)}: sem ela o Gplan não lê esta base.")
+    elif motivo:
+        st.caption(f"A tela de colunas abre porque: {motivo}.")
+    elif b.mapeavel:
+        st.caption("As colunas batem com o mapeamento salvo desta pasta.")
+    c1, c2, c3, _ = st.columns([1.1, 1.4, 1.9, 2.2])
+    if c1.button("Cancelar", key="bsw_cancelar", use_container_width=True):
+        _bs_limpar()
+        st.rerun()
+    if b.mapeavel and not motivo:
+        if c2.button("Revisar colunas", key="bsw_revisar", use_container_width=True):
+            _bs_ir("colunas")
+    if b.mapeavel and motivo:
+        if c3.button("Relacionar colunas →", key="bsw_ir_colunas", type="primary",
+                     use_container_width=True):
+            _bs_ir("colunas")
+    elif c3.button("Conferir mudanças →", key="bsw_ir_conferir", type="primary",
+                   disabled=bool(an.faltam_abas), use_container_width=True):
+        _bs_ir("conferir")
+
+
+def _bs_colunas(b, an):
+    """Tela 3: à esquerda o que o Gplan precisa, ao lado a coluna do arquivo
+    que alimenta cada campo, com as primeiras linhas e de onde veio a
+    sugestão. A tela aponta a dúvida em vez de escolher calada."""
+    arq = st.session_state["bs_arq"]
+    sug = st.session_state.get("bs_sug") or []
+    escolhas = dict(st.session_state.get("bs_esc") or {})
+    opcoes = [BS_NAO_USAR] + list(dict.fromkeys(c for c in an.colunas if c))
+    st.session_state["bs_viu_colunas"] = True
+    render_html(f'<p class="bs-intro">À esquerda, o que o Gplan precisa; ao lado, a coluna de '
+                f'<b class="bs-mono">{esc(arq["nome"])}</b> que alimenta cada campo (aba '
+                f'{esc(an.aba)}, cabeçalho na linha {an.cabecalho}). As primeiras linhas aparecem '
+                'junto, para você ver se a coluna é mesmo aquela.</p>')
+    resumo = st.empty()
+    render_html('<div class="bs-grade-cab"><span>Campo do Gplan</span><span>Coluna do arquivo'
+                '</span><span>Primeiras linhas</span><span>Situação</span></div>')
+    chave = f"{arq['hash']}_{an.aba}_{an.cabecalho}"
+    for i, s in enumerate(sug):
+        campo = s["campo"]
+        c1, c2, c3, c4 = st.columns([2.3, 2.6, 3.1, 1.8], vertical_alignment="center")
+        with c1:
+            render_html('<div class="bs-campo"><b>' + esc(campo.rotulo)
+                        + ('<em>obrigatório</em>' if campo.obrigatorio else '') + '</b>'
+                        + (f'<i>{esc(campo.dica)}</i>' if campo.dica else '') + '</div>')
+        antes = escolhas.get(campo.padrao)
+        escolha = c2.selectbox(campo.rotulo, opcoes,
+                               index=opcoes.index(antes) if antes in opcoes else 0,
+                               key=f"bsw_map_{chave}_{i}", label_visibility="collapsed")
+        col = None if escolha == BS_NAO_USAR else escolha
+        escolhas[campo.padrao] = col
+        amostra = (an.amostras.get(col) or []) if col else []
+        with c3:
+            render_html(f'<div class="bs-amostra">{esc(" · ".join(amostra))}</div>' if amostra
+                        else '<div class="bs-amostra vazia">'
+                             + ("vazia nas primeiras linhas" if col else "—") + '</div>')
+        if campo.obrigatorio and not col:
+            pills = _bs_pill("falta a coluna", "vermelho")
+        elif col != s["coluna"]:
+            pills = _bs_pill("escolhida por você", "roxo")
+        else:
+            pills = _bs_pill(*BS_COMO[s["como"]])
+        if s["novo"]:
+            pills += _bs_pill("campo novo", "azul")
+        nota = ""
+        if s["sumiu"] and col == s["coluna"]:
+            nota = f'"{s["sumiu"]}", do mapeamento salvo, não está no arquivo'
+        elif s["parecidas"] and s["como"] in ("sugestao", "") and col == s["coluna"]:
+            nota = "parecidas: " + ", ".join(s["parecidas"])
+        with c4:
+            render_html(f'<div class="bs-situ">{pills}</div>'
+                        + (f'<div class="bs-nota">{esc(nota)}</div>' if nota else ""))
+    st.session_state["bs_esc"] = escolhas
+    usadas = {c for c in escolhas.values() if c}
+    nao_usadas = [c for c in opcoes[1:] if c not in usadas]
+    iguais = [s for s in sug if escolhas.get(s["campo"].padrao) == s["coluna"]]
+    contas = [(sum(1 for s in iguais if s["como"] in ("nome", "salvo") and s["coluna"]),
+               "pelo nome ou salvas", "teal"),
+              (sum(1 for s in iguais if s["como"] == "sugestao"), "para conferir", "ambar"),
+              (len(sug) - len(iguais), "escolhidas por você", "roxo"),
+              (sum(1 for s in sug if s["novo"]), "campos novos", "azul"),
+              (sum(1 for v in escolhas.values() if not v), "sem coluna", "cinza"),
+              (len(nao_usadas), "colunas do arquivo não usadas", "cinza")]
+    resumo.markdown('<div class="bs-chips">' + "".join(
+        _bs_pill(f"{n} {rot}", cor) for n, rot, cor in contas if n) + "</div>",
+        unsafe_allow_html=True)
+    if nao_usadas:
+        with st.expander(f"{len(nao_usadas)} colunas do arquivo que o Gplan não usa"):
+            render_html('<div class="bs-lista-cols">'
+                        + "".join(f"<span>{esc(c)}</span>" for c in nao_usadas) + "</div>")
+    render_html(f'<div class="bs-nota bs-nota-solta">O mapeamento fica salvo na pasta {b.codigo} '
+                f'(02_MODELOS_E_INSTRUCOES › mapeamentos › {esc(b.stem)}.json) e vale também '
+                'para o Atualizar tudo e o CMD. Nas próximas cargas, esta tela só abre se alguma '
+                'coluna sumir, mudar de nome ou aparecer uma nova.</div>')
+    erros = area_bases.problemas(b, escolhas)
+    if erros:
+        st.error("  \n".join(erros))
+    c1, c2, _ = st.columns([1.1, 1.9, 3])
+    if c1.button("← Voltar", key="bsw_col_voltar", use_container_width=True):
+        _bs_ir("arquivo")
+    if c2.button("Conferir mudanças →", key="bsw_col_seguir", type="primary",
+                 disabled=bool(erros), use_container_width=True):
+        _bs_ir("conferir")
+
+
+def _bs_conferir(b, planilha: Path, an, reprocessar: bool = False):
+    """Tela 4: a diferença para a versão em uso, o que o Gplan vai fazer (e
+    o que fica como está) e o botão que dispara."""
+    publicar = _bs_publicador()
+    if reprocessar:
+        atual = area_bases.arquivo_atual(b)
+        if atual is None:
+            st.error(f"{b.arquivo} não está na pasta.")
+            return
+        s = atual.stat()
+        chave = (str(atual), s.st_mtime)
+        if st.session_state.get("bs_an_pasta_chave") != chave:
+            with st.spinner("Lendo o arquivo da pasta..."):
+                st.session_state["bs_an_pasta"] = area_bases.analisar(b, atual.read_bytes())
+            st.session_state["bs_an_pasta_chave"] = chave
+        referencia = st.session_state["bs_an_pasta"]
+        render_html('<p class="bs-intro">Importa de novo a versão que já está na pasta, sem '
+                    'trocar arquivo nenhum.</p><div class="bs-caixa"><h4>Versão em uso</h4>'
+                    '<div class="bs-arquivo">'
+                    f'<span class="bs-ext">{esc(atual.suffix.lstrip("."))}</span><div>'
+                    f'<b class="bs-mono">{esc(atual.name)}</b>'
+                    f'<i>{_bs_tamanho(s.st_size)} · arquivo de {_bs_quando(s.st_mtime)} · '
+                    f'{br_num(referencia.linhas)} linhas de dados</i></div></div></div>')
+    else:
+        arq = st.session_state["bs_arq"]
+        if "bs_cmp" not in st.session_state:
+            with st.spinner("Comparando com a versão em uso..."):
+                st.session_state["bs_cmp"] = area_bases.comparar(
+                    b, arq["dados"], an, st.session_state.get("bs_esc") or {})
+        cmp_ = st.session_state["bs_cmp"]
+        referencia = an
+        la, ln = cmp_["linhas_atual"], cmp_["linhas_novo"]
+        itens = [f'<div><span>Linhas de dados</span><b>'
+                 f'{br_num(la) if la is not None else "—"} → {br_num(ln)}</b><i>'
+                 + (f'{"+" if ln >= la else "−"}{br_num(abs(ln - la))} em relação à versão em uso'
+                    if la is not None else "primeira versão desta base na pasta") + '</i></div>']
+        if cmp_["novos"] is not None:
+            por = " + ".join(f.rotulo for f in b.campos if f.padrao in b.chave)
+            itens.append(f'<div><span>Entram</span><b>+{br_num(cmp_["novos"])}</b>'
+                         f'<i>{esc(por)} que a versão em uso não tem</i></div>')
+            itens.append(f'<div><span>Saem</span><b>−{br_num(cmp_["removidos"])}</b>'
+                         '<i>estão na versão em uso e não nesta</i></div>')
+        render_html('<p class="bs-intro">Compare com a versão em uso antes de trocar.</p>'
+                    '<div class="bs-caixa"><h4>O que muda</h4><div class="bs-kv">'
+                    + "".join(itens) + '</div></div>')
+    marca = "pasta" if reprocessar else st.session_state["bs_arq"]["hash"]
+    recalcular = st.checkbox(
+        "Recalcular no Excel antes de importar", value=bool(referencia.formulas),
+        key=f"bsw_recalc_{b.codigo}_{marca}",
+        help=("O mesmo passo 1 do Atualizar tudo: abre o arquivo no Excel, recalcula as "
+              "fórmulas e salva, porque o Gplan lê o último valor que o Excel gravou."
+              + (" Na 01_BASE_TAGS também atualiza o vínculo com o SharePoint (STATUS DE "
+                 "MONTAGEM)." if b.codigo == "01" else "")))
+    etapas = area_bases.etapas_da_carga(b, recalcular, publicar is not None,
+                                        trocar=not reprocessar)
+    outras = [x.nome for x in area_bases.BASES
+              if x.codigo != b.codigo and not set(x.abas_sistema) & set(b.refeitas)]
+    render_html('<div class="bs-caixa"><h4>O que o Gplan vai fazer</h4>' + _bs_etapas(etapas)
+                + f'<div class="bs-nota bs-nota-solta">Ficam como estão: {esc(", ".join(outras))}.'
+                  '</div></div>')
+    c1, c2, _ = st.columns([1.1, 1.9, 3])
+    if c1.button("← Voltar", key="bsw_conf_voltar", use_container_width=True):
+        if reprocessar:
+            _bs_limpar()
+            st.rerun()
+        _bs_ir("colunas" if b.mapeavel and st.session_state.get("bs_viu_colunas")
+               else "arquivo")
+    if c2.button("Importar de novo" if reprocessar else "Aplicar atualização",
+                 key="bsw_aplicar", type="primary", use_container_width=True):
+        try:
+            if reprocessar:
+                area_bases.iniciar_reprocessar(b, planilha, recalcular, publicar)
+            else:
+                arq = st.session_state["bs_arq"]
+                mapa = (area_bases.montar_mapeamento(b, an, st.session_state.get("bs_esc") or {},
+                                                     _bs_usuario()) if b.mapeavel else None)
+                area_bases.iniciar_carga(b, arq["dados"], arq["ext"], mapa, planilha,
+                                         recalcular, publicar)
+        except (area_bases.Ocupado, ValueError) as erro:
+            st.error(str(erro))
+            return
+        st.rerun()
+
+
+# ------------------------------------------------------ execução e resultado
+def _bs_etapas(etapas, t=None) -> str:
+    """A lista de etapas: antes de aplicar, com o tempo esperado; durante e
+    depois, com o estado e o tempo que cada uma levou."""
+    itens = []
+    for chave, oque, detalhe, esperado in etapas:
+        estado, tempo = "falta", esperado
+        if t is not None:
+            if chave in t.falhas:
+                estado, tempo = "erro", "parou aqui"
+            elif chave == "publicar" and t.resultado.get("publicacao") == "desligada":
+                estado, tempo = "pulada", "desligada"
+            elif chave in t.tempos:
+                estado, tempo = "feita", _bs_duracao(t.tempos[chave])
+            elif t.rodando and chave == t.etapa:
+                estado, tempo = "agora", _bs_duracao(t.em_andamento())
+            elif not t.rodando:
+                estado, tempo = "pulada", "não rodou"
+        itens.append(f'<div class="bs-etapa {estado}"><span class="bs-marca"></span>'
+                     f'<div><b>{esc(oque)}</b><i>{esc(detalhe)}</i></div>'
+                     f'<em>{esc(tempo)}</em></div>')
+    return '<div class="bs-etapas">' + "".join(itens) + "</div>"
+
+
+@st.fragment(run_every=1.5)
+def _bs_acompanhar():
+    t = area_bases.tarefa_atual()
+    if t is None or not t.rodando:
+        st.rerun()
+    st.session_state["bs_acompanhou"] = t.id
+    render_html('<div class="bs-caixa">'
+                f'<h4>Atualizando · {esc(t.titulo)} · {_bs_duracao(t.segundos())}</h4>'
+                + _bs_etapas(t.etapas, t)
+                + '<div class="bs-log">' + esc("\n".join(t.linhas[-14:]) or "começando...")
+                + '</div></div>')
+    st.caption("Pode trocar de aba: a atualização continua rodando neste computador, e o "
+               "resultado aparece aqui quando você voltar.")
+
+
+def _bs_disparar(iniciar, anterior) -> None:
+    try:
+        iniciar()
+    except area_bases.Ocupado as erro:
+        st.error(str(erro))
+        return
+    st.session_state["bs_visto"] = anterior.id
+    st.rerun()
+
+
+def _bs_resultado(t, planilha: Path):
+    if not t.resultado.get("_cache_limpo"):
+        # a planilha mudou: as abas precisam reler já, sem esperar os 60 s do
+        # carimbo guardado em cache
+        st.cache_data.clear()
+        t.resultado["_cache_limpo"] = True
+    if t.erro:
+        desfeito = (" A pasta voltou ao que era: a versão anterior continua em uso e a planilha "
+                    "não mudou." if t.resultado.get("desfeito") else "")
+        render_html(f'<div class="bs-faixa-erro">A atualização parou · {esc(t.titulo)}'
+                    f'<small>{esc(t.erro)}{esc(desfeito)}</small></div>')
+    elif t.avisos:
+        render_html(f'<div class="bs-faixa-aviso">Atualização aplicada em parte · {esc(t.titulo)}'
+                    + "".join(f"<small>{esc(a)}</small>" for a in t.avisos) + "</div>")
+    else:
+        onde = ("planilha publicada no Supabase" if t.resultado.get("publicacao") == "publicada"
+                else "planilha atualizada · publicação desligada nesta instância")
+        render_html(f'<div class="bs-faixa-ok">✓ Atualização aplicada · {esc(t.titulo)} · {onde}'
+                    f'<small>{_bs_duracao(t.segundos())} do início ao fim</small></div>')
+    base = area_bases.POR_CODIGO.get(t.resultado.get("base"))
+    guardadas = t.resultado.get("guardadas")
+    render_html('<div class="bs-caixa">' + _bs_etapas(t.etapas, t)
+                + (f'<div class="bs-nota bs-nota-solta">A versão que saiu de uso ficou guardada em '
+                   f'03_HISTORICO_IMPORTACOES › {esc(base.stem)} › {esc(", ".join(guardadas))}.'
+                   '</div>' if base and guardadas else "")
+                + '</div>')
+    # div, e não pre: o markdown do Streamlit troca todo pre pelo bloco de
+    # código dele e descarta a classe (o .bs-log já quebra linha sozinho)
+    with st.expander("Registro da execução"):
+        render_html('<div class="bs-log">' + esc("\n".join(t.linhas[-200:]) or "vazio")
+                    + '</div>')
+    # só a carga de uma base fica na tela para tentar de novo; o "Atualizar
+    # tudo" não tem base (e None == None fazia o botão aparecer à toa)
+    tentar = bool(t.erro and t.resultado.get("base")
+                  and st.session_state.get("bs_base") == t.resultado.get("base"))
+    c1, c2, _ = st.columns([1.7, 1.5, 3])
+    if t.resultado.get("falta_resumo"):
+        if c1.button("Refazer o resumo", key="bsw_refaz_resumo", type="primary",
+                     use_container_width=True):
+            _bs_disparar(lambda: area_bases.iniciar_resumo(planilha, _bs_publicador()), t)
+    elif t.resultado.get("falta_publicar"):
+        if c1.button("Publicar de novo", key="bsw_publicar", type="primary",
+                     use_container_width=True):
+            _bs_disparar(lambda: area_bases.iniciar_publicacao(planilha, _bs_publicador()), t)
+    elif tentar:
+        # a carga que falhou continua na tela: é só fechar o Excel e tentar
+        if c1.button("Tentar de novo", key="bsw_tentar", type="primary",
+                     use_container_width=True):
+            st.session_state["bs_visto"] = t.id
+            st.rerun()
+    acao = (t.resultado.get("falta_resumo") or t.resultado.get("falta_publicar")
+            or tentar)
+    if (c2 if acao else c1).button("Voltar às bases", key="bsw_fim",
+                                   use_container_width=True):
+        st.session_state["bs_visto"] = t.id
+        _bs_limpar(tudo=True)
+        st.rerun()
+
+
 def main():
     favicon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "favicon.png")
     st.set_page_config(
@@ -14701,6 +15634,8 @@ def main():
 
     admin_page = st.Page(render_acessos, title="Acessos",
                          icon=":material/manage_accounts:", url_path="acessos")
+    bases_page = st.Page(render_bases, title="Bases", icon=":material/folder_open:",
+                         url_path="bases")
     medicao_page = st.Page(
         lambda: _sob_carga("Conferindo o que o campo já fechou",
                            lambda: render_previsao_medicao(
@@ -14781,6 +15716,10 @@ def main():
         administracao.append(medicao_page)
     if pode("ver_curva_s"):
         administracao.append(curva_s_page)
+    # Bases só entra onde a pasta das bases existe: no Gplan que roda no
+    # computador de quem mantém as bases. No Render não há pasta.
+    if pode("atualizar_bases") and area_bases.disponivel():
+        administracao.append(bases_page)
     if pode("administrar"):
         administracao.append(admin_page)
     if administracao:
