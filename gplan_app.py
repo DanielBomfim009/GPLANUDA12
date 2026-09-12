@@ -324,14 +324,30 @@ def get_supabase_client():
 
 
 @st.cache_data(ttl=60)
+def _arquivos_publicados() -> dict:
+    """O que está no bucket agora: nome -> (carimbo, tamanho).
+
+    Uma consulta só, guardada por um minuto: a listagem leva ~13 s pelo
+    proxy da rede, e tanto o carimbo da planilha quanto a procura do pacote
+    rápido precisam dela. Duas chamadas separadas custavam o dobro.
+    """
+    client = get_supabase_client()
+    if client is None:
+        return {}
+    try:
+        return {f["name"]: (f.get("updated_at", "") or f.get("id", ""),
+                            (f.get("metadata") or {}).get("size"))
+                for f in client.storage.from_(SUPABASE_BUCKET).list()}
+    except Exception:
+        return {}
+
+
+@st.cache_data(ttl=60)
 def get_source_cache_key() -> str:
     client = get_supabase_client()
     if client is not None:
-        files = client.storage.from_(SUPABASE_BUCKET).list()
-        for f in files:
-            if f["name"] == SUPABASE_FILE_PATH:
-                return f.get("updated_at", "") or f.get("id", "")
-        return "missing"
+        carimbo, _ = _arquivos_publicados().get(SUPABASE_FILE_PATH, ("", None))
+        return carimbo or "missing"
     return str(os.path.getmtime(LOCAL_EXCEL_FALLBACK)) if os.path.exists(LOCAL_EXCEL_FALLBACK) else "missing"
 
 
@@ -500,13 +516,13 @@ def pacote_rapido(cache_key: str):
         return None
     import zipfile
     try:
-        arquivos = cliente.storage.from_(SUPABASE_BUCKET).list()
-        tamanhos = {f["name"]: (f.get("metadata") or {}).get("size") for f in arquivos}
-        if SUPABASE_RAPIDO not in tamanhos:
+        publicados = _arquivos_publicados()
+        if SUPABASE_RAPIDO not in publicados:
             return None
         dados = cliente.storage.from_(SUPABASE_BUCKET).download(SUPABASE_RAPIDO)
         with zipfile.ZipFile(io.BytesIO(dados)) as z:
-            if z.read("carimbo.txt").decode() != str(tamanhos.get(SUPABASE_FILE_PATH)):
+            _, tamanho_planilha = publicados.get(SUPABASE_FILE_PATH, ("", None))
+            if z.read("carimbo.txt").decode() != str(tamanho_planilha):
                 return None
         return dados
     except Exception:
@@ -752,15 +768,30 @@ def load_data(cache_key: str):
                      if "14_MOVIMENTACOES" in abas
                      else pd.DataFrame(columns=["DATA", "TIPO", "OBJETO", "CAMPO",
                                                 "DE", "PARA", "QTD_TAGS"]))
-    # Suprimentos ja vem pronto na combinada -- ver carregar_suprimentos.
-    suprimentos_itens, suprimentos_estoque = carregar_suprimentos(ler, abas)
     # o avanço do cabo é o "% Avanço REAL" (lançamento + conexão + teste),
     # não mais só o lançamento -- ver cabos_avanco_real
     lancamento = cabos_avanco_real(lancamento)
     resumo = aplicar_regra_aprovados(resumo, esperados)
     return (tags, cabos, tubing, sigem, resumo, esperados, gitec, locacao,
-            aux_areas, lancamento, depara, movimentacoes,
-            suprimentos_itens, suprimentos_estoque)
+            aux_areas, lancamento, depara, movimentacoes)
+
+
+@st.cache_data(show_spinner="Carregando suprimentos...")
+def suprimentos_dados(cache_key: str):
+    """As duas abas de Suprimentos, montadas só quando alguém abre a aba.
+
+    Montar os itens custa ~60 s na planilha de hoje: 3.694 materiais, cada um
+    com o ciclo de compra inteiro, linha a linha (ver carregar_suprimentos).
+    Enquanto isso morava no load_data, esse minuto era cobrado de quem abrisse
+    QUALQUER aba -- inclusive quem nunca olha Suprimentos.
+    """
+    pacote = pacote_rapido(cache_key)
+    if pacote is not None:
+        return carregar_suprimentos(lambda nome: _ler_do_pacote(pacote, nome),
+                                    _abas_do_pacote(pacote))
+    excel_file = pd.ExcelFile(_planilha_para_ler())
+    return carregar_suprimentos(lambda nome: pd.read_excel(excel_file, sheet_name=nome),
+                                set(excel_file.sheet_names))
 
 
 # Um relatorio so conta como avanco depois de aprovado pela fiscalizacao.
@@ -15101,9 +15132,6 @@ def _bs_visao(planilha: Path):
                 f'<i>{_bs_duracao((fim - r["inicio"]).total_seconds())}{extra}</i></div>')
 
     c1, c2, c3, c4 = st.columns([4.4, 1.4, 1.4, 1.7], vertical_alignment="center")
-    with c1:
-        render_html('<p class="bs-intro">Carregue só a base que mudou. O Gplan refaz apenas '
-                    'o que depende dela e publica a planilha sozinho.</p>')
     historico = st.session_state.get("bs_hist", False)
     # botão, e não st.toggle: o toggle saía sem rótulo com o tema do app
     if c2.button("Fechar histórico" if historico else "Histórico", key="bsw_hist_bt",
@@ -15804,8 +15832,7 @@ def main():
     st.session_state["gplan_atualizado_em"] = data_atualizacao(fonte)
     st.session_state["gplan_fonte"] = fonte_dados(fonte)
     (tags, cabos, tubing, sigem, resumo, esperados,
-     gitec, locacao, aux_areas, lancamento, depara, movimentacoes,
-     suprimentos_itens, suprimentos_estoque) = load_data(cache_key)
+     gitec, locacao, aux_areas, lancamento, depara, movimentacoes) = load_data(cache_key)
 
     with st.sidebar:
         render_html(
@@ -15832,7 +15859,7 @@ def main():
         render_perfil_lateral()
 
     dashboard_page = st.Page(lambda: _sob_carga("Carregando o painel", lambda: render_dashboard(resumo, esperados, tags, sigem, cache_key)), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
-    suprimentos_page = st.Page(lambda: _sob_carga("Carregando suprimentos", lambda: render_suprimentos(suprimentos_itens, suprimentos_estoque, tags, movimentacoes, cache_key)), title="Suprimentos", icon=":material/local_shipping:", url_path="suprimentos")
+    suprimentos_page = st.Page(lambda: _sob_carga("Carregando suprimentos", lambda: render_suprimentos(*suprimentos_dados(cache_key), tags, movimentacoes, cache_key)), title="Suprimentos", icon=":material/local_shipping:", url_path="suprimentos")
     relatorios_page = st.Page(lambda: _sob_carga("Carregando os relatórios", lambda: render_relatorios(esperados, resumo, tags, sigem, cache_key)), title="Relatórios", icon=":material/description:", url_path="relatorios")
     progresso_page = st.Page(lambda: _sob_carga("Abrindo o Progresso", lambda: render_progresso(resumo, esperados, tags, sigem, cache_key)), title="Progresso", icon=":material/insights:", url_path="progresso")
     pesquisa_page = st.Page(lambda: _sob_carga("Carregando as tags", lambda: render_pesquisa_tag(resumo, esperados, tags, sigem, cache_key, lancamento, depara)), title="Pesquisa tag", icon=":material/search:", url_path="pesquisa")
