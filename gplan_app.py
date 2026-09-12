@@ -14183,7 +14183,7 @@ def _rd_fase(tags: pd.DataFrame, chave: str, rotulo: str, prod: dict,
                        if realizado(s) is not None), default=None)
 
     linhas = []
-    ac_prev = ac_real = ac_tend = 0.0
+    ac_prev = ac_real = 0.0
     saldo_corrente = total          # onde a tendência emenda quando o real acaba
     for s in range(s_ini, s_fim + 1):
         h = hist.get(s, {})
@@ -14194,7 +14194,6 @@ def _rd_fase(tags: pd.DataFrame, chave: str, rotulo: str, prod: dict,
         tend = manual(s, "tendencia") if not e_real else None
 
         ac_prev += (prev or 0.0)
-        ac_tend += (tend or 0.0)
         saldo_previsto = max(total - ac_prev, 0.0)
 
         if e_real:
@@ -14227,7 +14226,7 @@ def _rd_fase(tags: pd.DataFrame, chave: str, rotulo: str, prod: dict,
     return {
         "chave": chave, "rotulo": rotulo, "prazo": prazo,
         "total": total, "realizado_total": ac_real,
-        "previsto_total": ac_prev, "tendencia_total": ac_tend,
+        "previsto_total": ac_prev,
         "saldo": max(total - ac_real, 0.0),
         "pct": (ac_real / total * 100) if total else 0.0,
         "semana_atual": semana_atual, "semana_prazo": semana_prazo,
@@ -14570,29 +14569,6 @@ def _rd_bloco(f: dict, chave: str) -> None:
         render_html('<div class="gplan-panel"><div class="cs-vazio">Nenhuma TAG nesta '
                     'fase na 01_BASE_TAGS.</div></div>')
         return
-
-    # O previsto e a tendência são preenchidos à mão na planilha; o total
-    # sai da base. Quando os dois não fecham, a curva chega a zero antes (ou
-    # nunca chega) e isso não é erro de conta: é lançamento sobre outro
-    # universo. Em 11/09/2026 eram as 14 TAGs prioritárias canceladas, que a
-    # planilha conta e a base descarta.
-    for frase, somado in (
-            ("O previsto lançado na planilha soma", f["previsto_total"]),
-            ("A tendência mais o realizado somam",
-             f["tendencia_total"] + f["realizado_total"])):
-        sobra = int(round(somado - f["total"]))
-        if abs(sobra) >= 1:
-            fim = ("A curva chega a zero antes do fim." if sobra > 0
-                   else "A curva não chega a zero.")
-            render_html(
-                '<div class="rd-aviso" style="margin:0 0 10px;padding:10px 14px;'
-                'border-radius:10px;background:rgba(245,158,11,.12);'
-                'border:1px solid rgba(245,158,11,.35);font-size:13.5px">'
-                f'{esc(frase)} '
-                f'<b>{br_num(int(round(somado)))}</b>, e esta fase tem '
-                f'<b>{br_num(int(f["total"]))}</b> TAGs: '
-                f'{"sobram" if sobra > 0 else "faltam"} '
-                f'<b>{br_num(abs(sobra))}</b>. {fim}</div>')
 
     menu = menu_exportar(f"expmenu_rd_{chave}")
     render_html(f"""
