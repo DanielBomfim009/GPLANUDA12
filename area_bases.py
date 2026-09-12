@@ -818,6 +818,60 @@ def tarefa_atual() -> Tarefa | None:
     return _ATUAL
 
 
+_QUEM = {"nome": ""}
+
+
+def quem_esta_usando(nome: str) -> None:
+    """Quem abriu a aba Bases -- a tela avisa a cada desenho. É o nome que
+    entra no registro das atualizações."""
+    _QUEM["nome"] = nome or ""
+
+
+def arquivo_registro() -> Path:
+    return historico_dir() / "registro.jsonl"
+
+
+def anotar(tarefa: Tarefa) -> None:
+    """Uma linha por atualização terminada, no fim do registro.
+
+    Uma linha por vez, em JSON: cresce ~200 bytes por atualização, abre em
+    qualquer editor e não se perde se o Gplan for fechado no meio.
+    """
+    linha = {
+        "quando": tarefa.inicio.isoformat(timespec="seconds"),
+        "quem": _QUEM["nome"],
+        "o_que": tarefa.titulo,
+        "base": tarefa.resultado.get("base", ""),
+        "modo": tarefa.resultado.get("modo", ""),
+        "arquivo": tarefa.resultado.get("arquivo", ""),
+        "segundos": round(tarefa.segundos()),
+        "resultado": ("erro" if tarefa.erro else "aviso" if tarefa.avisos else "ok"),
+        "publicacao": tarefa.resultado.get("publicacao", ""),
+        "detalhe": tarefa.erro or " | ".join(tarefa.avisos),
+    }
+    try:
+        arq = arquivo_registro()
+        arq.parent.mkdir(parents=True, exist_ok=True)
+        with open(arq, "a", encoding="utf-8") as f:
+            f.write(json.dumps(linha, ensure_ascii=False) + chr(10))
+    except OSError:
+        pass        # registro é apoio: falta dele não derruba a atualização
+
+
+def registro(limite: int = 50) -> list:
+    """As últimas atualizações, da mais nova para a mais velha."""
+    arq = arquivo_registro()
+    if not arq.exists():
+        return []
+    linhas = []
+    for bruta in arq.read_text(encoding="utf-8").splitlines()[-limite:]:
+        try:
+            linhas.append(json.loads(bruta))
+        except ValueError:
+            continue
+    return list(reversed(linhas))
+
+
 def _disparar(tarefa: Tarefa, trabalho) -> Tarefa:
     global _ATUAL
     if not _TRAVA.acquire(blocking=False):
@@ -835,6 +889,7 @@ def _disparar(tarefa: Tarefa, trabalho) -> Tarefa:
             if tarefa.etapa and tarefa.etapa not in tarefa.falhas:
                 tarefa.tempos[tarefa.etapa] = tarefa.em_andamento()
             tarefa.fim = dt.datetime.now()
+            anotar(tarefa)
             _TRAVA.release()
 
     threading.Thread(target=corre, name=f"gplan-bases-{tarefa.id}", daemon=True).start()
@@ -950,6 +1005,9 @@ def etapas_da_carga(b: Base, recalcular: bool, publica: bool, trocar: bool = Tru
     e.append(("importar", f"Importa a base {b.codigo}", " · ".join(b.refeitas), "~1 min"))
     if b.precisa_resumo:
         e.append(("resumo", "Refaz o resumo por TAG", RESUMO_ABAS, "1 a 3 min"))
+    if publica:
+        e.append(("confere", "Confere o que mudou na planilha",
+                  "linhas por aba, antes e depois", "~20 s"))
     e.append(_etapa_publicar(publica))
     return e
 
@@ -1035,7 +1093,27 @@ def _desfazer(troca: dict) -> None:
         arq.write_bytes(troca["map_antes"])
 
 
-def _depois_de_importar(t: Tarefa, resumo: bool, planilha: Path, publicar) -> None:
+# Quanto uma aba pode encolher sem ser suspeito. Abaixo disso é variação
+# normal da base; acima, quase sempre é arquivo errado ou coluna fora do lugar.
+ENCOLHEU_FRACAO = 0.10
+ENCOLHEU_MINIMO = 20
+
+
+def _encolheu(antes: dict, depois: dict) -> list:
+    """As abas que perderam linhas demais entre antes e depois da importação."""
+    perdas = []
+    for aba, tinha in (antes or {}).items():
+        agora = (depois or {}).get(aba)
+        if agora is None or not tinha:
+            continue
+        perda = tinha - agora
+        if perda >= ENCOLHEU_MINIMO and perda >= tinha * ENCOLHEU_FRACAO:
+            perdas.append(f"{aba} caiu de {tinha} para {agora} linhas")
+    return perdas
+
+
+def _depois_de_importar(t: Tarefa, resumo: bool, planilha: Path, publicar,
+                        antes: dict | None = None) -> None:
     """Resumo por TAG e publicação. A base já entrou: o que falhar daqui para
     frente vira aviso com o que fazer, e não desfaz a carga."""
     if resumo:
@@ -1047,6 +1125,17 @@ def _depois_de_importar(t: Tarefa, resumo: bool, planilha: Path, publicar) -> No
             t.resultado["falta_resumo"] = True
             t.avisos.append("A base entrou, mas o resumo por TAG não foi refeito, e por isso a "
                             f"planilha não foi publicada. Motivo: {erro}")
+            return
+    if antes and publicar is not None:
+        t.passo("confere")
+        perdas = _encolheu(antes, contagens(planilha))
+        if perdas:
+            t.falhou("confere", "; ".join(perdas))
+            t.resultado["falta_publicar"] = True
+            t.avisos.append(
+                "A planilha foi atualizada aqui, mas NÃO subiu para o Supabase: "
+                + "; ".join(perdas) + ". Confira se isso era esperado -- se for, "
+                "clique em Publicar de novo.")
             return
     t.passo("publicar")
     if publicar is None:
@@ -1075,6 +1164,9 @@ def iniciar_carga(b: Base, conteudo: bytes, extensao: str, mapeamento: dict | No
     t = Tarefa(titulo=f"{b.codigo} · {b.nome}",
                etapas=etapas_da_carga(b, recalcular, publicar is not None))
     t.resultado.update(base=b.codigo, modo="carga")
+    # as linhas de cada aba antes de mexer: é com isto que a conferência
+    # de depois compara (já está em cache, a lista das bases acabou de ler)
+    antes = contagens(planilha)
 
     def trabalho(t: Tarefa):
         t.passo("guardar")
@@ -1091,7 +1183,7 @@ def iniciar_carga(b: Base, conteudo: bytes, extensao: str, mapeamento: dict | No
             raise
         t.resultado["guardadas"] = [h.name for _, h in troca["guardadas"]]
         t.resultado["apagadas"] = [p.name for p in _podar(b)]
-        _depois_de_importar(t, b.precisa_resumo, planilha, publicar)
+        _depois_de_importar(t, b.precisa_resumo, planilha, publicar, antes)
 
     return _disparar(t, trabalho)
 
@@ -1102,6 +1194,9 @@ def iniciar_reprocessar(b: Base, planilha: Path, recalcular: bool, publicar=None
     t = Tarefa(titulo=f"{b.codigo} · {b.nome}",
                etapas=etapas_da_carga(b, recalcular, publicar is not None, trocar=False))
     t.resultado.update(base=b.codigo, modo="reprocessar")
+    # as linhas de cada aba antes de mexer: é com isto que a conferência
+    # de depois compara (já está em cache, a lista das bases acabou de ler)
+    antes = contagens(planilha)
 
     def trabalho(t: Tarefa):
         if recalcular:
@@ -1109,31 +1204,38 @@ def iniciar_reprocessar(b: Base, planilha: Path, recalcular: bool, publicar=None
             _recalcular(t, [b.codigo])
         t.passo("importar")
         _importar(t, planilha, [b.codigo])
-        _depois_de_importar(t, b.precisa_resumo, planilha, publicar)
+        _depois_de_importar(t, b.precisa_resumo, planilha, publicar, antes)
 
     return _disparar(t, trabalho)
 
 
 def etapas_de_tudo(publica: bool) -> list:
-    return [("excel", "Recalcula as 11 bases no Excel", "abre, recalcula e salva cada uma",
+    e = [("excel", "Recalcula as 11 bases no Excel", "abre, recalcula e salva cada uma",
              "alguns min"),
             ("importar", "Importa as 11 bases", "todas as abas de base do controle",
              "2 a 5 min"),
-            ("resumo", "Refaz o resumo por TAG", RESUMO_ABAS, "1 a 3 min"),
-            _etapa_publicar(publica)]
+            ("resumo", "Refaz o resumo por TAG", RESUMO_ABAS, "1 a 3 min")]
+    if publica:
+        e.append(("confere", "Confere o que mudou na planilha",
+                  "linhas por aba, antes e depois", "~20 s"))
+    e.append(_etapa_publicar(publica))
+    return e
 
 
 def iniciar_tudo(planilha: Path, publicar=None) -> Tarefa:
     """O ATUALIZAR_TUDO.cmd, os três passos na mesma ordem, mais a publicação."""
     t = Tarefa(titulo="Atualizar tudo", etapas=etapas_de_tudo(publicar is not None))
     t.resultado.update(modo="tudo")
+    # as linhas de cada aba antes de mexer: é com isto que a conferência
+    # de depois compara (já está em cache, a lista das bases acabou de ler)
+    antes = contagens(planilha)
 
     def trabalho(t: Tarefa):
         t.passo("excel")
         _recalcular(t, None)
         t.passo("importar")
         _importar(t, planilha, None)
-        _depois_de_importar(t, True, planilha, publicar)
+        _depois_de_importar(t, True, planilha, publicar, antes)
 
     return _disparar(t, trabalho)
 

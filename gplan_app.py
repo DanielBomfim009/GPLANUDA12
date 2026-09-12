@@ -52,6 +52,20 @@ LOCAL_EXCEL_FALLBACK = os.environ.get("GPLAN_PLANILHA") or os.path.join(
 )
 SUPABASE_BUCKET = "gplan-data"
 SUPABASE_FILE_PATH = "CONTROLE_DOCUMENTAL_INSTRUMENTACAO_ATUAL.xlsx"
+# Ao lado da planilha, a atualização publica as mesmas abas em formato de
+# leitura rápida (parquet, num zip só). É o que faz o site abrir em ~1 s em
+# vez de ~30 s. O .xlsx continua mandando: ver pacote_rapido.
+SUPABASE_RAPIDO = "dados_rapidos.zip"
+# As abas que o Gplan lê -- as do load_data mais as que cada tela busca
+# sozinha (Pedestal, Infraestrutura e as três do Rundown).
+ABAS_RAPIDAS = (
+    "01_BASE_TAGS", "02_BASE_CABOS", "03_BASE_TUBING", "04_BASE_SIGEM",
+    "05_BASE_LOCAÇÃO", "05_AUX_AREAS", "06_BASE_GITEC", "07_TAG_RESUMO",
+    "08_RELATORIOS_ESPERADOS", "02_CABOS_LANCAMENTO", "02_CABOS_DEPARA",
+    "09_SUPRIMENTOS_ITENS", "09_SUPRIMENTOS_ESTOQUE", "14_MOVIMENTACOES",
+    "08_BASE_PEDESTAL", "11_BASE_INFRAESTRUTURA", "10_BASE_RUNDOWN",
+    "10_BASE_RUNDOWN_CURVA", "10_BASE_RUNDOWN_CAL",
+)
 PAGE_SIZE = 100
 # O Render roda em UTC; sem converter, o cabecalho mostrava 3h a mais.
 BR_TZ = "America/Sao_Paulo"
@@ -403,7 +417,120 @@ def _sup_num0(v) -> int:
     return int(v) if pd.notna(v) else 0
 
 
-def carregar_suprimentos(excel_file: pd.ExcelFile) -> tuple[pd.DataFrame, pd.DataFrame]:
+def gerar_pacote_rapido(planilha) -> bytes:
+    """As abas que o Gplan lê, em parquet, num zip só.
+
+    Dentro vai o tamanho do .xlsx publicado: é por ele que o site sabe se o
+    pacote corresponde à planilha ou se ficou para trás (alguém subiu a
+    planilha à mão). Custa ~1,5 s no fim da atualização e economiza meio
+    minuto de cada pessoa que abrir o site depois.
+    """
+    import zipfile
+    caminho = Path(planilha)
+    memoria = io.BytesIO()
+    with pd.ExcelFile(caminho) as xls, zipfile.ZipFile(
+            memoria, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("carimbo.txt", str(caminho.stat().st_size))
+        for aba in ABAS_RAPIDAS:
+            if aba not in xls.sheet_names:
+                continue
+            df = pd.read_excel(xls, sheet_name=aba)
+            buf = io.BytesIO()
+            try:
+                df.to_parquet(buf, index=False, compression="zstd")
+            except Exception:
+                # coluna que mistura número e texto na mesma planilha (SKID,
+                # semana de teste, data solta): vira texto, que é como o
+                # Gplan já a lê -- todas passam por astype(str) ou
+                # to_datetime antes de serem usadas.
+                d = df.copy()
+                for c in d.columns:
+                    if d[c].dtype == object and len(
+                            {type(v) for v in d[c].dropna().head(500)}) > 1:
+                        d[c] = d[c].map(_texto_de_celula)
+                buf = io.BytesIO()
+                d.to_parquet(buf, index=False, compression="zstd")
+            z.writestr(f"{aba}.parquet", buf.getvalue())
+    return memoria.getvalue()
+
+
+def _texto_de_celula(v):
+    """O valor como texto, do jeito que a tela mostra: inteiro sem o ".0" que
+    o Excel carrega (SKID 1 é "1", não "1.0"), data em dia/mês/ano, e vazio
+    continua vazio.
+
+    A data é o ponto delicado: o Gplan lê data com dayfirst=True, então em
+    formato ISO "2026-08-11" voltaria como 8 de novembro. Em dd/mm/aaaa não
+    há o que trocar. Achado comparando o pacote com o Excel: 64 linhas de
+    Suprimentos tinham dia e mês invertidos.
+    """
+    if v is None:
+        return None
+    if not isinstance(v, str) and pd.isna(v):
+        return None
+    if isinstance(v, (datetime, date)):
+        if getattr(v, "hour", 0) or getattr(v, "minute", 0) or getattr(v, "second", 0):
+            return v.strftime("%d/%m/%Y %H:%M:%S")
+        return v.strftime("%d/%m/%Y")
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v)
+
+
+def _subir(cliente, caminho: str, dados: bytes, tipo: str) -> None:
+    """Grava por cima; se o arquivo ainda não existe no bucket, cria."""
+    pasta = cliente.storage.from_(SUPABASE_BUCKET)
+    try:
+        pasta.update(caminho, dados, {"content-type": tipo, "upsert": "true"})
+    except Exception:
+        pasta.upload(caminho, dados, {"content-type": tipo, "upsert": "true"})
+
+
+@st.cache_data(show_spinner=False, max_entries=2)
+def pacote_rapido(cache_key: str):
+    """O pacote publicado, quando ele corresponde à planilha de agora.
+
+    Devolve os bytes do zip (2,7 MB, contra 9,3 MB do .xlsx) -- as abas saem
+    dele uma a uma, só quando alguma tela precisa. None quando não há pacote,
+    quando ele é de outra versão da planilha ou quando esta instância lê do
+    disco: nesses casos vale o Excel, mais devagar, mas sempre certo.
+    """
+    cliente = get_supabase_client()
+    if cliente is None:
+        return None
+    import zipfile
+    try:
+        arquivos = cliente.storage.from_(SUPABASE_BUCKET).list()
+        tamanhos = {f["name"]: (f.get("metadata") or {}).get("size") for f in arquivos}
+        if SUPABASE_RAPIDO not in tamanhos:
+            return None
+        dados = cliente.storage.from_(SUPABASE_BUCKET).download(SUPABASE_RAPIDO)
+        with zipfile.ZipFile(io.BytesIO(dados)) as z:
+            if z.read("carimbo.txt").decode() != str(tamanhos.get(SUPABASE_FILE_PATH)):
+                return None
+        return dados
+    except Exception:
+        return None
+
+
+def _abas_do_pacote(dados: bytes) -> set:
+    import zipfile
+    with zipfile.ZipFile(io.BytesIO(dados)) as z:
+        return {n[:-len(".parquet")] for n in z.namelist() if n.endswith(".parquet")}
+
+
+def _ler_do_pacote(dados: bytes, aba: str) -> pd.DataFrame:
+    import zipfile
+    with zipfile.ZipFile(io.BytesIO(dados)) as z:
+        df = pd.read_parquet(io.BytesIO(z.read(f"{aba}.parquet")))
+    # o parquet devolve None onde o Excel devolvia NaN: as contas tratam os
+    # dois como vazio, mas quem escreve o valor na tela veria "None"
+    for c in df.columns[df.dtypes == object]:
+        df[c] = df[c].where(df[c].notna(), float("nan"))
+    return df
+
+
+def carregar_suprimentos(ler, abas) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Le 09_SUPRIMENTOS_ITENS/09_SUPRIMENTOS_ESTOQUE da planilha combinada
     -- devolve (itens, estoque). Ainda sem historico dia-a-dia (isso e a
     Fase 2, no pipeline, igual a 14_MOVIMENTACOES).
@@ -414,10 +541,10 @@ def carregar_suprimentos(excel_file: pd.ExcelFile) -> tuple[pd.DataFrame, pd.Dat
     quebrar.
     """
     vazio = (pd.DataFrame(), pd.DataFrame())
-    if "09_SUPRIMENTOS_ITENS" not in excel_file.sheet_names:
+    if "09_SUPRIMENTOS_ITENS" not in abas:
         return vazio
 
-    itens = pd.read_excel(excel_file, sheet_name="09_SUPRIMENTOS_ITENS")
+    itens = ler("09_SUPRIMENTOS_ITENS")
     itens = itens.reset_index(names="_linha")
     for c in ("TAG", "REQUISICAO", "TITULO", "IDENT_CODE", "DESCRICAO_MATERIAL",
               "FORNECEDOR", "CATEGORIA_MATERIAL", "STATUS", "STATUS_PW",
@@ -446,8 +573,8 @@ def carregar_suprimentos(excel_file: pd.ExcelFile) -> tuple[pd.DataFrame, pd.Dat
     itens["_fases"] = itens["_linha"].map(fases_por_linha)
 
     estoque = pd.DataFrame()
-    if "09_SUPRIMENTOS_ESTOQUE" in excel_file.sheet_names:
-        estoque = pd.read_excel(excel_file, sheet_name="09_SUPRIMENTOS_ESTOQUE")
+    if "09_SUPRIMENTOS_ESTOQUE" in abas:
+        estoque = ler("09_SUPRIMENTOS_ESTOQUE")
         estoque.columns = [str(c).strip() for c in estoque.columns]
 
     return itens, estoque
@@ -526,8 +653,9 @@ def cabos_avanco_real(lanc: pd.DataFrame) -> pd.DataFrame:
     return lanc
 
 
-@st.cache_data(show_spinner="Carregando planilha...")
-def load_data(cache_key: str):
+def _planilha_para_ler():
+    """A planilha consolidada em bytes, do Supabase ou do disco. Só é chamada
+    quando não há pacote rápido válido -- ver pacote_rapido."""
     client = get_supabase_client()
     if client is not None:
         file_bytes = client.storage.from_(SUPABASE_BUCKET).download(SUPABASE_FILE_PATH)
@@ -563,52 +691,69 @@ def load_data(cache_key: str):
             ".streamlit/secrets.toml, ou rode localmente com a base de dados presente."
         )
         st.stop()
+    return source
 
-    excel_file = pd.ExcelFile(source)
-    tags = pd.read_excel(excel_file, sheet_name="01_BASE_TAGS")
-    cabos = pd.read_excel(excel_file, sheet_name="02_BASE_CABOS")
-    tubing = pd.read_excel(excel_file, sheet_name="03_BASE_TUBING")
-    sigem = pd.read_excel(excel_file, sheet_name="04_BASE_SIGEM")
-    resumo = pd.read_excel(excel_file, sheet_name="07_TAG_RESUMO")
-    esperados = pd.read_excel(excel_file, sheet_name="08_RELATORIOS_ESPERADOS")
+
+@st.cache_data(show_spinner="Carregando planilha...")
+def load_data(cache_key: str):
+    # Com o pacote rápido não se baixa nem se abre o .xlsx: cada aba sai do
+    # parquet em centésimos de segundo. Sem ele, é o caminho de sempre.
+    pacote = pacote_rapido(cache_key)
+    if pacote is not None:
+        abas = _abas_do_pacote(pacote)
+
+        def ler(nome):
+            return _ler_do_pacote(pacote, nome)
+    else:
+        excel_file = pd.ExcelFile(_planilha_para_ler())
+        abas = set(excel_file.sheet_names)
+
+        def ler(nome):
+            return pd.read_excel(excel_file, sheet_name=nome)
+    tags = ler("01_BASE_TAGS")
+    cabos = ler("02_BASE_CABOS")
+    tubing = ler("03_BASE_TUBING")
+    sigem = ler("04_BASE_SIGEM")
+    resumo = ler("07_TAG_RESUMO")
+    esperados = ler("08_RELATORIOS_ESPERADOS")
     # A medicao de campo so existe em planilha gerada pelo pipeline novo; a
     # antiga que estiver no Supabase continua abrindo, com a aba vazia.
     # O controle de lancamento de circuitos e o de-para de TAG so existem em
     # planilha gerada pelo pipeline novo. Sem eles a aba Certificacao abre
     # explicando o que rodar, em vez de quebrar.
-    lancamento = (pd.read_excel(excel_file, sheet_name="02_CABOS_LANCAMENTO")
-                  if "02_CABOS_LANCAMENTO" in excel_file.sheet_names
+    lancamento = (ler("02_CABOS_LANCAMENTO")
+                  if "02_CABOS_LANCAMENTO" in abas
                   else pd.DataFrame(columns=["CIRCUITO", "ORIGEM", "DESTINO", "DISCIPLINA",
                                              "TIPO", "STATUS", "PCT", "METROS"]))
-    depara = (pd.read_excel(excel_file, sheet_name="02_CABOS_DEPARA")
-              if "02_CABOS_DEPARA" in excel_file.sheet_names
+    depara = (ler("02_CABOS_DEPARA")
+              if "02_CABOS_DEPARA" in abas
               else pd.DataFrame(columns=["PONTA", "TAG", "COMO"]))
-    if "06_BASE_GITEC" in excel_file.sheet_names:
-        gitec = pd.read_excel(excel_file, sheet_name="06_BASE_GITEC")
+    if "06_BASE_GITEC" in abas:
+        gitec = ler("06_BASE_GITEC")
     else:
         gitec = pd.DataFrame(columns=["TAG", "ITEM_PPU_GITEC", "FASE", "AGRUPAMENTO",
                                       "ETAPA", "STATUS", "VALOR", "DATA_EXECUCAO"])
     # A area de cada TAG e o mapa area<->desenho so existem em planilha gerada
     # pelo pipeline novo. Sem eles a aba Planta abre explicando o que falta, em
     # vez de quebrar.
-    locacao = (pd.read_excel(excel_file, sheet_name="05_BASE_LOCAÇÃO")
-               if "05_BASE_LOCAÇÃO" in excel_file.sheet_names
+    locacao = (ler("05_BASE_LOCAÇÃO")
+               if "05_BASE_LOCAÇÃO" in abas
                else pd.DataFrame(columns=["TAG", "AREA"]))
     if "AREA" not in locacao.columns:
         locacao["AREA"] = pd.NA
-    aux_areas = (pd.read_excel(excel_file, sheet_name="05_AUX_AREAS")
-                 if "05_AUX_AREAS" in excel_file.sheet_names
+    aux_areas = (ler("05_AUX_AREAS")
+                 if "05_AUX_AREAS" in abas
                  else pd.DataFrame(columns=["AREA", "NOME_AREA", "DESENHO",
                                             "DESENHO_GERAL"]))
     # O que mudou de uma atualizacao para a outra. A base de TAGs e a de cabos
     # nao guardam historico -- quem apura a diferenca e o pipeline, no momento
     # em que grava a planilha, e deixa pronto nesta aba.
-    movimentacoes = (pd.read_excel(excel_file, sheet_name="14_MOVIMENTACOES")
-                     if "14_MOVIMENTACOES" in excel_file.sheet_names
+    movimentacoes = (ler("14_MOVIMENTACOES")
+                     if "14_MOVIMENTACOES" in abas
                      else pd.DataFrame(columns=["DATA", "TIPO", "OBJETO", "CAMPO",
                                                 "DE", "PARA", "QTD_TAGS"]))
     # Suprimentos ja vem pronto na combinada -- ver carregar_suprimentos.
-    suprimentos_itens, suprimentos_estoque = carregar_suprimentos(excel_file)
+    suprimentos_itens, suprimentos_estoque = carregar_suprimentos(ler, abas)
     # o avanço do cabo é o "% Avanço REAL" (lançamento + conexão + teste),
     # não mais só o lançamento -- ver cabos_avanco_real
     lancamento = cabos_avanco_real(lancamento)
@@ -14799,6 +14944,9 @@ def render_acessos():
 # session_state: "bs_*" é o estado da carga (some ao voltar para a lista de
 # bases); "bsw_*" são os widgets.
 
+# Dias sem arquivo novo para o cartão avisar. Um número só para todas: se
+# alguma base avisar cedo demais, vira exceção por base.
+BS_DIAS_PARADA = 7
 BS_IMPACTO = {"principal": ("Base principal", "ambar"),
               "resumo": ("+ resumo por TAG", "azul"),
               "leve": ("Só esta base", "teal")}
@@ -14852,10 +15000,15 @@ def _bs_publicador():
         return None
 
     def publicar(planilha) -> str:
-        cliente.storage.from_(SUPABASE_BUCKET).update(
-            SUPABASE_FILE_PATH, Path(planilha).read_bytes(),
-            {"content-type": "application/vnd.openxmlformats-officedocument"
-                             ".spreadsheetml.sheet", "upsert": "true"})
+        _subir(cliente, SUPABASE_FILE_PATH, Path(planilha).read_bytes(),
+               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        # o pacote rápido vai depois, e falha dele não invalida a publicação:
+        # sem pacote o site lê o .xlsx, mais devagar, mas com o dado novo
+        try:
+            _subir(cliente, SUPABASE_RAPIDO, gerar_pacote_rapido(planilha),
+                   "application/zip")
+        except Exception:
+            return "publicada (sem o pacote rápido)"
         return "publicada"
     return publicar
 
@@ -14906,6 +15059,8 @@ def render_bases():
                     'Esta página funciona no Gplan que roda no computador de quem mantém '
                     'as bases.</div>')
         return
+    # quem está na tela agora: é o nome que fica no registro de cada atualização
+    area_bases.quem_esta_usando(_bs_usuario())
     planilha = Path(LOCAL_EXCEL_FALLBACK)
     tarefa = area_bases.tarefa_atual()
     if tarefa is not None and tarefa.rodando:
@@ -14945,7 +15100,7 @@ def _bs_visao(planilha: Path):
                 f'<b>{r["inicio"]:%d/%m · %H:%M} → {fim:%H:%M}</b>'
                 f'<i>{_bs_duracao((fim - r["inicio"]).total_seconds())}{extra}</i></div>')
 
-    c1, c2, c3 = st.columns([6, 1.4, 1.7], vertical_alignment="center")
+    c1, c2, c3, c4 = st.columns([4.4, 1.4, 1.4, 1.7], vertical_alignment="center")
     with c1:
         render_html('<p class="bs-intro">Carregue só a base que mudou. O Gplan refaz apenas '
                     'o que depende dela e publica a planilha sozinho.</p>')
@@ -14955,7 +15110,12 @@ def _bs_visao(planilha: Path):
                  icon=":material/history:", use_container_width=True):
         st.session_state["bs_hist"] = not historico
         st.rerun()
-    if c3.button("Atualizar tudo", key="bsw_tudo", icon=":material/sync:",
+    mostra_reg = st.session_state.get("bs_reg", False)
+    if c3.button("Fechar registro" if mostra_reg else "Registro", key="bsw_reg_bt",
+                 icon=":material/receipt_long:", use_container_width=True):
+        st.session_state["bs_reg"] = not mostra_reg
+        st.rerun()
+    if c4.button("Atualizar tudo", key="bsw_tudo", icon=":material/sync:",
                  use_container_width=True):
         _bs_dialogo_tudo(planilha)
     pasta = area_bases.entrada_dir()
@@ -14969,6 +15129,8 @@ def _bs_visao(planilha: Path):
                   '<i>o Atualizar tudo e o CMD leem daqui</i></div></div>')
     if historico:
         _bs_historico()
+    if mostra_reg:
+        _bs_registro()
     for i in range(0, len(area_bases.BASES), 3):
         cols = st.columns(3)
         for b, col in zip(area_bases.BASES[i:i + 3], cols):
@@ -14976,6 +15138,34 @@ def _bs_visao(planilha: Path):
                 render_html(_bs_cartao(b, cont, carimbo))
                 if st.button("Carregar", key=f"bsw_abre_{b.codigo}", use_container_width=True):
                     _bs_abrir(b.codigo)
+
+
+def _bs_registro():
+    """As últimas atualizações: quem fez, quando, quanto demorou e como
+    terminou. Sai do registro gravado ao lado das bases."""
+    linhas = area_bases.registro(30)
+    if not linhas:
+        render_html('<div class="bs-caixa"><h4>Registro das atualizações</h4>'
+                    '<div class="bs-vazio">Nada registrado ainda. A partir de agora, cada '
+                    'atualização deixa uma linha aqui.</div></div>')
+        return
+    marcas = {"ok": ("concluída", "teal"), "aviso": ("com aviso", "ambar"),
+              "erro": ("parou", "vermelho")}
+    itens = []
+    for r in linhas:
+        q = r.get("quando") or ""
+        quando = f"{q[8:10]}/{q[5:7]} às {q[11:16]}" if len(q) >= 16 else q
+        rotulo, cor = marcas.get(r.get("resultado"), ("", "teal"))
+        detalhe = (r.get("detalhe") or "").strip()
+        itens.append(
+            f'<div class="bs-versao"><span class="bs-cod">{esc(r.get("base") or "··")}</span>'
+            f'<div><b>{esc(r.get("o_que") or "")}</b><i>{esc(quando)} · '
+            f'{esc(r.get("quem") or "sem identificação")} · '
+            f'{_bs_duracao(r.get("segundos") or 0)}'
+            + (f' · {esc(detalhe[:90])}' if detalhe else "")
+            + f'</i></div>{_bs_pill(rotulo, cor)}</div>')
+    render_html('<div class="bs-caixa"><h4>Registro das atualizações</h4>'
+                + "".join(itens) + "</div>")
 
 
 def _bs_cartao(b, cont: dict, carimbo_planilha: float) -> str:
@@ -14990,8 +15180,15 @@ def _bs_cartao(b, cont: dict, carimbo_planilha: float) -> str:
         # a planilha é gravada no fim de toda importação: base mais nova que
         # ela foi mexida depois da última vez que entrou no sistema
         mudou = carimbo_planilha and s.st_mtime > carimbo_planilha + 60
-        estado = (_bs_pill("mudou depois da última importação", "ambar") if mudou
-                  else _bs_pill("em dia", "teal"))
+        # base parada há semanas costuma ser esquecimento, não estabilidade:
+        # dizer "em dia" para um arquivo de um mês atrás esconde isso
+        dias = int((time.time() - s.st_mtime) / 86400)
+        if mudou:
+            estado = _bs_pill("mudou depois da última importação", "ambar")
+        elif dias >= BS_DIAS_PARADA:
+            estado = _bs_pill(f"sem atualizar há {dias} dias", "ambar")
+        else:
+            estado = _bs_pill("em dia", "teal")
         meta = f"{no_sistema} · arquivo de {_bs_quando(s.st_mtime)} · {_bs_tamanho(s.st_size)}"
         nome_arq = atual.name
     extras = []
@@ -15145,6 +15342,19 @@ def _bs_escolher(b):
         render_html(f'<p class="bs-intro">{esc(b.fixa)}</p>')
     tipos = sorted({e.lstrip(".") for e in b.extensoes}
                    | {e.lstrip(".").upper() for e in b.extensoes})
+    # os textos prontos do Streamlit vêm em inglês ("Upload", "200MB per
+    # file") e ele não deixa trocá-los: o português entra por cima, por
+    # estilo, sem mexer no componente
+    render_html('<style>'
+                '[data-testid="stFileUploaderDropzoneInstructions"] span{font-size:0}'
+                '[data-testid="stFileUploaderDropzoneInstructions"] span::after{'
+                'content:"Arraste a planilha aqui · até 200 MB";font-size:14px;'
+                'white-space:normal}'
+                '[data-testid="stFileUploaderDropzone"] [data-testid="stBaseButton-secondary"] '
+                'p{display:none}'
+                '[data-testid="stFileUploaderDropzone"] [data-testid="stBaseButton-secondary"] '
+                '[data-testid="stMarkdownContainer"]::after{content:"Escolher arquivo"}'
+                '</style>')
     up = st.file_uploader(f"Nova versão de {b.stem}", type=tipos,
                           key=f"bsw_up_{b.codigo}_{st.session_state.get('bs_up_n', 0)}",
                           help="A versão em uso continua valendo até você aplicar a nova.")
