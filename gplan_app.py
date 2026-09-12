@@ -323,7 +323,12 @@ def get_supabase_client():
     return create_client(url, key)
 
 
-@st.cache_data(ttl=60)
+# 5 min, e nao 1: a listagem leva ~10 s pelo proxy da rede, e com um minuto
+# de validade uma troca de aba fora da janela pagava os 10 s outra vez. O
+# atraso maximo para ver uma planilha publicada por fora passa a ser 5 min --
+# quem publica pela propria aba Bases continua vendo na hora, porque ela
+# limpa o cache no fim da atualizacao.
+@st.cache_data(ttl=300)
 def _arquivos_publicados() -> dict:
     """O que está no bucket agora: nome -> (carimbo, tamanho).
 
@@ -342,7 +347,7 @@ def _arquivos_publicados() -> dict:
         return {}
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def get_source_cache_key() -> str:
     client = get_supabase_client()
     if client is not None:
