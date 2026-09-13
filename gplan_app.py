@@ -15905,21 +15905,153 @@ def prog_tabela(aval: pd.DataFrame, chave: str) -> list:
     return aval.iloc[linhas]["TAG"].tolist() if linhas else []
 
 
+# O painel da semana: como está o que já foi programado. A forma de cada
+# número vem do trabalho que ele faz -- avanço é número com barra, e não
+# rosca, porque é uma parte de um todo só; situação é uma barra em três
+# pedaços com o rótulo em cada um, porque cor de status nunca vai sozinha;
+# impedimento é barra horizontal, que compara tamanho entre poucas
+# categorias.
+
+
+PROG_TONS = {
+    "livre": ("#2dd4bf", "em ordem"),
+    "ressalva": ("#f5b34a", "com aviso"),
+    "travada": ("#f87171", "em risco"),
+}
+
+
+def prog_barras(itens, cor="#2dd4bf", total=None) -> str:
+    """Barras horizontais para poucas categorias: rótulo, barra e número."""
+    if not itens:
+        return '<div class="pnl-vazio">nada aqui</div>'
+    maior = total or max(n for _r, n in itens) or 1
+    linhas = []
+    for rotulo, n in itens:
+        largura = max(n / maior * 100, 2)
+        linhas.append(
+            '<div class="pnl-linha">'
+            f'<span class="pnl-rot" title="{esc(rotulo)}">{esc(rotulo)}</span>'
+            f'<span class="pnl-trilho"><i style="width:{largura:.1f}%;background:{cor}"></i></span>'
+            f'<b>{br_num(n)}</b></div>')
+    return "".join(linhas)
+
+
+def prog_painel(plano, meta, semana: int, escolhidas: int) -> str:
+    """O retrato da semana: quanto já foi montado, como está a situação de
+    cada TAG e o que está travando."""
+    total = len(plano)
+    if not total:
+        return ('<div class="pnl-caixa"><div class="pnl-vazio">A Semana '
+                f'{semana} ainda não tem nada programado. Escolha as TAGs à '
+                'esquerda e elas aparecem aqui.</div></div>')
+    montadas = int((plano["MONTAGEM"] == "Montado").sum())
+    contagem = plano["SITUACAO"].value_counts()
+    risco = int(contagem.get("travada", 0))
+    pct = montadas / total * 100
+
+    # --- os números que abrem o painel
+    tiles = [("Programadas", br_num(total),
+              f"{br_num(len(plano) - escolhidas)} na base + {br_num(escolhidas)} agora"
+              if escolhidas else "todas já na base"),
+             ("Montadas", br_num(montadas), f"{pct:.0f}% da semana"),
+             ("Em risco", br_num(risco),
+              "com impedimento" if risco else "nenhuma travada"),
+             ("Meta da curva", br_num(int(meta)) if meta else "—",
+              f"faltam {br_num(max(int(meta) - total, 0))}" if meta and total < meta
+              else ("meta atingida" if meta else "sem previsto"))]
+    cabeca = "".join(
+        f'<div class="pnl-tile"><small>{esc(r)}</small><b>{v}</b><i>{esc(d)}</i></div>'
+        for r, v, d in tiles)
+
+    # --- avanço: uma parte de um todo, então número e barra
+    avanco = (
+        '<div class="pnl-bloco"><div class="pnl-cab">Avanço da semana</div>'
+        f'<div class="pnl-grande">{br_num(montadas)}<span> de {br_num(total)} montadas</span></div>'
+        f'<div class="pnl-trilho pnl-alto"><i style="width:{max(pct, 1):.1f}%;'
+        'background:#2dd4bf"></i></div></div>')
+
+    # --- situação: uma barra em três pedaços, cada um com o seu rótulo
+    pedacos, legenda = [], []
+    for chave in ("livre", "ressalva", "travada"):
+        n = int(contagem.get(chave, 0))
+        if not n:
+            continue
+        cor, rotulo = PROG_TONS[chave]
+        pedacos.append(f'<i style="width:{n / total * 100:.1f}%;background:{cor}" '
+                       f'title="{br_num(n)} {esc(rotulo)}"></i>')
+        legenda.append(f'<span><i style="background:{cor}"></i>{br_num(n)} {esc(rotulo)}</span>')
+    situacao = (
+        '<div class="pnl-bloco"><div class="pnl-cab">Como está cada TAG</div>'
+        f'<div class="pnl-pilha">{"".join(pedacos)}</div>'
+        f'<div class="pnl-legenda">{"".join(legenda)}</div></div>')
+
+    # --- o que trava e o que avisa
+    def conta(coluna):
+        tudo = [t for lista in plano[coluna] for t in lista]
+        resumo = {}
+        for t in tudo:
+            chave = t.split(" · ")[0]
+            resumo[chave] = resumo.get(chave, 0) + 1
+        return sorted(resumo.items(), key=lambda x: -x[1])[:4]
+
+    travas, avisos = conta("BLOQUEIOS"), conta("RESSALVAS")
+    impedimentos = (
+        '<div class="pnl-bloco"><div class="pnl-cab">O que está travando</div>'
+        + prog_barras(travas, "#f87171", total) + "</div>") if travas else ""
+    pendencias = (
+        '<div class="pnl-bloco"><div class="pnl-cab">Avisos, que não impedem</div>'
+        + prog_barras(avisos, "#f5b34a", total) + "</div>") if avisos else ""
+
+    tipos = plano["FAMILIA"].value_counts().head(4).items()
+    composicao = ('<div class="pnl-bloco"><div class="pnl-cab">O que tem na semana</div>'
+                  + prog_barras([(t, int(n)) for t, n in tipos], "#60a5fa", total) + "</div>")
+
+    return (f'<div class="pnl-caixa"><div class="pnl-tiles">{cabeca}</div>'
+            + avanco + situacao + impedimentos + pendencias + composicao + "</div>")
+
+
+PROG_CSS = """<style>
+.prog-chip{display:inline-block;font-size:12px;padding:3px 9px;border-radius:7px;
+  border:1px solid transparent;font-family:ui-monospace,Consolas,monospace;margin-right:6px}
+.prog-faixa{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:10px 0 16px}
+.prog-faixa small{color:#93a2b8;margin-left:6px}
+.pnl-caixa{border:1px solid rgba(148,163,184,.22);border-radius:14px;padding:16px;
+  background:rgba(148,163,184,.05)}
+.pnl-tiles{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:rgba(148,163,184,.22);
+  border:1px solid rgba(148,163,184,.22);border-radius:10px;overflow:hidden;margin-bottom:16px}
+.pnl-tile{background:var(--dark-card,#111a2b);padding:10px 12px}
+.pnl-tile small{display:block;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+  color:#93a2b8;font-family:ui-monospace,Consolas,monospace}
+.pnl-tile b{display:block;font-size:26px;line-height:1.15;font-variant-numeric:tabular-nums}
+.pnl-tile i{font-style:normal;font-size:11.5px;color:#93a2b8}
+.pnl-bloco{margin-bottom:16px}
+.pnl-cab{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:#93a2b8;
+  font-family:ui-monospace,Consolas,monospace;margin-bottom:8px}
+.pnl-grande{font-size:22px;font-variant-numeric:tabular-nums;margin-bottom:8px}
+.pnl-grande span{font-size:13px;color:#93a2b8}
+.pnl-trilho{display:block;height:8px;border-radius:99px;background:rgba(148,163,184,.18);
+  overflow:hidden;flex:1}
+.pnl-trilho.pnl-alto{height:12px}
+.pnl-trilho i{display:block;height:100%;border-radius:99px}
+.pnl-pilha{display:flex;gap:2px;height:14px;border-radius:99px;overflow:hidden;
+  background:rgba(148,163,184,.18)}
+.pnl-pilha i{display:block;height:100%}
+.pnl-legenda{display:flex;flex-wrap:wrap;gap:12px;margin-top:9px;font-size:12.5px;color:#cbd6e6}
+.pnl-legenda span{display:inline-flex;align-items:center;gap:6px}
+.pnl-legenda i{width:9px;height:9px;border-radius:3px;display:inline-block}
+.pnl-linha{display:grid;grid-template-columns:142px 1fr 30px;align-items:center;gap:8px;
+  font-size:12.5px;margin-bottom:7px}
+.pnl-rot{color:#cbd6e6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pnl-linha b{text-align:right;font-variant-numeric:tabular-nums;font-size:12.5px}
+.pnl-vazio{color:#93a2b8;font-size:13px;line-height:1.5}
+</style>"""
+
+
 def render_programacao(cache_key: str = ""):
     """Administração › Programação: a semana montada com quem pode ser
     montado de verdade."""
     render_header("Programação")
-    render_html(
-        "<style>"
-        ".prog-chip{display:inline-block;font-size:12px;padding:3px 9px;border-radius:7px;"
-        "border:1px solid transparent;font-family:ui-monospace,Consolas,monospace;margin-right:6px}"
-        ".prog-faixa{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:10px 0 16px}"
-        ".prog-faixa small{color:var(--muted,#93a2b8);margin-left:6px}"
-        ".prog-resumo{border:1px solid rgba(148,163,184,.25);border-radius:10px;padding:10px 14px}"
-        ".prog-resumo div{display:flex;justify-content:space-between;font-size:13.5px;padding:3px 0}"
-        ".prog-resumo b{font-family:ui-monospace,Consolas,monospace}"
-        ".prog-total{border-top:1px solid rgba(148,163,184,.25);margin-top:6px;padding-top:8px}"
-        "</style>")
+    render_html(PROG_CSS)
     tags = load_data(cache_key)[0]
 
     # ---------------------------------------------------------- os critérios
@@ -15986,33 +16118,34 @@ def render_programacao(cache_key: str = ""):
         if st.button("Limpar programação", use_container_width=True, key="prog_limpar"):
             st.session_state["prog_cesta"] = []
             st.rerun()
-    if ja_na_base:
-        r = programacao.resumo(conferencia)
-        risco = conferencia[conferencia["SITUACAO"] == "travada"]
-        titulo = (f"O que já está programado para a {rotulo_semana} · "
-                  f"{br_num(ja_na_base)} TAGs"
-                  + (f" · {br_num(len(risco))} em risco" if len(risco) else " · todas em ordem"))
-        with st.expander(titulo, expanded=bool(len(risco))):
-            st.caption("A mesma régua, aplicada ao que já foi programado: material que não "
-                       "chegou ou calibração que reprovou depois aparecem aqui a tempo de trocar.")
-            render_html(
-                '<div class="prog-faixa">'
-                + prog_chip("ok", f'{br_num(r["livre"])} em ordem')
-                + prog_chip("ressalva", f'{br_num(r["ressalva"])} com aviso')
-                + prog_chip("trava", f'{br_num(r["travada"])} em risco')
-                + "</div>")
-            prog_tabela(conferencia.sort_values("SITUACAO", ascending=False), "conferencia")
-
-    render_html(
-        f'<div class="prog-faixa">{prog_chip("ok", f"{br_num(conta["livre"])} livres")}'
-        f'{prog_chip("ressalva", f"{br_num(conta["ressalva"])} com ressalva")}'
-        f'{prog_chip("trava", f"{br_num(conta["travada"])} travadas")}'
-        f'<small>de {br_num(conta["total"])} TAGs que ainda não estão montadas '
-        'nem programadas em outra semana</small></div>')
-
-    # ----------------------------------------------------------- os filtros
-    esq, dir_ = st.columns([3.1, 1.25], gap="large")
+    # ----------------------------------------------------------- as colunas
+    esq, dir_ = st.columns([2.6, 1.5], gap="large")
     with esq:
+        if ja_na_base:
+            r = programacao.resumo(conferencia)
+            risco = conferencia[conferencia["SITUACAO"] == "travada"]
+            titulo = (f"O que já está programado para a {rotulo_semana} · "
+                      f"{br_num(ja_na_base)} TAGs"
+                      + (f" · {br_num(len(risco))} em risco" if len(risco)
+                         else " · todas em ordem"))
+            with st.expander(titulo, expanded=False):
+                st.caption("A mesma régua, aplicada ao que já foi programado: material que "
+                           "não chegou ou calibração que reprovou depois aparecem aqui a "
+                           "tempo de trocar.")
+                render_html(
+                    '<div class="prog-faixa">'
+                    + prog_chip("ok", f'{br_num(r["livre"])} em ordem')
+                    + prog_chip("ressalva", f'{br_num(r["ressalva"])} com aviso')
+                    + prog_chip("trava", f'{br_num(r["travada"])} em risco')
+                    + "</div>")
+                prog_tabela(conferencia.sort_values("SITUACAO", ascending=False), "conferencia")
+
+        render_html(
+            '<div class="prog-faixa">'
+            + prog_chip("ok", f'{br_num(conta["livre"])} livres')
+            + prog_chip("ressalva", f'{br_num(conta["ressalva"])} com ressalva')
+            + prog_chip("trava", f'{br_num(conta["travada"])} travadas')
+            + f'<small>de {br_num(conta["total"])} ainda sem semana</small></div>')
         f1, f2, f3 = st.columns([1.4, 1.4, 1])
         familias = sorted(aval["FAMILIA"].unique()) if not aval.empty else []
         plantas = sorted(aval["PLANTA"].unique()) if not aval.empty else []
@@ -16069,25 +16202,17 @@ def render_programacao(cache_key: str = ""):
 
     # ------------------------------------------------------------ a cesta
     with dir_:
-        st.markdown(f"**Programação da Semana {semana}**")
         aviso = st.session_state.pop("prog_aviso", "")
         if aviso:
             st.success(aviso)
-        if not cesta:
-            render_html('<div class="gtbl-empty">Nada escolhido ainda. Marque as linhas '
-                        'na tabela ou use os atalhos de planta.</div>')
-        else:
-            escolhidas = aval[aval["TAG"].isin(cesta)]
-            resumo_html = "".join(
-                f'<div><span>{esc(k)}</span><b>{br_num(v)}</b></div>'
-                for k, v in escolhidas["FAMILIA"].value_counts().items())
-            render_html(
-                '<div class="prog-resumo">' + resumo_html
-                + f'<div class="prog-total"><span>Prioritárias</span>'
-                  f'<b>{br_num(int(escolhidas["PRIORITARIA"].sum()))}</b></div>'
-                + f'<div><span>Plantas</span><b>{br_num(escolhidas["PLANTA"].nunique())}</b></div>'
-                + "</div>")
-            with st.expander(f"As {br_num(len(cesta))} escolhidas", expanded=False):
+        # o plano da semana é o que já está na base MAIS o que ele acabou de
+        # escolher: é esse conjunto que o painel retrata
+        escolhidas = aval[aval["TAG"].isin(cesta)]
+        plano = (pd.concat([conferencia, escolhidas], ignore_index=True)
+                 if ja_na_base else escolhidas)
+        render_html(prog_painel(plano, meta, semana, len(cesta)))
+        if cesta:
+            with st.expander(f"As {br_num(len(cesta))} que você acabou de escolher"):
                 for tag in cesta[:200]:
                     linha = st.columns([3, 1])
                     linha[0].markdown(f"`{tag}`")
