@@ -53,6 +53,7 @@ PERMISSOES = {
     "ver_avanco_fisico": "Ver a aba Avanço",
     "ver_previsao_medicao": "Ver a aba Previsão Medição",
     "ver_curva_s": "Ver a aba Rundown",
+    "programar": "Montar a programação da semana (aba Programação)",
     "atualizar_bases": "Atualizar as bases (aba Bases)",
     "ver_valores": "Ver valores em reais",
     "administrar": "Criar, editar e remover logins",
