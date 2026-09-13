@@ -308,6 +308,30 @@ def estado(tags: pd.DataFrame) -> dict:
     }
 
 
+def _semana_teste(valor: object) -> str:
+    """A semana prevista do teste de malha ("SEM87"). "0" quer dizer sem
+    previsão, mesma convenção do SKID -- e vira vazio."""
+    texto = _texto(valor).upper().replace(" ", "")
+    return "" if texto in ("", "0", "SEM0") else texto
+
+
+def urgencia(linha: dict) -> tuple:
+    """A ordem em que as oportunidades aparecem.
+
+    Primeiro o teste de malha mais próximo (a montagem tem de acontecer
+    antes dele), depois prioritária, depois o nível do subgrupo, e por fim
+    a TAG -- para a lista não dançar entre um desenho e outro.
+    """
+    teste = linha.get("TESTE_MALHA") or ""
+    numero = int("".join(c for c in teste if c.isdigit()) or 9999)
+    nivel = linha.get("NIVEL") or "99"
+    try:
+        nivel_num = float(nivel)
+    except ValueError:
+        nivel_num = 99.0
+    return (numero, 0 if linha.get("PRIORITARIA") else 1, nivel_num, linha.get("TAG", ""))
+
+
 def _numero_da_semana(rotulo: object) -> int:
     digitos = "".join(c for c in str(rotulo) if c.isdigit())
     return int(digitos) if digitos else 0
@@ -376,12 +400,22 @@ def _avaliar(f: Fonte, base: pd.DataFrame, modos) -> pd.DataFrame:
             "PRIORITARIA": _texto(linha.get("SSOP_PRIORITARIO")).upper() == "SIM",
             "SEMANA": _texto(linha.get("SEMANA_PROGRAMADA")),
             "MONTAGEM": _texto(linha.get("STATUS_MONTAGEM")),
+            "NIVEL": _texto(linha.get("SUBGRUPO_PRIORIDADE")),
+            "FASE": _texto(linha.get("FASE")),
+            "SISTEMA": _texto(linha.get("SOP")),
+            "SUBSISTEMA": _texto(linha.get("SSOP")),
+            "TESTE_MALHA": _semana_teste(linha.get("PREVISAO_TESTE_MALHA")),
             "SITUACAO": "travada" if bloqueios else ("ressalva" if ressalvas else "livre"),
             "MOTIVOS": motivos,
             "BLOQUEIOS": bloqueios,
             "RESSALVAS": ressalvas,
         })
-    return pd.DataFrame(linhas)
+    if not linhas:
+        return pd.DataFrame(columns=["TAG", "DESCRICAO", "FAMILIA", "AREA", "PLANTA",
+                                     "MALHA", "PRIORITARIA", "NIVEL", "FASE", "SISTEMA",
+                                     "SUBSISTEMA", "TESTE_MALHA", "SEMANA", "MONTAGEM",
+                                     "SITUACAO", "MOTIVOS", "BLOQUEIOS", "RESSALVAS"])
+    return pd.DataFrame(sorted(linhas, key=urgencia))
 
 
 def resumo(aval: pd.DataFrame) -> dict:
@@ -393,7 +427,9 @@ def resumo(aval: pd.DataFrame) -> dict:
 
 
 def por_grupo(aval: pd.DataFrame, coluna: str = "PLANTA") -> list[dict]:
-    """As oportunidades agrupadas -- por planta é como o campo trabalha."""
+    """As oportunidades agrupadas -- por planta é como o campo trabalha, e
+    por subsistema é como ele programa (130 das 203 TAGs das semanas 62 a 64
+    saíram do mesmo SOP)."""
     if aval.empty:
         return []
     grupos = []

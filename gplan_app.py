@@ -15880,9 +15880,13 @@ def prog_tabela(aval: pd.DataFrame, chave: str) -> list:
         "TAG": aval["TAG"],
         "Descrição": aval["DESCRICAO"],
         "Tipo": aval["FAMILIA"],
+        "Prio": aval["PRIORITARIA"].map({True: "★", False: ""}),
+        "Nível": aval["NIVEL"],
+        "Teste malha": aval["TESTE_MALHA"],
         "Área": aval["AREA"],
         "Planta": aval["PLANTA"],
-        "Prioritária": aval["PRIORITARIA"].map({True: "SIM", False: ""}),
+        "Sistema": aval["SUBSISTEMA"],
+        "Fase": aval["FASE"],
         "O que foi conferido": [
             " · ".join(t for _c, s, t in m if s != "sem_dado") for m in aval["MOTIVOS"]],
         "Pendências": [" · ".join(b + r) for b, r in zip(aval["BLOQUEIOS"], aval["RESSALVAS"])],
@@ -15891,10 +15895,16 @@ def prog_tabela(aval: pd.DataFrame, chave: str) -> list:
         vista, hide_index=True, use_container_width=True, height=430,
         on_select="rerun", selection_mode="multi-row", key=f"prog_tab_{chave}",
         column_config={
-            # sem largura fixa: "small" cortava o sufixo da TAG, e
-            # AST-120101B aparecia igual a AST-120101A
             "TAG": st.column_config.TextColumn(width="medium"),
             "Descrição": st.column_config.TextColumn(width="medium"),
+            "Prio": st.column_config.TextColumn("Prio", width="small",
+                                                help="SSOP Prioritário = SIM"),
+            "Nível": st.column_config.TextColumn(width="small",
+                                                 help="Subgrupo de prioridade da base"),
+            "Teste malha": st.column_config.TextColumn(
+                width="small", help="Semana prevista do teste de malha -- a montagem "
+                                    "precisa acontecer antes dela"),
+            "Sistema": st.column_config.TextColumn(width="medium", help="SSOP"),
             "O que foi conferido": st.column_config.TextColumn(width="large"),
             "Pendências": st.column_config.TextColumn(width="medium"),
         })
@@ -16146,35 +16156,50 @@ def render_programacao(cache_key: str = ""):
             + prog_chip("ressalva", f'{br_num(conta["ressalva"])} com ressalva')
             + prog_chip("trava", f'{br_num(conta["travada"])} travadas')
             + f'<small>de {br_num(conta["total"])} ainda sem semana</small></div>')
-        f1, f2, f3 = st.columns([1.4, 1.4, 1])
+        f1, f2, f3, f4 = st.columns([1.3, 1.3, 1.3, 1])
         familias = sorted(aval["FAMILIA"].unique()) if not aval.empty else []
         plantas = sorted(aval["PLANTA"].unique()) if not aval.empty else []
+        niveis = sorted(n for n in aval["NIVEL"].unique() if n) if not aval.empty else []
+        fases = sorted(f for f in aval["FASE"].unique() if f) if not aval.empty else []
         with f1:
             sel_fam = st.multiselect("Tipo", familias, key="prog_fam",
                                      placeholder="Todos")
         with f2:
+            sel_nivel = st.multiselect("Nível de prioridade", niveis, key="prog_nivel",
+                                       placeholder="Todos")
+        with f3:
             sel_planta = st.multiselect("Planta", plantas, key="prog_planta",
                                         placeholder="Todas")
-        with f3:
+        with f4:
             so_prio = st.toggle("Só prioritárias", key="prog_prio")
+        sel_fase = st.multiselect("Fase", fases, key="prog_fase", placeholder="Todas")
         vista = aval
         if sel_fam:
             vista = vista[vista["FAMILIA"].isin(sel_fam)]
+        if sel_nivel:
+            vista = vista[vista["NIVEL"].isin(sel_nivel)]
         if sel_planta:
             vista = vista[vista["PLANTA"].isin(sel_planta)]
+        if sel_fase:
+            vista = vista[vista["FASE"].isin(sel_fase)]
         if so_prio:
             vista = vista[vista["PRIORITARIA"]]
         vista = vista[~vista["TAG"].isin(cesta)]
 
-        # "sem planta" não é um lugar: agrupar por ela não ajuda a programar
-        agrupaveis = vista[(vista["SITUACAO"] != "travada") & (vista["PLANTA"] != "sem planta")]
-        atalhos = programacao.por_grupo(agrupaveis)[:6]
+        por = st.radio("Agrupar os atalhos por", ("Planta", "Subsistema"), horizontal=True,
+                       key="prog_agrupar", label_visibility="collapsed")
+        coluna_grupo = "PLANTA" if por == "Planta" else "SUBSISTEMA"
+        vazio = "sem planta" if por == "Planta" else ""
+        agrupaveis = vista[(vista["SITUACAO"] != "travada") & (vista[coluna_grupo] != vazio)]
+        atalhos = programacao.por_grupo(agrupaveis, coluna_grupo)[:6]
         if atalhos:
-            st.caption("Plantas com mais oportunidades — o campo trabalha por planta:")
+            st.caption(f"{por}s com mais oportunidades — o campo trabalha por planta, "
+                       "e a programação costuma sair por subsistema:")
             for grupo, coluna in zip(atalhos, st.columns(min(len(atalhos), 3))):
                 with coluna:
                     if st.button(f"+ {grupo['nome']} · {br_num(grupo['livres'])}",
-                                 key=f"prog_g_{grupo['nome']}", use_container_width=True,
+                                 key=f"prog_g_{coluna_grupo}_{grupo['nome']}",
+                                 use_container_width=True,
                                  help=f"{grupo['prioritarias']} prioritárias · "
                                       f"áreas {', '.join(grupo['areas'][:3])}"):
                         prog_juntar(grupo["tags"]["TAG"].tolist())
@@ -16183,14 +16208,16 @@ def render_programacao(cache_key: str = ""):
         livres = vista[vista["SITUACAO"] == "livre"]
         ressalva = vista[vista["SITUACAO"] == "ressalva"]
         travadas = vista[vista["SITUACAO"] == "travada"]
-        aba1, aba2, aba3 = st.tabs([
-            f"Livres · {br_num(len(livres))}",
-            f"Com ressalva · {br_num(len(ressalva))}",
-            f"Travadas · {br_num(len(travadas))}"])
+        # só o que está apto: é daqui que ele parte. As travadas continuam a
+        # um clique, embaixo, para quando ele quiser saber o que falta nelas.
+        aba1, aba2 = st.tabs([f"Prontas · {br_num(len(livres))}",
+                              f"Com aviso · {br_num(len(ressalva))}"])
         for aba, bloco, chave, ajuda in (
-                (aba1, livres, "livres", "Passaram em todos os critérios ligados."),
-                (aba2, ressalva, "ressalva", "Pendência pequena — pedestal ou infra quase prontos."),
-                (aba3, travadas, "travadas", "O motivo de cada uma está na última coluna.")):
+                (aba1, livres, "livres", "Passaram em todos os critérios que você deixou "
+                                         "como bloqueio. Em cima, o teste de malha mais "
+                                         "próximo."),
+                (aba2, ressalva, "ressalva", "Dá para montar: o aviso é de suporte, bandeja, "
+                                             "pedestal ou infra, que não impedem.")):
             with aba:
                 st.caption(ajuda)
                 marcadas = prog_tabela(bloco, chave)
@@ -16199,6 +16226,11 @@ def render_programacao(cache_key: str = ""):
                         key=f"prog_add_{chave}", type="primary"):
                     prog_juntar(marcadas)
                     st.rerun()
+        if len(travadas):
+            with st.expander(f"As que ainda não dá para montar · {br_num(len(travadas))}"):
+                st.caption("Não entram na sua escolha: aqui só para você ver o que falta "
+                           "em cada uma e cobrar de quem resolve.")
+                prog_tabela(travadas, "travadas")
 
     # ------------------------------------------------------------ a cesta
     with dir_:
