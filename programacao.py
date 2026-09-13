@@ -21,24 +21,36 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 # --------------------------------------------------------------- critérios
-# (chave, rótulo, o que significa, ligado por padrão)
+# Três modos, e quem decide é quem programa: BLOQUEIA tira a TAG da lista,
+# AVISA deixa passar em âmbar, IGNORA nem mostra.
+#
+# O padrão saiu da prova real -- as 719 TAGs JÁ MONTADAS, em 13/09/2026:
+# calibração, almoxarifado, suprimentos e localização reprovariam de 0% a 2%
+# delas; bandeja reprovaria 19% e pedestal 13%. Critério que reprova um
+# quinto do que já foi para campo avisa, não bloqueia (usuário: "se o
+# pedestal tiver faltando abertura de tag... não é impeditivo de montagem").
+BLOQUEIA, AVISA, IGNORA = "bloqueia", "avisa", "ignora"
+MODOS = (BLOQUEIA, AVISA, IGNORA)
+
+# (chave, rótulo, o que significa, modo padrão)
 CRITERIOS = [
     ("calibracao", "Calibração aprovada",
-     "STATUS_CALIBRACAO da 01_BASE_TAGS", True),
+     "STATUS_CALIBRACAO da 01_BASE_TAGS", BLOQUEIA),
     ("estoque", "Material na obra",
-     "saldo no almoxarifado, pelo Tag Number", True),
+     "almoxarifado: reservado para a TAG, em estoque ou já retirado", BLOQUEIA),
     ("suprimentos", "Sem material pendente",
-     "Mapa de Suprimentos, a mesma ligação da aba Suprimentos", True),
-    ("suporte", "Suporte, bandeja e eletroduto",
-     "05_BASE_LOCAÇÃO", True),
-    ("pedestal", "Pedestal concluído",
-     "08_BASE_PEDESTAL, avanço por TAG", True),
-    ("infra", "Infraestrutura da planta",
-     "11_BASE_INFRAESTRUTURA, avanço por desenho", False),
+     "Mapa de Suprimentos, a mesma ligação da aba Suprimentos", BLOQUEIA),
     ("localizacao", "Instrumento localizado",
-     "STATUS_LOCALIZACAO", False),
+     "STATUS_LOCALIZACAO -- ele usa em 100% do que programa", BLOQUEIA),
+    ("suporte", "Suporte, bandeja e eletroduto",
+     "05_BASE_LOCAÇÃO -- pendência de trecho não impede montar", AVISA),
+    ("pedestal", "Pedestal concluído",
+     "08_BASE_PEDESTAL -- falta de abertura não impede montar", AVISA),
+    ("infra", "Infraestrutura da planta",
+     "11_BASE_INFRAESTRUTURA, avanço por desenho", AVISA),
 ]
-LIGADOS_PADRAO = [c for c, _, _, padrao in CRITERIOS if padrao]
+MODOS_PADRAO = {c: modo for c, _r, _f, modo in CRITERIOS}
+LIGADOS_PADRAO = [c for c, _r, _f, modo in CRITERIOS if modo != IGNORA]
 
 # Abaixo disso é ressalva (âmbar), não bloqueio: o campo está quase pronto e
 # costuma fechar dentro da semana.
@@ -121,13 +133,27 @@ def _c_calibracao(tag: str, linha: pd.Series, f: Fonte) -> tuple[str, str]:
 
 
 def _c_estoque(tag: str, linha: pd.Series, f: Fonte) -> tuple[str, str]:
+    """O material chegou à obra?
+
+    Reservado é o sinal mais forte: o almoxarifado separou aquele material
+    para a TAG, e ao separar ele SAI do saldo. Foi o que a programação das
+    semanas 63 e 64 mostrou -- 87 TAGs reservadas contra 3 com saldo. Já
+    retirado (emitido) também conta: o material foi para o campo.
+    """
     saldo = f._estoque_por_tag.get(tag)
     if saldo is None:
         return TRAVA, "material não está na obra"
-    qtd, onde = saldo
-    if qtd <= 0:
-        return TRAVA, "sem saldo em estoque"
-    return OK, f"estoque {qtd:g}" + (f" · {onde}" if onde else "")
+    if saldo["reservada"] > 0:
+        return OK, f"reservado {saldo['reservada']:g}" + (
+            f" · {saldo['onde']}" if saldo["onde"] else "")
+    if saldo["estoque"] > 0:
+        return OK, f"em estoque {saldo['estoque']:g}" + (
+            f" · {saldo['onde']}" if saldo["onde"] else "")
+    if saldo["emitida"] > 0:
+        return OK, f"já retirado {saldo['emitida']:g}"
+    if saldo["recebida"] > 0:
+        return RESSALVA, "recebido, mas sem saldo nem reserva agora"
+    return TRAVA, "material não está na obra"
 
 
 def _c_suprimentos(tag: str, linha: pd.Series, f: Fonte) -> tuple[str, str]:
@@ -161,7 +187,9 @@ def _c_suporte(tag: str, linha: pd.Series, f: Fonte) -> tuple[str, str]:
     faltam = [nome.lower() for nome in ("SUPORTE", "BANDEJA", "ELETRODUTO")
               if _texto(loc.get(nome)).upper() == "NÃO"]
     if faltam:
-        return TRAVA, f"falta {' e '.join(faltam)}"
+        # ressalva, e não trava: das 719 TAGs já montadas, 134 estão sem
+        # bandeja na base -- ela vem depois, ou em paralelo com o instrumento
+        return RESSALVA, f"falta {' e '.join(faltam)}"
     tem = [nome.lower() for nome in ("SUPORTE", "BANDEJA", "ELETRODUTO")
            if _texto(loc.get(nome)).upper() == "SIM"]
     if not tem:
@@ -170,13 +198,14 @@ def _c_suporte(tag: str, linha: pd.Series, f: Fonte) -> tuple[str, str]:
 
 
 def _c_pedestal(tag: str, linha: pd.Series, f: Fonte) -> tuple[str, str]:
+    """Pedestal incompleto é aviso, nunca trava por conta própria: a base
+    marca o pedestal inteiro, e o que falta pode ser a abertura de outra TAG
+    (usuário, 13/09/2026). Quem quiser que bloqueie escolhe na tela."""
     avanco = f.pedestal.get(tag)
     if avanco is None:
         return SEM_DADO, "TAG sem pedestal na base"
     if avanco >= 1:
         return OK, "pedestal 100%"
-    if avanco >= PEDESTAL_RESSALVA:
-        return RESSALVA, f"pedestal {avanco * 100:.0f}%"
     return TRAVA, f"pedestal {avanco * 100:.0f}%"
 
 
@@ -212,15 +241,25 @@ CONTAS = {
 # -------------------------------------------------------------- o veredito
 def preparar(f: Fonte) -> Fonte:
     """Índices que as contas usam -- feitos uma vez, não por TAG."""
-    qtd = pd.to_numeric(f.estoque.get("Quantidade Estoque"), errors="coerce").fillna(0)
+    def numero(coluna):
+        return pd.to_numeric(f.estoque.get(coluna), errors="coerce").fillna(0)
+
     onde = f.estoque.get("Localização", pd.Series("", index=f.estoque.index)).astype(str)
-    por_tag_estoque: dict[str, tuple[float, str]] = {}
-    for tag, q, local in zip(f.estoque.get("Tag Number", pd.Series(dtype=str)).astype(str).str.strip(),
-                             qtd, onde):
+    por_tag_estoque: dict[str, dict] = {}
+    for tag, rec, est, res, emi, local in zip(
+            f.estoque.get("Tag Number", pd.Series(dtype=str)).astype(str).str.strip(),
+            numero("Quantidade Recebida"), numero("Quantidade Estoque"),
+            numero("Quantidade Reservada"), numero("Quantidade Emitida"), onde):
         if not tag or tag == "nan":
             continue
-        antes = por_tag_estoque.get(tag, (0.0, ""))
-        por_tag_estoque[tag] = (antes[0] + float(q), local if q > 0 else antes[1])
+        antes = por_tag_estoque.setdefault(
+            tag, {"recebida": 0.0, "estoque": 0.0, "reservada": 0.0, "emitida": 0.0, "onde": ""})
+        antes["recebida"] += float(rec)
+        antes["estoque"] += float(est)
+        antes["reservada"] += float(res)
+        antes["emitida"] += float(emi)
+        if not antes["onde"] and (res > 0 or est > 0):
+            antes["onde"] = local
     f._estoque_por_tag = por_tag_estoque
     f._locacao_por_tag = {str(r["TAG"]).strip(): r
                           for r in f.locacao.to_dict("records") if _texto(r.get("TAG"))}
@@ -235,8 +274,55 @@ def candidatas(tags: pd.DataFrame) -> pd.DataFrame:
     """
     mont = tags["STATUS_MONTAGEM"].astype(str).str.strip()
     semana = tags["SEMANA_PROGRAMADA"].astype(str).str.strip()
-    livre = ~mont.eq("Montado") & semana.isin(("Não Programado", "", "nan"))
+    # os dois lados: o status e a semana. Uma TAG com status "Em Programação"
+    # sem semana marcada não pode reaparecer como disponível.
+    livre = (~mont.isin(("Montado", "Em Programação"))
+             & semana.isin(("Não Programado", "", "nan")))
     return tags[livre].copy()
+
+
+def programadas(tags: pd.DataFrame, semana: str = "") -> pd.DataFrame:
+    """Quem já tem semana marcada na base -- de uma semana, ou de todas."""
+    coluna = tags["SEMANA_PROGRAMADA"].astype(str).str.strip()
+    if semana:
+        return tags[coluna.eq(semana)].copy()
+    return tags[~coluna.isin(("Não Programado", "", "nan"))].copy()
+
+
+def estado(tags: pd.DataFrame) -> dict:
+    """O retrato da montagem: o que está montado, programado e disponível."""
+    mont = tags["STATUS_MONTAGEM"].astype(str).str.strip()
+    semana = tags["SEMANA_PROGRAMADA"].astype(str).str.strip()
+    com_semana = ~semana.isin(("Não Programado", "", "nan"))
+    por_semana = semana[com_semana].value_counts()
+    por_semana = {s: int(n) for s, n in sorted(
+        por_semana.items(), key=lambda x: _numero_da_semana(x[0]))}
+    return {
+        "total": len(tags),
+        "montadas": int(mont.eq("Montado").sum()),
+        "em_programacao": int(mont.eq("Em Programação").sum()),
+        "nao_montado": int(mont.eq("Não Montado").sum()),
+        "programadas": int(com_semana.sum()),
+        "disponiveis": len(candidatas(tags)),
+        "por_semana": por_semana,
+    }
+
+
+def _numero_da_semana(rotulo: object) -> int:
+    digitos = "".join(c for c in str(rotulo) if c.isdigit())
+    return int(digitos) if digitos else 0
+
+
+def _modos(escolha) -> dict:
+    """Aceita o dicionário de modos, uma lista de critérios ligados (que
+    então bloqueiam) ou None, que vale o padrão medido."""
+    if escolha is None:
+        return dict(MODOS_PADRAO)
+    if isinstance(escolha, dict):
+        return {c: escolha.get(c, IGNORA) for c, _r, _f, _p in CRITERIOS}
+    ligados = set(escolha)
+    return {c: (MODOS_PADRAO[c] if c in ligados else IGNORA)
+            for c, _r, _f, _p in CRITERIOS}
 
 
 def avaliar(f: Fonte, ligados: list[str] | None = None) -> pd.DataFrame:
@@ -246,10 +332,25 @@ def avaliar(f: Fonte, ligados: list[str] | None = None) -> pd.DataFrame:
     ("livre", "ressalva" ou "travada"), MOTIVOS (lista de (chave, situação,
     texto)) e BLOQUEIOS (só o que pesou).
     """
+    return _avaliar(f, candidatas(f.tags), ligados)
+
+
+def conferir(f: Fonte, semana: str, ligados: list[str] | None = None) -> pd.DataFrame:
+    """O que JÁ está programado para a semana continua apto?
+
+    A programação envelhece: material que não chegou, calibração que
+    reprovou. Passar a mesma régua no que já foi programado é o que avisa a
+    tempo de trocar -- em 13/09/2026, 28 das 75 TAGs da Semana 64 estavam
+    sem material registrado na obra.
+    """
+    return _avaliar(f, programadas(f.tags, semana), ligados)
+
+
+def _avaliar(f: Fonte, base: pd.DataFrame, modos) -> pd.DataFrame:
     f = preparar(f)
-    ligados = list(LIGADOS_PADRAO if ligados is None else ligados)
+    modos = _modos(modos)
     linhas = []
-    for linha in candidatas(f.tags).to_dict("records"):
+    for linha in base.to_dict("records"):
         tag = str(linha.get("TAG") or "").strip()
         if not tag:
             continue
@@ -257,11 +358,12 @@ def avaliar(f: Fonte, ligados: list[str] | None = None) -> pd.DataFrame:
         for chave, _rotulo, _fonte, _padrao in CRITERIOS:
             situacao, texto = CONTAS[chave](tag, linha, f)
             motivos.append((chave, situacao, texto))
-            if chave not in ligados:
+            modo = modos.get(chave, IGNORA)
+            if modo == IGNORA or situacao in (OK, SEM_DADO):
                 continue
-            if situacao == TRAVA:
+            if modo == BLOQUEIA and situacao == TRAVA:
                 bloqueios.append(texto)
-            elif situacao == RESSALVA:
+            else:
                 ressalvas.append(texto)
         loc = f._locacao_por_tag.get(tag) or {}
         linhas.append({
@@ -272,6 +374,8 @@ def avaliar(f: Fonte, ligados: list[str] | None = None) -> pd.DataFrame:
             "PLANTA": planta_do_desenho(loc.get("LOCACAO")) or "sem planta",
             "MALHA": _texto(linha.get("MALHA")),
             "PRIORITARIA": _texto(linha.get("SSOP_PRIORITARIO")).upper() == "SIM",
+            "SEMANA": _texto(linha.get("SEMANA_PROGRAMADA")),
+            "MONTAGEM": _texto(linha.get("STATUS_MONTAGEM")),
             "SITUACAO": "travada" if bloqueios else ("ressalva" if ressalvas else "livre"),
             "MOTIVOS": motivos,
             "BLOQUEIOS": bloqueios,

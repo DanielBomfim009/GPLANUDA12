@@ -15796,289 +15796,340 @@ def _bs_resultado(t, planilha: Path):
         st.rerun()
 
 
-# ==========================================================================
-#  Programação -- montar a semana com quem pode mesmo ser montado
-# ==========================================================================
-# A conta que o Daniel fazia à mão: meta da curva, TAGs aprovadas na
-# calibração, material no almoxarifado, impedimento de suprimentos e campo
-# pronto. O motor mora em programacao.py (sem Streamlit); aqui é só a tela.
-PROG_SEMANAS = 12          # quantas semanas à frente aparecem na escolha
-
-
-@st.cache_data(show_spinner="Conferindo o que pode ser montado...", max_entries=3)
-def prog_avaliacao(cache_key: str, ligados: tuple) -> pd.DataFrame:
-    """O veredito de cada TAG candidata. Guardado por versão da planilha e
-    por combinação de critérios -- mexer num critério não relê nada."""
-    tags, _cabos, _tubing, _sigem, _resumo, _esperados, _gitec, locacao, *_ = load_data(cache_key)
-    itens, estoque = suprimentos_dados(cache_key)
-    hoje = pd.Timestamp.today().normalize()
-    universo = set(tags["TAG"].astype(str).str.strip())
-    fonte = programacao.Fonte(
-        tags=tags, locacao=locacao, estoque=estoque, itens=itens,
-        por_tag=sup_por_tag(itens, hoje, universo),
-        indice_titulo=sup_indice_titulo(itens, universo),
-        pedestal=medicao_pedestal(cache_key), infra=medicao_infraestrutura(cache_key))
-    return programacao.avaliar(fonte, list(ligados))
-
-
-def prog_meta(tags: pd.DataFrame, cache_key: str, semana: int) -> float | None:
-    """Quanto a curva do Rundown previu para aquela semana."""
-    try:
-        fases = rundown_dados(tags, cache_key)
-    except Exception:
-        return None
-    for linha in fases.get("geral", {}).get("linhas", []):
-        if linha["semana"] == semana:
-            return linha.get("previsto")
-    return None
-
-
-def prog_cesta() -> list:
-    return st.session_state.setdefault("prog_cesta", [])
-
-
-def prog_juntar(tags: list) -> None:
-    cesta = prog_cesta()
-    novos = [t for t in tags if t not in cesta]
-    cesta.extend(novos)
-    st.session_state["prog_aviso"] = (
-        f"{br_num(len(novos))} TAG{'s' if len(novos) != 1 else ''} na programação."
-        if novos else "Essas TAGs já estavam na programação.")
-
-
-def prog_chip(situacao: str, texto: str) -> str:
-    cor = {"ok": ("#0f2f2b", "#1d5b53", "#5eead4"),
-           "ressalva": ("#33260d", "#6b4d17", "#f5b34a"),
-           "trava": ("#351a1e", "#6d2b31", "#fca5a5"),
-           "sem_dado": ("#16233a", "#2b3d5e", "#9fb0c9")}[situacao]
-    return (f'<span class="prog-chip" style="background:{cor[0]};border-color:{cor[1]};'
-            f'color:{cor[2]}">{esc(texto)}</span>')
-
-
-def prog_tabela(aval: pd.DataFrame, chave: str) -> list:
-    """A tabela com seleção de linhas -- devolve as TAGs marcadas.
-
-    Tabela, e não um botão por TAG: são centenas de linhas, e o Streamlit
-    desenha uma tabela de 500 linhas mais rápido do que 50 botões.
-    """
-    if aval.empty:
-        render_html('<div class="gtbl-empty">Nada aqui com os filtros de agora.</div>')
-        return []
-    vista = pd.DataFrame({
-        "TAG": aval["TAG"],
-        "Descrição": aval["DESCRICAO"],
-        "Tipo": aval["FAMILIA"],
-        "Área": aval["AREA"],
-        "Planta": aval["PLANTA"],
-        "Prioritária": aval["PRIORITARIA"].map({True: "SIM", False: ""}),
-        "O que foi conferido": [
-            " · ".join(t for _c, s, t in m if s != "sem_dado") for m in aval["MOTIVOS"]],
-        "Pendências": [" · ".join(b + r) for b, r in zip(aval["BLOQUEIOS"], aval["RESSALVAS"])],
-    })
-    escolha = st.dataframe(
-        vista, hide_index=True, use_container_width=True, height=430,
-        on_select="rerun", selection_mode="multi-row", key=f"prog_tab_{chave}",
-        column_config={
+# ==========================================================================
+#  Programação -- montar a semana com quem pode mesmo ser montado
+# ==========================================================================
+# A conta que o Daniel fazia à mão: meta da curva, TAGs aprovadas na
+# calibração, material no almoxarifado, impedimento de suprimentos e campo
+# pronto. O motor mora em programacao.py (sem Streamlit); aqui é só a tela.
+PROG_SEMANAS = 12          # quantas semanas à frente aparecem na escolha
+
+
+@st.cache_data(show_spinner=False, max_entries=4)
+def prog_fonte(cache_key: str):
+    """Tudo o que a programação lê, junto: TAGs, locação, almoxarifado,
+    Mapa de Suprimentos, pedestal e infraestrutura."""
+    tags, _cabos, _tubing, _sigem, _resumo, _esperados, _gitec, locacao, *_ = load_data(cache_key)
+    itens, estoque = suprimentos_dados(cache_key)
+    hoje = pd.Timestamp.today().normalize()
+    universo = set(tags["TAG"].astype(str).str.strip())
+    fonte = programacao.Fonte(
+        tags=tags, locacao=locacao, estoque=estoque, itens=itens,
+        por_tag=sup_por_tag(itens, hoje, universo),
+        indice_titulo=sup_indice_titulo(itens, universo),
+        pedestal=medicao_pedestal(cache_key), infra=medicao_infraestrutura(cache_key))
+    return programacao.preparar(fonte)
+
+
+@st.cache_data(show_spinner="Conferindo o que pode ser montado...", max_entries=4)
+def prog_avaliacao(cache_key: str, modos: tuple) -> pd.DataFrame:
+    """O veredito de cada TAG que ainda pode ser programada."""
+    return programacao.avaliar(prog_fonte(cache_key), dict(modos))
+
+
+@st.cache_data(show_spinner=False, max_entries=6)
+def prog_conferencia(cache_key: str, semana: str, modos: tuple) -> pd.DataFrame:
+    """A mesma régua no que JÁ está programado para aquela semana."""
+    return programacao.conferir(prog_fonte(cache_key), semana, dict(modos))
+
+
+def prog_meta(tags: pd.DataFrame, cache_key: str, semana: int) -> float | None:
+    """Quanto a curva do Rundown previu para aquela semana."""
+    try:
+        fases = rundown_dados(tags, cache_key)
+    except Exception:
+        return None
+    for linha in fases.get("geral", {}).get("linhas", []):
+        if linha["semana"] == semana:
+            return linha.get("previsto")
+    return None
+
+
+def prog_cesta() -> list:
+    return st.session_state.setdefault("prog_cesta", [])
+
+
+def prog_juntar(tags: list) -> None:
+    cesta = prog_cesta()
+    novos = [t for t in tags if t not in cesta]
+    cesta.extend(novos)
+    st.session_state["prog_aviso"] = (
+        f"{br_num(len(novos))} TAG{'s' if len(novos) != 1 else ''} na programação."
+        if novos else "Essas TAGs já estavam na programação.")
+
+
+def prog_chip(situacao: str, texto: str) -> str:
+    cor = {"ok": ("#0f2f2b", "#1d5b53", "#5eead4"),
+           "ressalva": ("#33260d", "#6b4d17", "#f5b34a"),
+           "trava": ("#351a1e", "#6d2b31", "#fca5a5"),
+           "sem_dado": ("#16233a", "#2b3d5e", "#9fb0c9")}[situacao]
+    return (f'<span class="prog-chip" style="background:{cor[0]};border-color:{cor[1]};'
+            f'color:{cor[2]}">{esc(texto)}</span>')
+
+
+def prog_tabela(aval: pd.DataFrame, chave: str) -> list:
+    """A tabela com seleção de linhas -- devolve as TAGs marcadas.
+
+    Tabela, e não um botão por TAG: são centenas de linhas, e o Streamlit
+    desenha uma tabela de 500 linhas mais rápido do que 50 botões.
+    """
+    if aval.empty:
+        render_html('<div class="gtbl-empty">Nada aqui com os filtros de agora.</div>')
+        return []
+    vista = pd.DataFrame({
+        "TAG": aval["TAG"],
+        "Descrição": aval["DESCRICAO"],
+        "Tipo": aval["FAMILIA"],
+        "Área": aval["AREA"],
+        "Planta": aval["PLANTA"],
+        "Prioritária": aval["PRIORITARIA"].map({True: "SIM", False: ""}),
+        "O que foi conferido": [
+            " · ".join(t for _c, s, t in m if s != "sem_dado") for m in aval["MOTIVOS"]],
+        "Pendências": [" · ".join(b + r) for b, r in zip(aval["BLOQUEIOS"], aval["RESSALVAS"])],
+    })
+    escolha = st.dataframe(
+        vista, hide_index=True, use_container_width=True, height=430,
+        on_select="rerun", selection_mode="multi-row", key=f"prog_tab_{chave}",
+        column_config={
             # sem largura fixa: "small" cortava o sufixo da TAG, e
             # AST-120101B aparecia igual a AST-120101A
-            "TAG": st.column_config.TextColumn(width="medium"),
-            "Descrição": st.column_config.TextColumn(width="medium"),
-            "O que foi conferido": st.column_config.TextColumn(width="large"),
-            "Pendências": st.column_config.TextColumn(width="medium"),
-        })
-    try:
-        linhas = escolha["selection"]["rows"]
-    except (TypeError, KeyError, IndexError):
-        linhas = []
-    return aval.iloc[linhas]["TAG"].tolist() if linhas else []
-
-
-def render_programacao(cache_key: str = ""):
-    """Administração › Programação: a semana montada com quem pode ser
-    montado de verdade."""
-    render_header("Programação")
-    render_html(
-        "<style>"
-        ".prog-chip{display:inline-block;font-size:12px;padding:3px 9px;border-radius:7px;"
-        "border:1px solid transparent;font-family:ui-monospace,Consolas,monospace;margin-right:6px}"
-        ".prog-faixa{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:10px 0 16px}"
-        ".prog-faixa small{color:var(--muted,#93a2b8);margin-left:6px}"
-        ".prog-resumo{border:1px solid rgba(148,163,184,.25);border-radius:10px;padding:10px 14px}"
-        ".prog-resumo div{display:flex;justify-content:space-between;font-size:13.5px;padding:3px 0}"
-        ".prog-resumo b{font-family:ui-monospace,Consolas,monospace}"
-        ".prog-total{border-top:1px solid rgba(148,163,184,.25);margin-top:6px;padding-top:8px}"
-        "</style>")
-    tags = load_data(cache_key)[0]
-
-    # ---------------------------------------------------------- os critérios
-    guardados = st.session_state.get("prog_criterios")
-    ligados = list(guardados if guardados is not None else programacao.LIGADOS_PADRAO)
-    with st.expander("O que conta como \"pode montar\"", expanded=False):
-        st.caption("Desligue um critério e ele continua aparecendo na ficha da TAG, "
-                   "mas deixa de bloquear.")
-        colunas = st.columns(3)
-        novos = []
-        for i, (chave, rotulo, fonte, _padrao) in enumerate(programacao.CRITERIOS):
-            with colunas[i % 3]:
-                if st.checkbox(rotulo, value=chave in ligados, key=f"prog_c_{chave}",
-                               help=fonte):
-                    novos.append(chave)
-        if novos != ligados:
-            st.session_state["prog_criterios"] = novos
-            st.rerun()
-
-    aval = prog_avaliacao(cache_key, tuple(ligados))
-    conta = programacao.resumo(aval)
-
-    # ------------------------------------------------------- semana e meta
-    cfg_semana = _prog_semana_atual(tags, cache_key)
-    c_sem, c_meta, c_lim = st.columns([1.2, 2.4, 1.4], vertical_alignment="center")
-    with c_sem:
-        semana = st.selectbox(
-            "Semana", list(range(cfg_semana, cfg_semana + PROG_SEMANAS)),
-            format_func=lambda s: f"Semana {s}", key="prog_semana")
-    meta = prog_meta(tags, cache_key, semana)
-    cesta = prog_cesta()
-    with c_meta:
-        if meta:
-            falta = max(int(meta) - len(cesta), 0)
-            st.progress(min(len(cesta) / meta, 1.0),
-                        text=f"{br_num(len(cesta))} de {br_num(int(meta))} previstos na curva"
-                             + (f" · faltam {br_num(falta)}" if falta else " · meta atingida"))
-        else:
-            st.progress(0.0, text=f"{br_num(len(cesta))} na programação · "
-                                  "a curva não tem previsto para esta semana")
-    with c_lim:
-        if st.button("Limpar programação", use_container_width=True, key="prog_limpar"):
-            st.session_state["prog_cesta"] = []
-            st.rerun()
-    render_html(
-        f'<div class="prog-faixa">{prog_chip("ok", f"{br_num(conta["livre"])} livres")}'
-        f'{prog_chip("ressalva", f"{br_num(conta["ressalva"])} com ressalva")}'
-        f'{prog_chip("trava", f"{br_num(conta["travada"])} travadas")}'
-        f'<small>de {br_num(conta["total"])} TAGs que ainda não estão montadas '
-        'nem programadas em outra semana</small></div>')
-
-    # ----------------------------------------------------------- os filtros
-    esq, dir_ = st.columns([3.1, 1.25], gap="large")
-    with esq:
-        f1, f2, f3 = st.columns([1.4, 1.4, 1])
-        familias = sorted(aval["FAMILIA"].unique()) if not aval.empty else []
-        plantas = sorted(aval["PLANTA"].unique()) if not aval.empty else []
-        with f1:
+            "TAG": st.column_config.TextColumn(width="medium"),
+            "Descrição": st.column_config.TextColumn(width="medium"),
+            "O que foi conferido": st.column_config.TextColumn(width="large"),
+            "Pendências": st.column_config.TextColumn(width="medium"),
+        })
+    try:
+        linhas = escolha["selection"]["rows"]
+    except (TypeError, KeyError, IndexError):
+        linhas = []
+    return aval.iloc[linhas]["TAG"].tolist() if linhas else []
+
+
+def render_programacao(cache_key: str = ""):
+    """Administração › Programação: a semana montada com quem pode ser
+    montado de verdade."""
+    render_header("Programação")
+    render_html(
+        "<style>"
+        ".prog-chip{display:inline-block;font-size:12px;padding:3px 9px;border-radius:7px;"
+        "border:1px solid transparent;font-family:ui-monospace,Consolas,monospace;margin-right:6px}"
+        ".prog-faixa{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:10px 0 16px}"
+        ".prog-faixa small{color:var(--muted,#93a2b8);margin-left:6px}"
+        ".prog-resumo{border:1px solid rgba(148,163,184,.25);border-radius:10px;padding:10px 14px}"
+        ".prog-resumo div{display:flex;justify-content:space-between;font-size:13.5px;padding:3px 0}"
+        ".prog-resumo b{font-family:ui-monospace,Consolas,monospace}"
+        ".prog-total{border-top:1px solid rgba(148,163,184,.25);margin-top:6px;padding-top:8px}"
+        "</style>")
+    tags = load_data(cache_key)[0]
+
+    # ---------------------------------------------------------- os critérios
+    ROTULOS = {programacao.BLOQUEIA: "Bloqueia", programacao.AVISA: "Só avisa",
+               programacao.IGNORA: "Ignora"}
+    guardados = st.session_state.get("prog_modos") or dict(programacao.MODOS_PADRAO)
+    with st.expander("O que conta como \"pode montar\"", expanded=False):
+        st.caption("**Bloqueia** tira a TAG da lista · **Só avisa** deixa passar em âmbar, "
+                   "com o motivo à vista · **Ignora** nem mostra. O padrão saiu das 719 TAGs "
+                   "já montadas: calibração, almoxarifado, suprimentos e localização erram de "
+                   "0% a 2% delas; bandeja erraria 19% e pedestal 13% -- por isso avisam.")
+        escolhidos, colunas = {}, st.columns(2)
+        for i, (chave, rotulo, fonte, _padrao) in enumerate(programacao.CRITERIOS):
+            with colunas[i % 2]:
+                escolha = st.segmented_control(
+                    rotulo, list(ROTULOS), key=f"prog_m_{chave}",
+                    default=guardados.get(chave, programacao.IGNORA),
+                    format_func=lambda m: ROTULOS[m], help=fonte)
+                escolhidos[chave] = escolha or programacao.IGNORA
+        if escolhidos != guardados:
+            st.session_state["prog_modos"] = escolhidos
+            st.rerun()
+    modos = tuple(sorted(guardados.items()))
+
+    aval = prog_avaliacao(cache_key, modos)
+    conta = programacao.resumo(aval)
+    estado = programacao.estado(tags)
+    ultimas = list(estado["por_semana"].items())[-5:]
+    render_html(
+        '<div class="prog-faixa">'
+        + prog_chip("ok", f'{br_num(estado["montadas"])} montadas')
+        + prog_chip("sem_dado", f'{br_num(estado["em_programacao"])} em programação')
+        + prog_chip("sem_dado", f'{br_num(estado["programadas"])} com semana marcada')
+        + prog_chip("ressalva", f'{br_num(estado["disponiveis"])} ainda sem semana')
+        + '<small>últimas semanas: '
+        + " · ".join(f"{esc(s.replace('Semana ', 'S'))} {br_num(n)}" for s, n in ultimas)
+        + "</small></div>")
+
+    # ------------------------------------------------------- semana e meta
+    cfg_semana = _prog_semana_atual(tags, cache_key)
+    c_sem, c_meta, c_lim = st.columns([1.2, 2.4, 1.4], vertical_alignment="center")
+    with c_sem:
+        semana = st.selectbox(
+            "Semana", list(range(cfg_semana, cfg_semana + PROG_SEMANAS)),
+            format_func=lambda s: f"Semana {s}", key="prog_semana")
+    meta = prog_meta(tags, cache_key, semana)
+    cesta = prog_cesta()
+    rotulo_semana = f"Semana {semana}"
+    conferencia = prog_conferencia(cache_key, rotulo_semana, modos)
+    ja_na_base = len(conferencia)
+    total_semana = ja_na_base + len(cesta)
+    with c_meta:
+        detalhe = (f"{br_num(ja_na_base)} já na base + {br_num(len(cesta))} escolhidas agora"
+                   if ja_na_base else f"{br_num(len(cesta))} escolhidas")
+        if meta:
+            falta = max(int(meta) - total_semana, 0)
+            st.progress(min(total_semana / meta, 1.0),
+                        text=f"{br_num(total_semana)} de {br_num(int(meta))} previstos na curva · "
+                             + detalhe
+                             + (f" · faltam {br_num(falta)}" if falta else " · meta atingida"))
+        else:
+            st.progress(0.0, text=detalhe + " · a curva não tem previsto para esta semana")
+    with c_lim:
+        if st.button("Limpar programação", use_container_width=True, key="prog_limpar"):
+            st.session_state["prog_cesta"] = []
+            st.rerun()
+    if ja_na_base:
+        r = programacao.resumo(conferencia)
+        risco = conferencia[conferencia["SITUACAO"] == "travada"]
+        titulo = (f"O que já está programado para a {rotulo_semana} · "
+                  f"{br_num(ja_na_base)} TAGs"
+                  + (f" · {br_num(len(risco))} em risco" if len(risco) else " · todas em ordem"))
+        with st.expander(titulo, expanded=bool(len(risco))):
+            st.caption("A mesma régua, aplicada ao que já foi programado: material que não "
+                       "chegou ou calibração que reprovou depois aparecem aqui a tempo de trocar.")
+            render_html(
+                '<div class="prog-faixa">'
+                + prog_chip("ok", f'{br_num(r["livre"])} em ordem')
+                + prog_chip("ressalva", f'{br_num(r["ressalva"])} com aviso')
+                + prog_chip("trava", f'{br_num(r["travada"])} em risco')
+                + "</div>")
+            prog_tabela(conferencia.sort_values("SITUACAO", ascending=False), "conferencia")
+
+    render_html(
+        f'<div class="prog-faixa">{prog_chip("ok", f"{br_num(conta["livre"])} livres")}'
+        f'{prog_chip("ressalva", f"{br_num(conta["ressalva"])} com ressalva")}'
+        f'{prog_chip("trava", f"{br_num(conta["travada"])} travadas")}'
+        f'<small>de {br_num(conta["total"])} TAGs que ainda não estão montadas '
+        'nem programadas em outra semana</small></div>')
+
+    # ----------------------------------------------------------- os filtros
+    esq, dir_ = st.columns([3.1, 1.25], gap="large")
+    with esq:
+        f1, f2, f3 = st.columns([1.4, 1.4, 1])
+        familias = sorted(aval["FAMILIA"].unique()) if not aval.empty else []
+        plantas = sorted(aval["PLANTA"].unique()) if not aval.empty else []
+        with f1:
             sel_fam = st.multiselect("Tipo", familias, key="prog_fam",
-                                     placeholder="Todos")
-        with f2:
+                                     placeholder="Todos")
+        with f2:
             sel_planta = st.multiselect("Planta", plantas, key="prog_planta",
-                                        placeholder="Todas")
-        with f3:
-            so_prio = st.toggle("Só prioritárias", key="prog_prio")
-        vista = aval
-        if sel_fam:
-            vista = vista[vista["FAMILIA"].isin(sel_fam)]
-        if sel_planta:
-            vista = vista[vista["PLANTA"].isin(sel_planta)]
-        if so_prio:
-            vista = vista[vista["PRIORITARIA"]]
-        vista = vista[~vista["TAG"].isin(cesta)]
-
+                                        placeholder="Todas")
+        with f3:
+            so_prio = st.toggle("Só prioritárias", key="prog_prio")
+        vista = aval
+        if sel_fam:
+            vista = vista[vista["FAMILIA"].isin(sel_fam)]
+        if sel_planta:
+            vista = vista[vista["PLANTA"].isin(sel_planta)]
+        if so_prio:
+            vista = vista[vista["PRIORITARIA"]]
+        vista = vista[~vista["TAG"].isin(cesta)]
+
         # "sem planta" não é um lugar: agrupar por ela não ajuda a programar
         agrupaveis = vista[(vista["SITUACAO"] != "travada") & (vista["PLANTA"] != "sem planta")]
-        atalhos = programacao.por_grupo(agrupaveis)[:6]
-        if atalhos:
-            st.caption("Plantas com mais oportunidades — o campo trabalha por planta:")
-            for grupo, coluna in zip(atalhos, st.columns(min(len(atalhos), 3))):
-                with coluna:
-                    if st.button(f"+ {grupo['nome']} · {br_num(grupo['livres'])}",
-                                 key=f"prog_g_{grupo['nome']}", use_container_width=True,
-                                 help=f"{grupo['prioritarias']} prioritárias · "
-                                      f"áreas {', '.join(grupo['areas'][:3])}"):
-                        prog_juntar(grupo["tags"]["TAG"].tolist())
-                        st.rerun()
-
-        livres = vista[vista["SITUACAO"] == "livre"]
-        ressalva = vista[vista["SITUACAO"] == "ressalva"]
-        travadas = vista[vista["SITUACAO"] == "travada"]
-        aba1, aba2, aba3 = st.tabs([
-            f"Livres · {br_num(len(livres))}",
-            f"Com ressalva · {br_num(len(ressalva))}",
-            f"Travadas · {br_num(len(travadas))}"])
-        for aba, bloco, chave, ajuda in (
-                (aba1, livres, "livres", "Passaram em todos os critérios ligados."),
-                (aba2, ressalva, "ressalva", "Pendência pequena — pedestal ou infra quase prontos."),
-                (aba3, travadas, "travadas", "O motivo de cada uma está na última coluna.")):
-            with aba:
-                st.caption(ajuda)
-                marcadas = prog_tabela(bloco, chave)
-                if marcadas and st.button(
-                        f"Adicionar {br_num(len(marcadas))} à programação",
-                        key=f"prog_add_{chave}", type="primary"):
-                    prog_juntar(marcadas)
-                    st.rerun()
-
-    # ------------------------------------------------------------ a cesta
-    with dir_:
-        st.markdown(f"**Programação da Semana {semana}**")
-        aviso = st.session_state.pop("prog_aviso", "")
-        if aviso:
-            st.success(aviso)
-        if not cesta:
-            render_html('<div class="gtbl-empty">Nada escolhido ainda. Marque as linhas '
-                        'na tabela ou use os atalhos de planta.</div>')
-        else:
-            escolhidas = aval[aval["TAG"].isin(cesta)]
-            resumo_html = "".join(
-                f'<div><span>{esc(k)}</span><b>{br_num(v)}</b></div>'
-                for k, v in escolhidas["FAMILIA"].value_counts().items())
-            render_html(
-                '<div class="prog-resumo">' + resumo_html
-                + f'<div class="prog-total"><span>Prioritárias</span>'
-                  f'<b>{br_num(int(escolhidas["PRIORITARIA"].sum()))}</b></div>'
-                + f'<div><span>Plantas</span><b>{br_num(escolhidas["PLANTA"].nunique())}</b></div>'
-                + "</div>")
-            with st.expander(f"As {br_num(len(cesta))} escolhidas", expanded=False):
-                for tag in cesta[:200]:
-                    linha = st.columns([3, 1])
-                    linha[0].markdown(f"`{tag}`")
-                    if linha[1].button("✕", key=f"prog_rm_{tag}"):
-                        st.session_state["prog_cesta"] = [t for t in cesta if t != tag]
-                        st.rerun()
-            st.download_button(
-                "Exportar Excel", programacao.para_excel(aval, cesta, f"Semana {semana}"),
-                file_name=f"programacao_semana_{semana}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="prog_xlsx", type="primary", use_container_width=True)
-            if st.button("Salvar no Gplan", key="prog_salvar", use_container_width=True):
-                _prog_salvar(f"Semana {semana}", cesta, aval, meta)
-
-
-def _prog_semana_atual(tags: pd.DataFrame, cache_key: str) -> int:
-    """A semana de hoje, pelo mesmo calendário do Rundown."""
-    try:
-        fases = rundown_dados(tags, cache_key)
-        return int(fases["geral"]["semana_atual"]) + 1
-    except Exception:
-        return 1
-
-
-def _prog_salvar(semana: str, cesta: list, aval: pd.DataFrame, meta) -> None:
-    """Guarda a programação ao lado da planilha, para conferir depois.
-
-    No Supabase quando ele existe (o site inteiro enxerga), e no disco na
-    instância local -- mesma ideia do registro da aba Bases.
-    """
-    dados = programacao.para_guardar(semana, cesta, aval, _bs_usuario(), meta)
-    nome = f"programacao_{semana.lower().replace(' ', '_')}.json"
-    cliente = get_supabase_client()
-    try:
-        if cliente is not None:
-            _subir(cliente, nome, dados, "application/json")
-            st.success(f"Programação da {semana} salva no Gplan ({br_num(len(cesta))} TAGs).")
-        else:
-            destino = Path(LOCAL_EXCEL_FALLBACK).parent / nome
-            destino.write_bytes(dados)
-            st.success(f"Programação salva em {destino.name} ({br_num(len(cesta))} TAGs).")
-    except Exception as erro:
+        atalhos = programacao.por_grupo(agrupaveis)[:6]
+        if atalhos:
+            st.caption("Plantas com mais oportunidades — o campo trabalha por planta:")
+            for grupo, coluna in zip(atalhos, st.columns(min(len(atalhos), 3))):
+                with coluna:
+                    if st.button(f"+ {grupo['nome']} · {br_num(grupo['livres'])}",
+                                 key=f"prog_g_{grupo['nome']}", use_container_width=True,
+                                 help=f"{grupo['prioritarias']} prioritárias · "
+                                      f"áreas {', '.join(grupo['areas'][:3])}"):
+                        prog_juntar(grupo["tags"]["TAG"].tolist())
+                        st.rerun()
+
+        livres = vista[vista["SITUACAO"] == "livre"]
+        ressalva = vista[vista["SITUACAO"] == "ressalva"]
+        travadas = vista[vista["SITUACAO"] == "travada"]
+        aba1, aba2, aba3 = st.tabs([
+            f"Livres · {br_num(len(livres))}",
+            f"Com ressalva · {br_num(len(ressalva))}",
+            f"Travadas · {br_num(len(travadas))}"])
+        for aba, bloco, chave, ajuda in (
+                (aba1, livres, "livres", "Passaram em todos os critérios ligados."),
+                (aba2, ressalva, "ressalva", "Pendência pequena — pedestal ou infra quase prontos."),
+                (aba3, travadas, "travadas", "O motivo de cada uma está na última coluna.")):
+            with aba:
+                st.caption(ajuda)
+                marcadas = prog_tabela(bloco, chave)
+                if marcadas and st.button(
+                        f"Adicionar {br_num(len(marcadas))} à programação",
+                        key=f"prog_add_{chave}", type="primary"):
+                    prog_juntar(marcadas)
+                    st.rerun()
+
+    # ------------------------------------------------------------ a cesta
+    with dir_:
+        st.markdown(f"**Programação da Semana {semana}**")
+        aviso = st.session_state.pop("prog_aviso", "")
+        if aviso:
+            st.success(aviso)
+        if not cesta:
+            render_html('<div class="gtbl-empty">Nada escolhido ainda. Marque as linhas '
+                        'na tabela ou use os atalhos de planta.</div>')
+        else:
+            escolhidas = aval[aval["TAG"].isin(cesta)]
+            resumo_html = "".join(
+                f'<div><span>{esc(k)}</span><b>{br_num(v)}</b></div>'
+                for k, v in escolhidas["FAMILIA"].value_counts().items())
+            render_html(
+                '<div class="prog-resumo">' + resumo_html
+                + f'<div class="prog-total"><span>Prioritárias</span>'
+                  f'<b>{br_num(int(escolhidas["PRIORITARIA"].sum()))}</b></div>'
+                + f'<div><span>Plantas</span><b>{br_num(escolhidas["PLANTA"].nunique())}</b></div>'
+                + "</div>")
+            with st.expander(f"As {br_num(len(cesta))} escolhidas", expanded=False):
+                for tag in cesta[:200]:
+                    linha = st.columns([3, 1])
+                    linha[0].markdown(f"`{tag}`")
+                    if linha[1].button("✕", key=f"prog_rm_{tag}"):
+                        st.session_state["prog_cesta"] = [t for t in cesta if t != tag]
+                        st.rerun()
+            st.download_button(
+                "Exportar Excel", programacao.para_excel(aval, cesta, f"Semana {semana}"),
+                file_name=f"programacao_semana_{semana}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="prog_xlsx", type="primary", use_container_width=True)
+            if st.button("Salvar no Gplan", key="prog_salvar", use_container_width=True):
+                _prog_salvar(f"Semana {semana}", cesta, aval, meta)
+
+
+def _prog_semana_atual(tags: pd.DataFrame, cache_key: str) -> int:
+    """A semana de hoje, pelo mesmo calendário do Rundown."""
+    try:
+        fases = rundown_dados(tags, cache_key)
+        return int(fases["geral"]["semana_atual"]) + 1
+    except Exception:
+        return 1
+
+
+def _prog_salvar(semana: str, cesta: list, aval: pd.DataFrame, meta) -> None:
+    """Guarda a programação ao lado da planilha, para conferir depois.
+
+    No Supabase quando ele existe (o site inteiro enxerga), e no disco na
+    instância local -- mesma ideia do registro da aba Bases.
+    """
+    dados = programacao.para_guardar(semana, cesta, aval, _bs_usuario(), meta)
+    nome = f"programacao_{semana.lower().replace(' ', '_')}.json"
+    cliente = get_supabase_client()
+    try:
+        if cliente is not None:
+            _subir(cliente, nome, dados, "application/json")
+            st.success(f"Programação da {semana} salva no Gplan ({br_num(len(cesta))} TAGs).")
+        else:
+            destino = Path(LOCAL_EXCEL_FALLBACK).parent / nome
+            destino.write_bytes(dados)
+            st.success(f"Programação salva em {destino.name} ({br_num(len(cesta))} TAGs).")
+    except Exception as erro:
         st.error(f"Não consegui salvar a programação: {type(erro).__name__}: {erro}")
 
 
