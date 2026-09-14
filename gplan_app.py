@@ -1097,6 +1097,27 @@ TEMAS = {
         "esquema": "light",
     },
 }
+# A escala de cor das zonas da Planta e fixa (do laranja ao verde). Como
+# TEXTO ela precisa de uma versao escurecida no tema claro: as originais dao
+# 2,08 a 2,72 sobre o cartao branco. Escurecidas ate 4,5:1, medidas uma a
+# uma. No tema escuro as originais ja passam, e ficam.
+PLANTA_TINTAS = {
+    "escuro": ["#E8974E", "#D4B106", "#A8A020", "#8BC34A",
+               "#6BAF3E", "#4F9130", "#2F7D32"],
+    "claro": ["#A26A37", "#8C7504", "#7C7618", "#5C8131",
+              "#4F812E", "#47822B", "#2F7D32"],
+}
+
+
+def planta_tintas_css(tema: str) -> str:
+    """A cor de TEXTO das zonas, por tema. O fill e a borda nao mudam."""
+    cores = PLANTA_TINTAS.get(tema, PLANTA_TINTAS[TEMA_PADRAO])
+    return "\n        ".join(
+        f".pl-res .pl{i + 1}, .pl-zona.pl{i + 1}, .pl-ch.pl{i + 1} "
+        f"{{ color:{cor}; }}"
+        for i, cor in enumerate(cores))
+
+
 TEMA_PADRAO = "escuro"
 
 
@@ -3283,8 +3304,13 @@ def inject_css():
         .exp-relacionados-cta .txt b { display:block; color:var(--text-1); font-size:12px; font-weight:700; }
         .exp-relacionados-cta .txt small { display:block; color:var(--text-3); font-size:10.5px; margin-top:1px; }
         .exp-relacionados-cta .seta { color:var(--accent-blue); font-size:16px; flex:none; }
+        /* --accent-blue e a cor do BLOCO azul; como texto sobre cartao claro
+           ela mede 2,87:1. --txt-azul existe exatamente para isto. */
+        /* O azul de link do Streamlit (#3D9DF3) vence a regra de classe e da
+           2,87:1 sobre o cartao claro. --txt-azul existe para texto em azul;
+           precisa de !important porque a regra de <a> dele e mais forte. */
         .sup-mestre-ficha { display:block; text-align:right; padding:0 20px 14px 0; font-size:11.5px;
-          font-weight:700; color:var(--accent-blue); text-decoration:none; }
+          font-weight:700; color:var(--txt-azul) !important; text-decoration:none; }
         .sup-mestre-ficha:hover { text-decoration:underline; }
         /* Selo "Fase atual: X - desde DD/MM" -- linha expandida da tabela
            mestre e ficha completa, mesmo selo nos dois lugares. */
@@ -4549,6 +4575,13 @@ def inject_css():
         .pl-zona.pl5 .pl-ar { background:#6BAF3E; }
         .pl-zona.pl6 .pl-ar { background:#4F9130; }
         .pl-zona.pl7 .pl-ar { background:#2F7D32; }
+        /* A cor da zona e fixa e clara: var(--sobre-cor) dava branco sobre
+           laranja claro no tema claro (2,10:1). Tinta escura mede 6,35 a
+           8,31 em pl1..pl6; a pl7 e verde escuro e prefere branco. */
+        .pl-zona.pl1 .pl-ar, .pl-zona.pl2 .pl-ar, .pl-zona.pl3 .pl-ar,
+        .pl-zona.pl4 .pl-ar, .pl-zona.pl5 .pl-ar, .pl-zona.pl6 .pl-ar {
+          color:#111a30; }
+        .pl-zona.pl7 .pl-ar { color:#ffffff; }
 
         /* A lista de instrumentos rola dentro do painel. Paginar aqui obrigaria
            a fechar a ficha para trocar de pagina -- o modal e :target puro, nao
@@ -4584,6 +4617,9 @@ def inject_css():
         .pl-ch.pl5 { color:#6BAF3E; }
         .pl-ch.pl6 { color:#4F9130; }
         .pl-ch.pl7 { color:#2F7D32; }
+        /* A troca por tema vem DEPOIS de todas as regras acima: mesma
+           especificidade, entao quem vence e a ultima. */
+        __PLANTA_TINTAS__
         .pl-ch .tx b { display:block; font-size:12px; font-weight:750; color:var(--text-1); line-height:1.3; }
         .pl-ch .tx em { font-style:normal; font-size:10.5px; color:var(--text-3); }
         .pl-ch .qt { margin-left:auto; text-align:right; }
@@ -4595,6 +4631,7 @@ def inject_css():
         """.replace("__ICONES__", fx_css_icones())
             .replace("__ICONES_SECAO__", secao_css_icones())
             .replace("__TOKENS__", tokens_css(tema_ativo()))
+            .replace("__PLANTA_TINTAS__", planta_tintas_css(tema_ativo()))
     )
 
 
@@ -12516,7 +12553,9 @@ def planta_area_ficha_html(area: dict, sub: pd.DataFrame, zonas: list[str]) -> s
         fx_tile("Instrumentos", br_num(n), "tag", "#2dd4bf",
                 f"{br_num(completos)} com documentação completa")
         + fx_tile("Montados", br_num(montados), "seta", "#34d399", br_pct(pct))
-        + fx_tile("Medidos no Gitec", br_num(medidos), "check", "#60a5fa",
+        # "check" e o nome do KPI_ICONS; aqui o dicionario e o FX_ICO, onde o
+        # mesmo tique se chama "ok" -- com o nome errado o icone saia vazio
+        + fx_tile("Medidos no Gitec", br_num(medidos), "ok", "#60a5fa",
                   f"de {br_num(montados)} montados")
         + fx_tile("Plantas", br_num(len(zonas)), "grade", "#a78bfa",
                   "desenhos desta área"))
