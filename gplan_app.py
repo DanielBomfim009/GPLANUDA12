@@ -631,6 +631,28 @@ def _fonte_planilha():
     return None
 
 
+def cabos_so_lancamento(lanc: pd.DataFrame) -> bool:
+    """Se a base carregada ainda não traz o "% Avanço REAL".
+
+    Sem a coluna, cabos_avanco_real não tem o que trocar e o avanço do cabo
+    volta a ser só o lançamento -- cabo lançado e não conectado aparece como
+    pronto, e a TAG entra na fila do teste de malha sem estar. Isso era
+    silencioso: nada na tela dizia qual das duas réguas estava valendo
+    (achado com ele em 14/09/2026, dois circuitos verdes com 75% de avanço
+    real na base). PCT_LANC só existe depois da troca, então ela é a prova
+    de que a régua nova está em uso.
+    """
+    return not lanc.empty and "PCT_LANC" not in lanc.columns
+
+
+CABOS_AVISO_LANCAMENTO = (
+    "**Base sem a coluna “% Avanço REAL” — o avanço do cabo está só por "
+    "lançamento.** Cabo lançado e ainda não conectado aparece como concluído, "
+    "e a TAG entra na fila do teste de malha sem estar pronta. Atualize a base "
+    "de cabos pela aba **Bases**: o pipeline grava a coluna e a régua volta a "
+    "ser lançamento + conexão + teste.")
+
+
 def cabos_avanco_real(lanc: pd.DataFrame) -> pd.DataFrame:
     """O avanço de cada circuito passa a ser o "% Avanço REAL" da base.
 
@@ -10272,6 +10294,9 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                     "circuito, que é o que responde a certificação.</div></div>")
         return
 
+    if cabos_so_lancamento(lanc):
+        st.warning(CABOS_AVISO_LANCAMENTO)
+
     mont = cert_montagem(tags, depara, cache_key)
     pan = cert_panorama(lanc, mont, cache_key)
     alvos = cert_alvos(lanc, cache_key)
@@ -13655,6 +13680,8 @@ def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
     reorganizar nada na mão.
     """
     render_header("Avanço")
+    if cabos_so_lancamento(lanc):
+        st.warning(CABOS_AVISO_LANCAMENTO)
     menu_af = menu_exportar("expmenu_af")
     linhas = medicao_prontidao(tags, resumo, esperados, lanc, depara, cache_key)
     if not linhas:
