@@ -2547,10 +2547,14 @@ def inject_css():
            ficam do mesmo tamanho/posicao e o popover abre no lugar certo. */
         div[class*="st-key-expmenu_"] { width:fit-content !important;
           margin:-6px 0 10px auto; }
+        /* Botao de barra, com rotulo -- o circulo com "..." nao dizia o que
+           fazia (usuario, 14/09/2026). */
         div[class*="st-key-expmenu_"] [data-testid="stPopover"] button {
-          width:36px !important; height:36px !important; min-height:0 !important;
-          padding:0 !important; border-radius:50% !important;
+          height:38px !important; min-height:0 !important;
+          padding:0 16px !important; border-radius:10px !important;
           display:inline-flex !important; align-items:center; justify-content:center;
+          gap:8px; font-size:13.5px !important; font-weight:600 !important;
+          letter-spacing:.1px;
           background:var(--dark-card) !important; border:1px solid var(--border-color) !important;
           box-shadow:none !important; transition:background 120ms, border-color 120ms, transform 120ms; }
         div[class*="st-key-expmenu_"] [data-testid="stPopover"] button:hover {
@@ -2565,8 +2569,10 @@ def inject_css():
            virando um traço ilegivel do lado do ⋮. O icone principal fica
            sozinho, span com aria-hidden e decorativo mesmo (Streamlit ja
            marca assim), sem perda de acessibilidade. */
+        /* com rotulo, a setinha do Streamlit faz sentido: fica, so mais
+           discreta e do outro lado do texto */
         div[class*="st-key-expmenu_"] [data-testid="stPopoverButton"] div[aria-hidden="true"] {
-          display:none !important; }
+          opacity:.55; margin-left:2px; }
         div[class*="st-key-expmenu_"] [data-testid="stPopover"] button [data-testid="stIconMaterial"] {
           margin:0 !important; font-size:19px !important; color:var(--text-1) !important; }
         div[class*="st-key-expmenu_"] [data-testid="stPopover"] button:hover [data-testid="stIconMaterial"] {
@@ -2632,12 +2638,43 @@ def inject_css():
         /* Divisor de secao dentro do menu (ex.: "Pendencias" separando do
            "Exportar tudo" acima) -- rotulo pequeno com um traço em cima,
            igual um cabecalho de grupo de menu nativo. */
+        /* Cada bloco do menu vira uma secao com marcacao propria: barra de
+           cor a esquerda do titulo e respiro em volta. Sem isso os tres
+           grupos (filtrar / geral / pendente) corriam juntos. */
         div[data-testid="stPopoverBody"] .expmenu-divisor {
-          font-size:10.5px; font-weight:700; letter-spacing:.3px; text-transform:uppercase;
-          color:var(--text-3); border-top:1px solid var(--border-color);
-          margin:6px 2px 4px; padding-top:8px; }
+          position:relative; font-size:10px; font-weight:700; letter-spacing:.09em;
+          text-transform:uppercase; color:var(--text-2);
+          border-top:1px solid var(--border-color);
+          margin:14px 2px 8px; padding:12px 0 0 10px; }
+        div[data-testid="stPopoverBody"] .expmenu-divisor::before {
+          content:""; position:absolute; left:0; top:12px; width:3px; height:12px;
+          border-radius:2px; background:var(--accent-blue); }
+        /* o primeiro nao precisa de linha em cima */
+        div[data-testid="stPopoverBody"] [data-testid="stVerticalBlock"]
+          > [data-testid="stElementContainer"]:first-child .expmenu-divisor {
+          border-top:0; margin-top:2px; padding-top:0; }
+        div[data-testid="stPopoverBody"] [data-testid="stVerticalBlock"]
+          > [data-testid="stElementContainer"]:first-child .expmenu-divisor::before {
+          top:1px; }
         div[data-testid="stPopoverBody"] [data-testid="stCaptionContainer"] {
-          padding:0 10px 4px; }
+          padding:2px 10px 6px; }
+        div[data-testid="stPopoverBody"] [data-testid="stCaptionContainer"] p {
+          font-size:11.5px !important; color:var(--text-3) !important; }
+
+        /* ---- a janela "Montar exportação" ---- */
+        .exp-resumo { display:flex; gap:10px; flex-wrap:wrap; margin:2px 0 14px; }
+        .exp-cart { flex:1 1 150px; border:1px solid var(--border-color);
+          border-radius:10px; padding:10px 14px; background:var(--dark-card); min-width:0; }
+        .exp-cart small { display:block; font-size:10px; letter-spacing:.09em;
+          text-transform:uppercase; color:var(--text-3);
+          font-family:ui-monospace,Consolas,monospace; }
+        .exp-cart b { display:block; font-size:22px; line-height:1.25; margin-top:2px;
+          color:var(--text-1); font-variant-numeric:tabular-nums; }
+        .exp-cart i { display:block; font-style:normal; font-size:11.5px;
+          color:var(--text-2); }
+        [role="dialog"] [data-testid="stExpander"] { margin-bottom:8px; }
+        [role="dialog"] [data-testid="stExpander"] details {
+          border:1px solid var(--border-color) !important; border-radius:10px !important; }
 
         /* ---------------------------------------------------------------
            Chrome do proprio Streamlit. O config.toml fixa base="dark", entao
@@ -4655,9 +4692,16 @@ def export_montar(cache_key: str, tags_alvo, escolha: dict) -> pd.DataFrame:
 def dialogo_exportacao(cache_key: str, tags_alvo, recomendado: dict, chave: str,
                        nome_arquivo: str):
     """A janela de escolher colunas, aba por aba."""
-    st.caption(f"{br_num(len(tags_alvo))} TAGs. O que está marcado é o "
-               "recomendado para esta aba — abra as outras para levar mais.")
     escolha: dict[str, list] = {}
+    marcadas_total = sum(len([c for c in v]) for v in recomendado.values())
+    render_html(
+        '<div class="exp-resumo">'
+        f'<div class="exp-cart"><small>TAGs</small><b>{br_num(len(tags_alvo))}</b>'
+        '<i>uma linha por TAG</i></div>'
+        f'<div class="exp-cart"><small>Abas da base</small>'
+        f'<b>{br_num(len(EXPORT_FONTES))}</b><i>ligadas por TAG</i></div>'
+        f'<div class="exp-cart"><small>Recomendado</small><b>{br_num(marcadas_total)}'
+        '</b><i>colunas já marcadas</i></div></div>')
     for aba, ch, rotulo in EXPORT_FONTES:
         base = export_aba(cache_key, aba)
         if base.empty or ch not in base.columns:
@@ -4685,7 +4729,7 @@ def dialogo_exportacao(cache_key: str, tags_alvo, recomendado: dict, chave: str,
                            use_container_width=True, key=f"exp_baixar_{chave}")
 
 
-def menu_exportar(key: str):
+def menu_exportar(key: str, rotulo: str = "Exportar"):
     """Botão "⋮" no topo da página, que abre um menu com as opções de
     exportar -- pedido do usuário pra reunir tudo num lugar só, perto do
     título, em vez de um botão solto no fim de cada tela (2026-09-03).
@@ -4697,8 +4741,8 @@ def menu_exportar(key: str):
     só do chamador quando a mesma função de render roda mais de uma vez no
     mesmo run (ex.: um bloco por aba da Curva S).
     """
-    return st.popover("", icon=":material/more_vert:", key=key,
-                      help="Exportar")
+    return st.popover(rotulo, icon=":material/ios_share:", key=key,
+                      help="Exportar e filtrar")
 
 
 KPI_ICONS = {
@@ -10678,6 +10722,36 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
             cert_tags_up = ler_lista_tags(arq_cert)
             if cert_tags_up is None:
                 st.warning("Não consegui ler essa planilha.")
+            elif cert_tags_up:
+                # Ele subiu 101 e voltaram 44 -- a aba só enxerga TAG com
+                # cadeia de cabo na base. Dizer isso, em vez de sumir.
+                na_base = {str(t).strip().upper()
+                           for t in tags["TAG"].astype(str)}
+                no_escopo = {t.upper() for t in universo}
+                dentro = cert_tags_up & no_escopo
+                sem_cabo = (cert_tags_up & na_base) - no_escopo
+                de_fora = cert_tags_up - na_base
+                st.caption(f"**{br_num(len(dentro))} de {br_num(len(cert_tags_up))}** "
+                           "entraram.")
+                if sem_cabo or de_fora:
+                    partes = []
+                    if sem_cabo:
+                        partes.append(f"{br_num(len(sem_cabo))} sem cadeia de cabo "
+                                      "na base")
+                    if de_fora:
+                        partes.append(f"{br_num(len(de_fora))} fora da base de TAGs")
+                    st.caption("Ficaram de fora: " + " · ".join(partes) + ".")
+                    fora_csv = pd.DataFrame(
+                        [{"TAG": t, "MOTIVO": "sem cadeia de cabo na base"}
+                         for t in sorted(sem_cabo)]
+                        + [{"TAG": t, "MOTIVO": "não está na base de TAGs"}
+                           for t in sorted(de_fora)])
+                    st.download_button(
+                        "Baixar as que ficaram de fora",
+                        fora_csv.to_csv(index=False, sep=";").encode("utf-8-sig"),
+                        file_name="tags_fora_da_certificacao.csv", mime="text/csv",
+                        key="cert_fora_csv", icon=":material/report:",
+                        type="tertiary", use_container_width=True)
 
         # --- exportação geral: TODO circuito, não só o que está pendente
         render_html('<div class="expmenu-divisor">Geral · uma linha por '
@@ -14064,10 +14138,21 @@ def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
         if tags_upload is None:
             st.warning("Não consegui ler essa planilha -- confira o arquivo "
                        "e tente de novo.")
-        if tags_upload is not None:
-            achadas = sum(1 for l in grupo if l["tag"].upper() in tags_upload)
-            st.caption(f"{achadas} de {len(tags_upload)} TAGs da planilha "
-                      "encontradas neste recorte.")
+        if tags_upload:
+            no_recorte = {l["tag"].upper() for l in grupo}
+            dentro = tags_upload & no_recorte
+            de_fora = tags_upload - no_recorte
+            st.caption(f"**{br_num(len(dentro))} de {br_num(len(tags_upload))}** "
+                       "TAGs da planilha entraram."
+                       + (f" {br_num(len(de_fora))} não têm relatório esperado "
+                          "neste recorte." if de_fora else ""))
+            if de_fora:
+                st.download_button(
+                    "Baixar as que ficaram de fora",
+                    pd.DataFrame({"TAG": sorted(de_fora)})
+                    .to_csv(index=False, sep=";").encode("utf-8-sig"),
+                    file_name="tags_fora_do_avanco.csv", mime="text/csv",
+                    key="af_fora_csv", icon=":material/report:", type="tertiary")
             grupo = [l for l in grupo if l["tag"].upper() in tags_upload]
 
     busca = st.text_input("Buscar TAG", key="af_busca",
