@@ -78,6 +78,31 @@ FAMILIAS = {
     "PV": "Válvula de controle", "TV": "Válvula de controle", "LV": "Válvula de controle",
     "PSV": "Válvula de segurança", "XY": "Solenoide", "PY": "Conversor",
     "FY": "Conversor", "TY": "Conversor", "LY": "Conversor",
+    # Os 55 prefixos que caíam em "Outros" (856 TAGs). O nome saiu da própria
+    # descrição da base 01, encurtado -- agrupar por família só serve à tela.
+    "CJV": "Caixa de junção", "CBF": "Caixa de junção", "CJT": "Caixa de junção",
+    "CBZ": "Caixa de junção", "CBT": "Caixa de junção",
+    "YST": "Detector", "BSL": "Detector", "OST": "Detector",
+    "HV": "Válvula de controle", "PCV": "Válvula de controle",
+    "FCV": "Válvula de controle", "PDV": "Válvula de controle",
+    "VM": "Válvula on-off", "PAV": "Válvula de segurança", "PRV": "Válvula de segurança",
+    "TJT": "Transmissor", "PT": "Transmissor", "TT": "Transmissor",
+    "PDT": "Transmissor", "LT": "Transmissor", "FT": "Transmissor",
+    "IIT": "Transmissor", "EIT": "Transmissor", "ST": "Transmissor",
+    "ZIT": "Transmissor de posição", "ZT": "Transmissor de posição",
+    "FO": "Orifício de restrição",
+    "FZ": "Posicionador", "HZ": "Posicionador", "PZ": "Posicionador",
+    "ZV": "Posicionador", "LZ": "Posicionador", "TZ": "Posicionador",
+    "PDZ": "Posicionador",
+    "HSS": "Botoeira", "ESD": "Botoeira", "YS": "Botoeira",
+    "PN": "Painel", "PNI": "Painel",
+    "XSHL": "Solenoide", "HY": "Solenoide",
+    "YAYL": "Alarme", "PDA": "Pote de ar",
+    "VSH": "Chave", "LSLL": "Chave",
+    "SE": "Sensor", "ZE": "Sensor",
+    "AP": "Analisador", "AR": "Analisador", "AE": "Analisador",
+    "SIC": "Controlador", "ZC": "Controlador", "SY": "Controlador",
+    "ZI": "Indicador", "SI": "Indicador",
 }
 
 
