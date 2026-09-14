@@ -7695,6 +7695,43 @@ def cert_status_conjunto(circuitos: list) -> str:
     return vistos[0] or "sem circuito"
 
 
+def cert_papel_do_circuito(c) -> str:
+    """Onde este cabo está na cadeia, pelo nível das duas pontas."""
+    o, d = cert_nivel(str(c["ORIGEM"]).strip()), cert_nivel(str(c["DESTINO"]).strip())
+    if o == 0:
+        return "ramal do instrumento"
+    if o == 2 and d == 2:
+        return "tronco entre painéis"
+    if d == 2:
+        return "tronco até o painel"
+    return "tronco entre caixas"
+
+
+def cert_montante(cadeia: list, saida_por_ponta: dict) -> list:
+    """O que vem DEPOIS do painel onde a cadeia parou.
+
+    A cadeia do veredito termina no primeiro painel -- é o suficiente para
+    dizer se a TAG fecha. Mas o tronco desse painel para o painel seguinte
+    é do mesmo circuito, e costuma ser o elo que trava. Segue só por
+    painel->painel: seguir tudo o que sai de um painel traria os 180 e
+    poucos cabos dos outros instrumentos dele, que não são desta TAG.
+    """
+    if not cadeia:
+        return []
+    extra, vistos = [], set()
+    ponta = str(cadeia[-1]["DESTINO"]).strip()
+    while ponta and ponta not in vistos and cert_nivel(ponta) == 2:
+        vistos.add(ponta)
+        seguinte = None
+        for r in saida_por_ponta.get(ponta, []):
+            if cert_nivel(str(r["DESTINO"]).strip()) == 2:
+                extra.append(r)
+                seguinte = str(r["DESTINO"]).strip()
+                break
+        ponta = seguinte
+    return extra
+
+
 def cert_remendo(linha) -> bool:
     """Se a linha é uma ligação que nós acrescentamos, não um cabo medido.
 
@@ -10521,14 +10558,24 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         # --- exportação geral: TODO circuito, não só o que está pendente
         render_html('<div class="expmenu-divisor">Geral · uma linha por '
                     'circuito</div>')
+        # a lista subida manda: exportar tudo passa a ser "tudo dessas TAGs"
+        alvo_geral = ([t for t in universo if t.upper() in cert_tags_up]
+                      if cert_tags_up else list(universo))
+        # a cadeia do veredito para no primeiro painel; a exportacao segue
+        # ate o fim, pelo tronco entre paineis -- ver cert_montante
+        saida_por_ponta: dict[str, list] = {}
+        for r in lanc.to_dict("records"):
+            saida_por_ponta.setdefault(str(r["ORIGEM"]).strip(), []).append(r)
         geral_export: dict[str, dict] = {}
-        for tag in universo:
-            for c in (por_tag[tag].get("cadeia_uniao")
-                      or por_tag[tag].get("cadeia", [])):
+        for tag in alvo_geral:
+            cadeia_tag = (por_tag[tag].get("cadeia_uniao")
+                          or por_tag[tag].get("cadeia", []))
+            for c in list(cadeia_tag) + cert_montante(cadeia_tag, saida_por_ponta):
                 cid = str(c["CIRCUITO"]).strip()
                 linha = geral_export.setdefault(cid, {
                     "CIRCUITO": cid, "ORIGEM": str(c["ORIGEM"]).strip(),
                     "DESTINO": str(c["DESTINO"]).strip(),
+                    "PAPEL": cert_papel_do_circuito(c),
                     "DISCIPLINA": str(c["DISCIPLINA"]).strip(),
                     "STATUS": str(c["STATUS"]).strip(),
                     "PCT_AVANCO_REAL": round(cert_num(c["PCT"]), 1),
@@ -10551,7 +10598,8 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                 key="cert_csv_geral", icon=":material/download:",
                 type="tertiary", use_container_width=True)
             st.caption(f"{br_num(len(linhas_geral))} circuitos · "
-                       f"{br_num(len(universo))} TAGs")
+                       f"{br_num(len(alvo_geral))} TAGs"
+                       + (" (da planilha)" if cert_tags_up else ""))
         else:
             st.caption("Nenhum circuito neste recorte.")
 
@@ -10561,14 +10609,20 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
             "Prefixos de TAG, separados por vírgula", value="AST,OST",
             key="cert_export_prefixos")
         prefixos = tuple(p.strip().upper() for p in prefixos_txt.split(",") if p.strip())
-        alvo_export = sorted(t for t in universo if prefixos and t.upper().startswith(prefixos))
+        # subiu planilha? ela manda, e o campo de prefixo fica de reserva
+        alvo_export = (sorted(t for t in universo if t.upper() in cert_tags_up)
+                       if cert_tags_up else
+                       sorted(t for t in universo if prefixos
+                              and t.upper().startswith(prefixos)))
         circuitos_export: dict[str, dict] = {}
         for tag in alvo_export:
             # cadeia_uniao, nao cadeia: uma TAG pode ter cabo de sinal E de
             # potência indo pra caixas diferentes, cada um com sua própria
             # pendência -- usar só a cadeia "vencedora" do veredito escondia
             # a pendência do outro cabo inteira.
-            for c in por_tag[tag].get("cadeia_uniao") or por_tag[tag].get("cadeia", []):
+            cadeia_tag = (por_tag[tag].get("cadeia_uniao")
+                          or por_tag[tag].get("cadeia", []))
+            for c in list(cadeia_tag) + cert_montante(cadeia_tag, saida_por_ponta):
                 # so o que ainda nao esta concluido pelo avanco real -- falta
                 # lancar, conectar ou testar. Montagem do instrumento e outra
                 # pendencia, essa exportacao e so sobre o cabo
@@ -10578,6 +10632,7 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                 linha = circuitos_export.setdefault(cid, {
                     "CIRCUITO": cid, "ORIGEM": str(c["ORIGEM"]).strip(),
                     "DESTINO": str(c["DESTINO"]).strip(),
+                    "PAPEL": cert_papel_do_circuito(c),
                     "DISCIPLINA": str(c["DISCIPLINA"]).strip(),
                     "STATUS": str(c["STATUS"]).strip(),
                     "PCT_AVANCO_REAL": round(cert_num(c["PCT"]), 1),
