@@ -15874,7 +15874,7 @@ def prog_tabela(aval: pd.DataFrame, chave: str) -> list:
     desenha uma tabela de 500 linhas mais rápido do que 50 botões.
     """
     if aval.empty:
-        render_html('<div class="gtbl-empty">Nada aqui com os filtros de agora.</div>')
+        render_html('<div class="gtbl-empty">Nada com estes filtros.</div>')
         return []
     vista = pd.DataFrame({
         "TAG": aval["TAG"],
@@ -15951,32 +15951,32 @@ def prog_painel(plano, meta, semana: int, escolhidas: int) -> str:
     cada TAG e o que está travando."""
     total = len(plano)
     if not total:
-        return ('<div class="pnl-caixa"><div class="pnl-vazio">A Semana '
-                f'{semana} ainda não tem nada programado. Escolha as TAGs à '
-                'esquerda e elas aparecem aqui.</div></div>')
+        return ('<div class="pnl-caixa"><div class="pnl-vazio">Semana '
+                f'{semana}: nada programado. Escolha à esquerda.</div></div>')
     montadas = int((plano["MONTAGEM"] == "Montado").sum())
     contagem = plano["SITUACAO"].value_counts()
     risco = int(contagem.get("travada", 0))
     pct = montadas / total * 100
 
     # --- os números que abrem o painel
+    frentes = plano["PLANTA"].nunique()
     tiles = [("Programadas", br_num(total),
-              f"{br_num(len(plano) - escolhidas)} na base + {br_num(escolhidas)} agora"
-              if escolhidas else "todas já na base"),
-             ("Montadas", br_num(montadas), f"{pct:.0f}% da semana"),
-             ("Em risco", br_num(risco),
-              "com impedimento" if risco else "nenhuma travada"),
-             ("Meta da curva", br_num(int(meta)) if meta else "—",
+              f"{br_num(len(plano) - escolhidas)} base + {br_num(escolhidas)} agora"
+              if escolhidas else "base"),
+             ("Montadas", br_num(montadas), f"{pct:.0f}%"),
+             ("Impedidas", br_num(risco), "bloqueio ativo" if risco else "nenhuma"),
+             ("Meta", br_num(int(meta)) if meta else "—",
               f"faltam {br_num(max(int(meta) - total, 0))}" if meta and total < meta
-              else ("meta atingida" if meta else "sem previsto"))]
+              else ("ok" if meta else "sem previsto"))]
     cabeca = "".join(
         f'<div class="pnl-tile"><small>{esc(r)}</small><b>{v}</b><i>{esc(d)}</i></div>'
         for r, v, d in tiles)
 
     # --- avanço: uma parte de um todo, então número e barra
     avanco = (
-        '<div class="pnl-bloco"><div class="pnl-cab">Avanço da semana</div>'
-        f'<div class="pnl-grande">{br_num(montadas)}<span> de {br_num(total)} montadas</span></div>'
+        '<div class="pnl-bloco"><div class="pnl-cab">Avanço</div>'
+        f'<div class="pnl-grande">{br_num(montadas)}<span> / {br_num(total)} montadas · '
+        f'{br_num(frentes)} planta{"s" if frentes != 1 else ""}</span></div>'
         f'<div class="pnl-trilho pnl-alto"><i style="width:{max(pct, 1):.1f}%;'
         'background:#2dd4bf"></i></div></div>')
 
@@ -15991,7 +15991,7 @@ def prog_painel(plano, meta, semana: int, escolhidas: int) -> str:
                        f'title="{br_num(n)} {esc(rotulo)}"></i>')
         legenda.append(f'<span><i style="background:{cor}"></i>{br_num(n)} {esc(rotulo)}</span>')
     situacao = (
-        '<div class="pnl-bloco"><div class="pnl-cab">Como está cada TAG</div>'
+        '<div class="pnl-bloco"><div class="pnl-cab">Situação</div>'
         f'<div class="pnl-pilha">{"".join(pedacos)}</div>'
         f'<div class="pnl-legenda">{"".join(legenda)}</div></div>')
 
@@ -16006,14 +16006,14 @@ def prog_painel(plano, meta, semana: int, escolhidas: int) -> str:
 
     travas, avisos = conta("BLOQUEIOS"), conta("RESSALVAS")
     impedimentos = (
-        '<div class="pnl-bloco"><div class="pnl-cab">O que está travando</div>'
+        '<div class="pnl-bloco"><div class="pnl-cab">Impedimentos</div>'
         + prog_barras(travas, "#f87171", total) + "</div>") if travas else ""
     pendencias = (
-        '<div class="pnl-bloco"><div class="pnl-cab">Avisos, que não impedem</div>'
+        '<div class="pnl-bloco"><div class="pnl-cab">Avisos</div>'
         + prog_barras(avisos, "#f5b34a", total) + "</div>") if avisos else ""
 
     tipos = plano["FAMILIA"].value_counts().head(4).items()
-    composicao = ('<div class="pnl-bloco"><div class="pnl-cab">O que tem na semana</div>'
+    composicao = ('<div class="pnl-bloco"><div class="pnl-cab">Composição</div>'
                   + prog_barras([(t, int(n)) for t, n in tipos], "#60a5fa", total) + "</div>")
 
     return (f'<div class="pnl-caixa"><div class="pnl-tiles">{cabeca}</div>'
@@ -16042,7 +16042,7 @@ PROG_CSS = """<style>
 .pnl-trilho{display:block;height:8px;border-radius:99px;background:rgba(148,163,184,.18);
   overflow:hidden;flex:1}
 .pnl-trilho.pnl-alto{height:12px}
-.pnl-trilho i{display:block;height:100%;border-radius:99px}
+.pnl-trilho{position:relative}.pnl-trilho i{display:block;height:100%;border-radius:99px}.pnl-trilho i.pnl-sobre{position:absolute;left:0;top:0}
 .pnl-pilha{display:flex;gap:2px;height:14px;border-radius:99px;overflow:hidden;
   background:rgba(148,163,184,.18)}
 .pnl-pilha i{display:block;height:100%}
@@ -16057,6 +16057,26 @@ PROG_CSS = """<style>
 </style>"""
 
 
+def prog_historico(linhas: list) -> str:
+    """Programado x montado nas últimas semanas -- calibra a meta."""
+    if not linhas:
+        return ""
+    maior = max(l["programadas"] for l in linhas) or 1
+    barras = []
+    for l in linhas:
+        pct = l["montadas"] / l["programadas"] * 100 if l["programadas"] else 0
+        barras.append(
+            '<div class="pnl-linha">'
+            f'<span class="pnl-rot">{esc(l["semana"].replace("Semana ", "S"))}</span>'
+            f'<span class="pnl-trilho">'
+            f'<i style="width:{l["programadas"] / maior * 100:.1f}%;background:#334867"></i>'
+            f'<i class="pnl-sobre" style="width:{l["montadas"] / maior * 100:.1f}%;'
+            'background:#2dd4bf"></i></span>'
+            f'<b>{pct:.0f}%</b></div>')
+    return ('<div class="pnl-bloco"><div class="pnl-cab">Histórico · montado / programado</div>'
+            + "".join(barras) + "</div>")
+
+
 def render_programacao(cache_key: str = ""):
     """Administração › Programação: a semana montada com quem pode ser
     montado de verdade."""
@@ -16069,10 +16089,10 @@ def render_programacao(cache_key: str = ""):
                programacao.IGNORA: "Ignora"}
     guardados = st.session_state.get("prog_modos") or dict(programacao.MODOS_PADRAO)
     with st.expander("O que conta como \"pode montar\"", expanded=False):
-        st.caption("**Bloqueia** tira a TAG da lista · **Só avisa** deixa passar em âmbar, "
-                   "com o motivo à vista · **Ignora** nem mostra. O padrão saiu das 719 TAGs "
-                   "já montadas: calibração, almoxarifado, suprimentos e localização erram de "
-                   "0% a 2% delas; bandeja erraria 19% e pedestal 13% -- por isso avisam.")
+        st.caption("**Bloqueia**: remove da lista · **Só avisa**: mantém, em âmbar · "
+                   "**Ignora**: oculta. Padrão medido nas 719 já montadas — calibração, "
+                   "almoxarifado, suprimentos e localização erram 0-2%; bandeja 19%, "
+                   "pedestal 13%.")
         escolhidos, colunas = {}, st.columns(2)
         for i, (chave, rotulo, fonte, _padrao) in enumerate(programacao.CRITERIOS):
             with colunas[i % 2]:
@@ -16096,7 +16116,7 @@ def render_programacao(cache_key: str = ""):
         + prog_chip("sem_dado", f'{br_num(estado["em_programacao"])} em programação')
         + prog_chip("sem_dado", f'{br_num(estado["programadas"])} com semana marcada')
         + prog_chip("ressalva", f'{br_num(estado["disponiveis"])} ainda sem semana')
-        + '<small>últimas semanas: '
+        + '<small>semanas: '
         + " · ".join(f"{esc(s.replace('Semana ', 'S'))} {br_num(n)}" for s, n in ultimas)
         + "</small></div>")
 
@@ -16114,20 +16134,34 @@ def render_programacao(cache_key: str = ""):
     ja_na_base = len(conferencia)
     total_semana = ja_na_base + len(cesta)
     with c_meta:
-        detalhe = (f"{br_num(ja_na_base)} já na base + {br_num(len(cesta))} escolhidas agora"
+        detalhe = (f"{br_num(ja_na_base)} base + {br_num(len(cesta))} agora"
                    if ja_na_base else f"{br_num(len(cesta))} escolhidas")
         if meta:
             falta = max(int(meta) - total_semana, 0)
             st.progress(min(total_semana / meta, 1.0),
-                        text=f"{br_num(total_semana)} de {br_num(int(meta))} previstos na curva · "
+                        text=f"{br_num(total_semana)} / {br_num(int(meta))} da curva · "
                              + detalhe
-                             + (f" · faltam {br_num(falta)}" if falta else " · meta atingida"))
+                             + (f" · faltam {br_num(falta)}" if falta else " · meta ok"))
         else:
-            st.progress(0.0, text=detalhe + " · a curva não tem previsto para esta semana")
+            st.progress(0.0, text=detalhe + " · curva sem previsto")
     with c_lim:
         if st.button("Limpar programação", use_container_width=True, key="prog_limpar"):
             st.session_state["prog_cesta"] = []
             st.rerun()
+    # --- o que urge: teste de malha em cima e ainda sem semana
+    urgentes = programacao.teste_urgente(aval, cfg_semana - 1)
+    fora_da_cesta = urgentes[~urgentes["TAG"].isin(cesta)]
+    if len(fora_da_cesta):
+        a1, a2 = st.columns([4, 1], vertical_alignment="center")
+        with a1:
+            st.warning(f"**{br_num(len(fora_da_cesta))} aptas com teste de malha em até "
+                       f"{programacao.JANELA_TESTE} semanas e sem programação** — "
+                       "montagem tem de anteceder o teste.")
+        with a2:
+            if st.button("Programar essas", key="prog_urg", use_container_width=True):
+                prog_juntar(fora_da_cesta["TAG"].tolist())
+                st.rerun()
+
     # ----------------------------------------------------------- as colunas
     esq, dir_ = st.columns([2.6, 1.5], gap="large")
     with esq:
@@ -16139,9 +16173,7 @@ def render_programacao(cache_key: str = ""):
                       + (f" · {br_num(len(risco))} em risco" if len(risco)
                          else " · todas em ordem"))
             with st.expander(titulo, expanded=False):
-                st.caption("A mesma régua, aplicada ao que já foi programado: material que "
-                           "não chegou ou calibração que reprovou depois aparecem aqui a "
-                           "tempo de trocar.")
+                st.caption("Régua aplicada ao já programado.")
                 render_html(
                     '<div class="prog-faixa">'
                     + prog_chip("ok", f'{br_num(r["livre"])} em ordem')
@@ -16155,7 +16187,7 @@ def render_programacao(cache_key: str = ""):
             + prog_chip("ok", f'{br_num(conta["livre"])} livres')
             + prog_chip("ressalva", f'{br_num(conta["ressalva"])} com ressalva')
             + prog_chip("trava", f'{br_num(conta["travada"])} travadas')
-            + f'<small>de {br_num(conta["total"])} ainda sem semana</small></div>')
+            + f'<small>de {br_num(conta["total"])} sem semana</small></div>')
         f1, f2, f3, f4 = st.columns([1.3, 1.3, 1.3, 1])
         familias = sorted(aval["FAMILIA"].unique()) if not aval.empty else []
         plantas = sorted(aval["PLANTA"].unique()) if not aval.empty else []
@@ -16193,8 +16225,7 @@ def render_programacao(cache_key: str = ""):
         agrupaveis = vista[(vista["SITUACAO"] != "travada") & (vista[coluna_grupo] != vazio)]
         atalhos = programacao.por_grupo(agrupaveis, coluna_grupo)[:6]
         if atalhos:
-            st.caption(f"{por}s com mais oportunidades — o campo trabalha por planta, "
-                       "e a programação costuma sair por subsistema:")
+            st.caption(f"Atalhos por {por.lower()}:")
             for grupo, coluna in zip(atalhos, st.columns(min(len(atalhos), 3))):
                 with coluna:
                     if st.button(f"+ {grupo['nome']} · {br_num(grupo['livres'])}",
@@ -16213,11 +16244,8 @@ def render_programacao(cache_key: str = ""):
         aba1, aba2 = st.tabs([f"Prontas · {br_num(len(livres))}",
                               f"Com aviso · {br_num(len(ressalva))}"])
         for aba, bloco, chave, ajuda in (
-                (aba1, livres, "livres", "Passaram em todos os critérios que você deixou "
-                                         "como bloqueio. Em cima, o teste de malha mais "
-                                         "próximo."),
-                (aba2, ressalva, "ressalva", "Dá para montar: o aviso é de suporte, bandeja, "
-                                             "pedestal ou infra, que não impedem.")):
+                (aba1, livres, "livres", "Aptas. Ordem: teste de malha, prioridade, nível."),
+                (aba2, ressalva, "ressalva", "Aptas com aviso não impeditivo.")):
             with aba:
                 st.caption(ajuda)
                 marcadas = prog_tabela(bloco, chave)
@@ -16227,9 +16255,8 @@ def render_programacao(cache_key: str = ""):
                     prog_juntar(marcadas)
                     st.rerun()
         if len(travadas):
-            with st.expander(f"As que ainda não dá para montar · {br_num(len(travadas))}"):
-                st.caption("Não entram na sua escolha: aqui só para você ver o que falta "
-                           "em cada uma e cobrar de quem resolve.")
+            with st.expander(f"Impedidas · {br_num(len(travadas))}"):
+                st.caption("Fora da escolha. Motivo na coluna Pendências.")
                 prog_tabela(travadas, "travadas")
 
     # ------------------------------------------------------------ a cesta
@@ -16242,9 +16269,21 @@ def render_programacao(cache_key: str = ""):
         escolhidas = aval[aval["TAG"].isin(cesta)]
         plano = (pd.concat([conferencia, escolhidas], ignore_index=True)
                  if ja_na_base else escolhidas)
-        render_html(prog_painel(plano, meta, semana, len(cesta)))
+        render_html(prog_painel(plano, meta, semana, len(cesta))
+                    + prog_historico(programacao.historico(tags)))
+        falta_meta = int(meta) - len(plano) if meta else 0
+        if falta_meta > 0:
+            if st.button(f"Completar meta · +{br_num(falta_meta)} mais urgentes",
+                         key="prog_completar", use_container_width=True):
+                prog_juntar(programacao.sugerir(aval, falta_meta, cesta))
+                st.rerun()
+        pulados = programacao.niveis_pulados(aval, list(plano["TAG"]))
+        if pulados:
+            st.warning("Fora de ordem: nível "
+                       + ", ".join(f"{n} ({br_num(q)} aptas)" for n, q in pulados)
+                       + " pendente.")
         if cesta:
-            with st.expander(f"As {br_num(len(cesta))} que você acabou de escolher"):
+            with st.expander(f"Escolhidas agora · {br_num(len(cesta))}"):
                 for tag in cesta[:200]:
                     linha = st.columns([3, 1])
                     linha[0].markdown(f"`{tag}`")

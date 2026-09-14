@@ -444,6 +444,81 @@ def por_grupo(aval: pd.DataFrame, coluna: str = "PLANTA") -> list[dict]:
     return sorted(grupos, key=lambda g: (-g["livres"], g["nome"]))
 
 
+# --------------------------------------------------------- o que urge
+JANELA_TESTE = 2        # semanas: teste nesse prazo e TAG sem semana = urgente
+
+
+def semana_numero(rotulo: object) -> int:
+    """"SEM87" ou "Semana 87" -> 87. Sem número, 0."""
+    digitos = "".join(c for c in str(rotulo or "") if c.isdigit())
+    return int(digitos) if digitos else 0
+
+
+def teste_urgente(aval: pd.DataFrame, semana_atual: int,
+                  janela: int = JANELA_TESTE) -> pd.DataFrame:
+    """Aptas com teste de malha dentro da janela e ainda sem semana.
+
+    O teste de malha é o prazo real: montar depois dele atrasa a malha.
+    """
+    if aval.empty:
+        return aval
+    limite = semana_atual + janela
+    numeros = aval["TESTE_MALHA"].map(semana_numero)
+    alvo = aval[(numeros > 0) & (numeros <= limite) & (aval["SITUACAO"] != "travada")]
+    return alvo.assign(_n=numeros[alvo.index]).sort_values("_n").drop(columns="_n")
+
+
+def sugerir(aval: pd.DataFrame, quantidade: int, fora: list | None = None) -> list:
+    """As N mais urgentes ainda não escolhidas -- a ordem já é a da lista."""
+    if quantidade <= 0 or aval.empty:
+        return []
+    fora = set(fora or [])
+    livres = aval[(aval["SITUACAO"] != "travada") & (~aval["TAG"].isin(fora))]
+    return livres["TAG"].head(quantidade).tolist()
+
+
+def niveis_pulados(aval: pd.DataFrame, escolhidas: list) -> list:
+    """Níveis mais urgentes que sobraram, abaixo do menor nível escolhido.
+
+    Programar 6.01 com 3.13 ainda apto é fora de ordem -- o nível é a fila
+    de prioridade da obra.
+    """
+    if not escolhidas or aval.empty:
+        return []
+
+    def numero(n):
+        try:
+            return float(n)
+        except (TypeError, ValueError):
+            return 99.0
+
+    escolha = aval[aval["TAG"].isin(escolhidas)]
+    niveis_escolhidos = [numero(n) for n in escolha["NIVEL"] if n]
+    if not niveis_escolhidos:
+        return []
+    menor = min(niveis_escolhidos)
+    sobrou = aval[(aval["SITUACAO"] != "travada") & (~aval["TAG"].isin(escolhidas))]
+    pendentes = {}
+    for nivel in sobrou["NIVEL"]:
+        if nivel and numero(nivel) < menor:
+            pendentes[nivel] = pendentes.get(nivel, 0) + 1
+    return sorted(pendentes.items(), key=lambda x: numero(x[0]))[:3]
+
+
+def historico(tags: pd.DataFrame, ultimas: int = 8) -> list:
+    """Semana a semana: quanto foi programado e quanto foi montado."""
+    semana = tags["SEMANA_PROGRAMADA"].astype(str).str.strip()
+    mont = tags["STATUS_MONTAGEM"].astype(str).str.strip()
+    com_semana = ~semana.isin(("Não Programado", "", "nan"))
+    linhas = []
+    for rotulo in sorted(set(semana[com_semana]), key=semana_numero):
+        grupo = com_semana & semana.eq(rotulo)
+        linhas.append({"semana": rotulo, "numero": semana_numero(rotulo),
+                       "programadas": int(grupo.sum()),
+                       "montadas": int((grupo & mont.eq("Montado")).sum())})
+    return linhas[-ultimas:]
+
+
 # ------------------------------------------------------ guardar e exportar
 def para_excel(aval: pd.DataFrame, escolhidas: list[str], semana: str) -> bytes:
     """A programação em .xlsx, pronta para lançar no sistema da empresa."""
