@@ -738,7 +738,7 @@ def _planilha_para_ler():
     return source
 
 
-@st.cache_data(show_spinner="Carregando planilha...")
+@st.cache_data(show_spinner="Carregando planilha…")
 def load_data(cache_key: str):
     # Com o pacote rápido não se baixa nem se abre o .xlsx: cada aba sai do
     # parquet em centésimos de segundo. Sem ele, é o caminho de sempre.
@@ -804,7 +804,7 @@ def load_data(cache_key: str):
             aux_areas, lancamento, depara, movimentacoes)
 
 
-@st.cache_data(show_spinner="Carregando suprimentos...")
+@st.cache_data(show_spinner="Carregando suprimentos…")
 def suprimentos_dados(cache_key: str):
     """As duas abas de Suprimentos, montadas só quando alguém abre a aba.
 
@@ -2721,6 +2721,17 @@ def inject_css():
           color:var(--text-3) !important; }
         div[data-testid="stPopoverBody"] [data-testid="stAlert"] {
           padding:8px 10px !important; border-radius:9px !important; margin:2px 0 6px; }
+
+        /* O unico texto em ingles que sobrou na tela: o "Select all" que o
+           Streamlit poe como primeira opcao de todo multiselect. Nao ha
+           parametro para traduzir nem classe estavel no elemento do texto --
+           ele so tem classe de emotion. A posicao e estavel (conferido em
+           duas paginas: e sempre o primeiro li[role=option]), entao o texto
+           sai por font-size:0 e o rotulo certo entra no ::before. */
+        li[role="option"]:first-child [data-testid="stTooltipHoverTarget"] {
+          font-size:0 !important; }
+        li[role="option"]:first-child [data-testid="stTooltipHoverTarget"]::before {
+          content:"Marcar todas"; font-size:14px; color:var(--text-1); }
 
         /* ---- aviso de mudancas importantes ----
            Anatomia da referencia que ele mandou (shadcn AlertDialog): icone
@@ -6374,7 +6385,7 @@ def render_relatorios(esperados: pd.DataFrame, resumo: pd.DataFrame, tags: pd.Da
         st.session_state["mem_rel_busca"] = pedido
         st.session_state.pop("rel_busca", None)
 
-    search = lembrado(st.text_input, "rel_busca", "Pesquisar", placeholder="Pesquisar por tag, descrição, relatório, documento, status...", label_visibility="collapsed")
+    search = lembrado(st.text_input, "rel_busca", "Pesquisar", placeholder="Pesquisar por tag, descrição, relatório, documento, status…", label_visibility="collapsed")
 
     status_options = sorted({sentence_case(s) for s in esperados["STATUS_SIGEM"].dropna().unique()})
     col_rel, col_sts = st.columns(2)
@@ -7473,7 +7484,7 @@ def render_pesquisa_tag(resumo: pd.DataFrame, esperados: pd.DataFrame, tags: pd.
     else:
         col_busca, col_painel = st.container(), None
     with col_busca:
-        search = lembrado(st.text_input, "pesq_busca", "Pesquisar", placeholder="Digite a tag para ver a ficha completa (ex: AIT-120005)...", label_visibility="collapsed")
+        search = lembrado(st.text_input, "pesq_busca", "Pesquisar", placeholder="Digite a tag para ver a ficha completa (ex: AIT-120005)…", label_visibility="collapsed")
 
     # Duas pontas: uma so ponta (min ou max fixo) responderia "acima de X" ou
     # "abaixo de X" -- as duas juntas fecham uma faixa fechada, entao 90-100
@@ -7596,7 +7607,7 @@ def render_sigem(sigem: pd.DataFrame, esperados: pd.DataFrame | None = None):
     with col1:
         status_filter = lembrado(st.selectbox, "sig_status", "Status", status_options)
     with col2:
-        text_search = lembrado(st.text_input, "sig_busca", "Pesquisa de texto", placeholder="Buscar em qualquer campo do documento...")
+        text_search = lembrado(st.text_input, "sig_busca", "Pesquisa de texto", placeholder="Buscar em qualquer campo do documento…")
 
     df = sigem.copy()
     if status_filter != "Todos":
@@ -16160,7 +16171,7 @@ def _bs_analise(b):
     arq = st.session_state["bs_arq"]
     chave = (arq["hash"], st.session_state.get("bs_aba"), st.session_state.get("bs_cab"))
     if st.session_state.get("bs_an_chave") != chave:
-        with st.spinner("Lendo o arquivo..."):
+        with st.spinner("Lendo o arquivo…"):
             an = area_bases.analisar(b, arq["dados"], aba=chave[1], cabecalho=chave[2])
         sug = area_bases.sugerir(b, an.colunas) if b.mapeavel and not an.erro else []
         st.session_state.update(bs_an=an, bs_an_chave=chave, bs_sug=sug,
@@ -16428,7 +16439,7 @@ def _bs_conferir(b, planilha: Path, an, reprocessar: bool = False):
         s = atual.stat()
         chave = (str(atual), s.st_mtime)
         if st.session_state.get("bs_an_pasta_chave") != chave:
-            with st.spinner("Lendo o arquivo da pasta..."):
+            with st.spinner("Lendo o arquivo da pasta…"):
                 st.session_state["bs_an_pasta"] = area_bases.analisar(b, atual.read_bytes())
             st.session_state["bs_an_pasta_chave"] = chave
         referencia = st.session_state["bs_an_pasta"]
@@ -16442,7 +16453,7 @@ def _bs_conferir(b, planilha: Path, an, reprocessar: bool = False):
     else:
         arq = st.session_state["bs_arq"]
         if "bs_cmp" not in st.session_state:
-            with st.spinner("Comparando com a versão em uso..."):
+            with st.spinner("Comparando com a versão em uso…"):
                 st.session_state["bs_cmp"] = area_bases.comparar(
                     b, arq["dados"], an, st.session_state.get("bs_esc") or {})
         cmp_ = st.session_state["bs_cmp"]
@@ -16533,7 +16544,7 @@ def _bs_acompanhar():
     render_html('<div class="bs-caixa">'
                 f'<h4>Atualizando · {esc(t.titulo)} · {_bs_duracao(t.segundos())}</h4>'
                 + _bs_etapas(t.etapas, t)
-                + '<div class="bs-log">' + esc("\n".join(t.linhas[-14:]) or "começando...")
+                + '<div class="bs-log">' + esc("\n".join(t.linhas[-14:]) or "começando…")
                 + '</div></div>')
     st.caption("Pode trocar de aba: a atualização continua rodando neste computador, e o "
                "resultado aparece aqui quando você voltar.")
@@ -16633,7 +16644,7 @@ def prog_fonte(cache_key: str):
     return programacao.preparar(fonte)
 
 
-@st.cache_data(show_spinner="Conferindo o que pode ser montado...", max_entries=4)
+@st.cache_data(show_spinner="Conferindo o que pode ser montado…", max_entries=4)
 def prog_avaliacao(cache_key: str, modos: tuple) -> pd.DataFrame:
     """O veredito de cada TAG que ainda pode ser programada."""
     return programacao.avaliar(prog_fonte(cache_key), dict(modos))
