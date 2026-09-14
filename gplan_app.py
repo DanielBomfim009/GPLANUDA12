@@ -1562,6 +1562,23 @@ def inject_css():
            na 8501 um usuario mudaria a tela de todos. Entao os componentes
            nativos que pintam com as cores do config precisam sair pelos
            nossos tokens, ou viram mancha escura na tela clara. */
+        /* O cabecalho do expander: depois de mexer num widget de dentro, o
+           Streamlit pinta o summary com a cor do tema fixo (#0e1222) e NAO
+           desfaz -- na tela clara vira uma barra escura com texto escuro,
+           contraste 1,08:1 (achado com ele em 14/09/2026). Fixamos os quatro
+           estados pelos tokens. */
+        [data-testid="stExpander"] summary,
+        [data-testid="stExpander"] summary:focus,
+        [data-testid="stExpander"] summary:focus-visible,
+        [data-testid="stExpander"] summary:active {
+          background: rgba(var(--rgb-tinta), 0.05) !important;
+          color: var(--text-1) !important; }
+        [data-testid="stExpander"] summary:hover {
+          background: rgba(var(--rgb-tinta), 0.10) !important; }
+        [data-testid="stExpander"] summary [data-testid="stMarkdownContainer"],
+        [data-testid="stExpander"] summary p {
+          color: var(--text-1) !important; }
+
         /* a planilha (canvas) nao acompanha o tema: no claro ela vem escura.
            O filtro e por tema -- "none" no escuro, invertido no claro. */
         [data-testid="stDataFrame"] { filter: var(--grade-filtro, none); }
@@ -16312,6 +16329,23 @@ PROG_CSS = """<style>
 .prog-alerta-txt b { display:block; font-size:14px; color:var(--text-1);
   line-height:1.35; }
 .prog-alerta-txt span { font-size:12.5px; color:var(--text-2); }
+
+/* O filtro marcado: o Streamlit so troca a borda, e no meio de tres
+   pastilhas iguais nao da para ver qual esta valendo. Cada uma acende na
+   cor da propria condicao. */
+/* o marcado e aria-pressed="true" (react-aria), nao aria-checked */
+.st-key-prog_sit button[aria-pressed="true"] { font-weight:700 !important; }
+.st-key-prog_sit button[aria-pressed="true"] p,
+.st-key-prog_sit button[aria-pressed="true"] div { color:inherit !important; }
+.st-key-prog_sit button:nth-child(1)[aria-pressed="true"] {
+  background:rgba(var(--rgb-teal),.18) !important;
+  border-color:var(--accent-teal) !important; color:var(--txt-teal) !important; }
+.st-key-prog_sit button:nth-child(2)[aria-pressed="true"] {
+  background:rgba(var(--rgb-ambar),.18) !important;
+  border-color:var(--accent-amber) !important; color:var(--txt-ambar) !important; }
+.st-key-prog_sit button:nth-child(3)[aria-pressed="true"] {
+  background:rgba(var(--rgb-vermelho),.18) !important;
+  border-color:var(--accent-red) !important; color:var(--txt-vermelho) !important; }
 
 /* o ponto de situação na tabela de consulta */
 .prog-ponto { display:inline-block; width:8px; height:8px; border-radius:50%;
