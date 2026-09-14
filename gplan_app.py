@@ -4561,6 +4561,130 @@ def ler_lista_tags(arquivo) -> set | None:
     return {str(v).strip().upper() for v in df[col].dropna() if str(v).strip()}
 
 
+# As abas da planilha que se ligam a uma TAG, com a coluna que faz a
+# ligacao. Sao as que valem para exportar "tudo sobre estas TAGs" -- as
+# outras 17 abas da planilha (curva, regras, auditoria, movimentacoes) nao
+# tem TAG e nao entrariam de jeito nenhum.
+EXPORT_FONTES = (
+    ("01_BASE_TAGS", "TAG", "Base de TAGs"),
+    ("07_TAG_RESUMO", "TAG", "Resumo por TAG"),
+    ("05_BASE_LOCAÇÃO", "TAG", "Locação"),
+    ("08_RELATORIOS_ESPERADOS", "TAG", "Relatórios esperados"),
+    ("09_PENDENCIAS", "TAG", "Pendências"),
+    ("06_BASE_GITEC", "TAG", "Gitec"),
+    ("02_BASE_CABOS", "TAG", "Cabos"),
+    ("03_BASE_TUBING", "TAG", "Tubing"),
+    ("10_APLICABILIDADE_CABO_TUBING", "TAG", "Aplicabilidade cabo/tubing"),
+    ("12_CALC_TAGS", "TAG", "Cálculo por TAG"),
+    ("09_SUPRIMENTOS_ITENS", "TAG", "Suprimentos · itens"),
+    ("09_SUPRIMENTOS_ESTOQUE", "Tag Number", "Suprimentos · estoque"),
+    ("08_BASE_PEDESTAL", "TAGINSTR1", "Pedestal"),
+)
+
+# O que ja vem marcado. A ideia dele: abrir a janela e a aba em que ele esta
+# ja estar preenchida; as outras ficam ali, fechadas, para quando quiser mais.
+EXPORT_RECOMENDADO = {
+    "01_BASE_TAGS": ["TAG", "DESCRICAO", "TIPO_ORIGEM", "FORNECIMENTO",
+                     "STATUS_CALIBRACAO", "STATUS_MONTAGEM", "STATUS_LOCALIZACAO",
+                     "STATUS_FINAL", "MALHA", "SOP", "SSOP", "FASE",
+                     "SEMANA_PROGRAMADA", "PREVISAO_TESTE_MALHA"],
+    "07_TAG_RESUMO": ["STATUS_DOCUMENTAL", "AVANCO_DOCUMENTAL", "STATUS_CABO",
+                      "RELATORIOS_ESPERADOS", "RELATORIOS_APROVADOS",
+                      "RELATORIOS_PENDENTES", "MEDIDO_GITEC"],
+    "05_BASE_LOCAÇÃO": ["AREA", "LOCACAO"],
+    "08_RELATORIOS_ESPERADOS": ["RELATORIO", "DOCUMENTO_ESPERADO", "STATUS_SIGEM",
+                                "REVISAO_SIGEM", "DATA_SIGEM"],
+}
+
+
+@st.cache_data(show_spinner=False, max_entries=16)
+def export_aba(cache_key: str, aba: str) -> pd.DataFrame:
+    """Uma aba qualquer da planilha, pelo caminho rápido quando dá."""
+    pacote = pacote_rapido(cache_key)
+    if pacote is not None and aba in _abas_do_pacote(pacote):
+        return _ler_do_pacote(pacote, aba)
+    try:
+        arq = pd.ExcelFile(_planilha_para_ler())
+        if aba in arq.sheet_names:
+            return pd.read_excel(arq, sheet_name=aba)
+    except Exception:
+        pass
+    return pd.DataFrame()
+
+
+def export_montar(cache_key: str, tags_alvo, escolha: dict) -> pd.DataFrame:
+    """Uma linha por TAG, com as colunas escolhidas de cada aba.
+
+    Aba que tem mais de uma linha por TAG (relatórios, pendências, itens de
+    suprimento) vira uma célula só, com os valores distintos separados por
+    " · ": a planilha não multiplica linha, e nada se perde de vista.
+    """
+    alvo = [str(t).strip() for t in tags_alvo]
+    fora = pd.DataFrame({"TAG": alvo})
+    # a chave de junção fica numa coluna própria: juntar por uma Series solta
+    # faz o pandas tentar criar "key_0" e estourar no segundo join
+    fora["_k"] = fora["TAG"].str.upper()
+    vistos = {"TAG", "_k"}
+    for aba, chave, rotulo in EXPORT_FONTES:
+        cols = [c for c in escolha.get(aba, []) if c != chave]
+        if not cols:
+            continue
+        base = export_aba(cache_key, aba)
+        if base.empty or chave not in base.columns:
+            continue
+        base = base.copy()
+        base["_k"] = base[chave].astype(str).str.strip().str.upper()
+        base = base[base["_k"].isin({t.upper() for t in alvo})]
+        presentes = [c for c in cols if c in base.columns]
+        if not presentes:
+            continue
+        junto = base.groupby("_k")[presentes].agg(
+            lambda v: " · ".join(dict.fromkeys(
+                x for x in (str(i).strip() for i in v)
+                if x and x.lower() not in ("nan", "none"))))
+        # duas abas podem ter coluna com o mesmo nome -- a segunda leva o
+        # nome da aba junto, para ninguem sobrescrever ninguem
+        junto.columns = [c if c not in vistos else f"{c} ({rotulo})"
+                         for c in junto.columns]
+        vistos.update(junto.columns)
+        fora = fora.join(junto, on="_k")
+    return fora.drop(columns="_k")
+
+
+@st.dialog("Montar exportação", width="large")
+def dialogo_exportacao(cache_key: str, tags_alvo, recomendado: dict, chave: str,
+                       nome_arquivo: str):
+    """A janela de escolher colunas, aba por aba."""
+    st.caption(f"{br_num(len(tags_alvo))} TAGs. O que está marcado é o "
+               "recomendado para esta aba — abra as outras para levar mais.")
+    escolha: dict[str, list] = {}
+    for aba, ch, rotulo in EXPORT_FONTES:
+        base = export_aba(cache_key, aba)
+        if base.empty or ch not in base.columns:
+            continue
+        disponiveis = [str(c) for c in base.columns]
+        marcadas = [c for c in recomendado.get(aba, []) if c in disponiveis]
+        with st.expander(f"{rotulo} · {br_num(len(disponiveis))} colunas"
+                         + (f" · {br_num(len(marcadas))} marcadas" if marcadas else ""),
+                         expanded=bool(marcadas)):
+            escolha[aba] = st.multiselect(
+                rotulo, disponiveis, default=marcadas,
+                key=f"exp_{chave}_{aba}", label_visibility="collapsed",
+                placeholder="Escolha as colunas desta aba")
+    total = sum(len(v) for v in escolha.values())
+    st.caption(f"{br_num(total)} colunas escolhidas.")
+    if st.button("Gerar planilha (CSV)", type="primary", use_container_width=True,
+                 disabled=not total, key=f"exp_gerar_{chave}"):
+        tabela = export_montar(cache_key, tags_alvo, escolha)
+        st.session_state[f"exp_pronta_{chave}"] = (
+            tabela.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"))
+    pronta = st.session_state.get(f"exp_pronta_{chave}")
+    if pronta:
+        st.download_button("Baixar", pronta, file_name=nome_arquivo,
+                           mime="text/csv", icon=":material/download:",
+                           use_container_width=True, key=f"exp_baixar_{chave}")
+
+
 def menu_exportar(key: str):
     """Botão "⋮" no topo da página, que abre um menu com as opções de
     exportar -- pedido do usuário pra reunir tudo num lugar só, perto do
@@ -10603,6 +10727,18 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
         else:
             st.caption("Nenhum circuito neste recorte.")
 
+        render_html('<div class="expmenu-divisor">Escolher as colunas</div>')
+        if st.button("Montar exportação…", key="cert_montar_exp",
+                     icon=":material/tune:", type="tertiary",
+                     use_container_width=True,
+                     help="Abre todas as abas da base e deixa escolher as "
+                          "colunas que vêm junto"):
+            dialogo_exportacao(cache_key, alvo_geral,
+                               {**EXPORT_RECOMENDADO,
+                                "07_TAG_RESUMO": EXPORT_RECOMENDADO["07_TAG_RESUMO"],
+                                "05_BASE_LOCAÇÃO": EXPORT_RECOMENDADO["05_BASE_LOCAÇÃO"]},
+                               "cert", "certificacao_tags.csv")
+
         render_html('<div class="expmenu-divisor">Só o que está pendente</div>')
         st.caption("Exportar pendências de cabo")
         prefixos_txt = st.text_input(
@@ -14060,6 +14196,15 @@ def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
             exportar.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
             file_name="avanco_fisico.csv", mime="text/csv", key="af_csv",
             icon=":material/download:", type="tertiary", use_container_width=True)
+        render_html('<div class="expmenu-divisor">Escolher as colunas</div>')
+        if st.button("Montar exportação…", key="af_montar_exp",
+                     icon=":material/tune:", type="tertiary",
+                     use_container_width=True,
+                     help="Abre todas as abas da base e deixa escolher as "
+                          "colunas que vêm junto"):
+            dialogo_exportacao(cache_key, [l["tag"] for l in grupo],
+                               EXPORT_RECOMENDADO, "af", "avanco_tags.csv")
+
         render_html('<div class="expmenu-divisor">Pendências · uma linha por '
                     'pendência, não por TAG</div>')
         if linhas_fisica:
