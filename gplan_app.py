@@ -8926,14 +8926,9 @@ function caixaFF(x, y, nome, rot, fim, mont) {
           <circle cx="${x + w - 6}" cy="${y + 6}" r="1.6" fill="var(--t3)"/>`;
   for (let i = 0; i < 4; i++)
     det += `<rect class="eq-lado" x="${x + 12 + i * 20}" y="${y + h}" width="8" height="6" rx="2"/>`;
-  const t = fim ? `<g>
-      <path d="M${x + w} ${y + 17.5} H${x + w + 13}" stroke="var(--ok)" stroke-width="2.4"/>
-      <rect x="${x + w + 13}" y="${y + 6}" width="21" height="23" rx="3"
-        fill="rgba(45,212,191,.15)" stroke="var(--ok)" stroke-width="1.5"/>
-      <path d="M${x + w + 18} ${y + 12} h11 M${x + w + 18} ${y + 17.5} h11
-               M${x + w + 20} ${y + 23} h7" stroke="var(--ok)" stroke-width="1.6"/>
-      <text x="${x + w + 23}" y="${y + 41}" text-anchor="middle" fill="var(--ok)"
-        font-size="6.5" font-weight="800">TERMINADOR</text></g>` : '';
+  // O desenho do terminador saiu a pedido dele (14/09/2026): estavam tirando
+  // conclusao errada dele no campo. O resto da caixa fica como estava.
+  const t = '';
   const dica = dicaCaixa(nome, mont,
     dl('papel', fim ? 'ponta do segmento, com terminador' : 'passagem do tronco'));
   return `<g ${dd(dica)}>${bloco(x, y, w, h, p, det, corMont(mont))}${t}</g>` +
