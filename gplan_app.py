@@ -1498,6 +1498,24 @@ def inject_css():
         }
         [data-testid="stHeader"] { background: transparent !important;
           height: 44px !important; min-height: 44px !important; }
+        /* O tema do Streamlit vem fixo em "dark" do config.toml e nao da
+           para troca-lo por sessao -- o set_option e global do processo, e
+           na 8501 um usuario mudaria a tela de todos. Entao os componentes
+           nativos que pintam com as cores do config precisam sair pelos
+           nossos tokens, ou viram mancha escura na tela clara. */
+        /* trilho da barra de progresso: vinha #12172a, uma barra preta */
+        [data-testid="stProgressBarTrack"] {
+          background: rgba(var(--rgb-tinta), 0.14) !important; }
+        /* o miolo do radio e pintado com a cor de fundo, para parecer um
+           furo no circulo -- com o fundo escuro fixo virava um ponto preto */
+        [data-testid="stRadioOption"] div > div > div:first-child > div {
+          background: var(--dark-bg) !important; }
+        /* e o anel do nao-marcado vinha do texto do tema escuro a 20%, o que
+           na tela clara e branco sobre branco: some. So o nao-marcado, para
+           nao apagar o azul do marcado. */
+        [data-testid="stRadioOption"]:not(:has(input:checked))
+          div > div > div:first-child {
+          background: rgba(var(--rgb-tinta), 0.34) !important; }
         /* st.file_uploader nasce com 96px de altura (o Streamlit mede o
            conteudo e trava a altura via style inline, entao so !important
            vence) -- botao "Upload" e o texto de limite empilhados em coluna,
@@ -15859,12 +15877,14 @@ def prog_juntar(tags: list) -> None:
 
 
 def prog_chip(situacao: str, texto: str) -> str:
-    cor = {"ok": ("#0f2f2b", "#1d5b53", "#5eead4"),
-           "ressalva": ("#33260d", "#6b4d17", "#f5b34a"),
-           "trava": ("#351a1e", "#6d2b31", "#fca5a5"),
-           "sem_dado": ("#16233a", "#2b3d5e", "#9fb0c9")}[situacao]
-    return (f'<span class="prog-chip" style="background:{cor[0]};border-color:{cor[1]};'
-            f'color:{cor[2]}">{esc(texto)}</span>')
+    """A pastilha de situação, pelos tokens -- muda junto com o tema."""
+    rgb, texto_cor = {"ok": ("--rgb-teal", "--txt-teal"),
+                      "ressalva": ("--rgb-ambar", "--txt-ambar"),
+                      "trava": ("--rgb-vermelho", "--txt-vermelho"),
+                      "sem_dado": ("--rgb-azul", "--txt-azul")}[situacao]
+    return (f'<span class="prog-chip" style="background:rgba(var({rgb}),.13);'
+            f'border-color:rgba(var({rgb}),.42);color:var({texto_cor})">'
+            f'{esc(texto)}</span>')
 
 
 def prog_cards(estado: dict) -> str:
@@ -15977,13 +15997,13 @@ def prog_tabela(aval: pd.DataFrame, chave: str) -> list:
 
 
 PROG_TONS = {
-    "livre": ("#2dd4bf", "em ordem"),
-    "ressalva": ("#f5b34a", "com aviso"),
-    "travada": ("#f87171", "em risco"),
+    "livre": ("var(--accent-teal)", "em ordem"),
+    "ressalva": ("var(--accent-amber)", "com aviso"),
+    "travada": ("var(--accent-red)", "em risco"),
 }
 
 
-def prog_barras(itens, cor="#2dd4bf", total=None) -> str:
+def prog_barras(itens, cor="var(--accent-teal)", total=None) -> str:
     """Barras horizontais para poucas categorias: rótulo, barra e número."""
     if not itens:
         return '<div class="pnl-vazio">nada aqui</div>'
@@ -16036,7 +16056,7 @@ def prog_painel(plano, meta, semana: int, escolhidas: int, extra: str = "") -> s
         f'<div class="pnl-grande">{br_num(montadas)}<span> / {br_num(total)} montadas · '
         f'{br_num(frentes)} planta{"s" if frentes != 1 else ""}</span></div>'
         f'<div class="pnl-trilho pnl-alto"><i style="width:{max(pct, 1):.1f}%;'
-        'background:#2dd4bf"></i></div></div>')
+        'background:var(--accent-teal)"></i></div></div>')
 
     # --- situação: uma barra em três pedaços, cada um com o seu rótulo
     pedacos, legenda = [], []
@@ -16065,14 +16085,15 @@ def prog_painel(plano, meta, semana: int, escolhidas: int, extra: str = "") -> s
     travas, avisos = conta("BLOQUEIOS"), conta("RESSALVAS")
     impedimentos = (
         '<div class="pnl-bloco"><div class="pnl-cab">Impedimentos</div>'
-        + prog_barras(travas, "#f87171", total) + "</div>") if travas else ""
+        + prog_barras(travas, "var(--accent-red)", total) + "</div>") if travas else ""
     pendencias = (
         '<div class="pnl-bloco"><div class="pnl-cab">Avisos</div>'
-        + prog_barras(avisos, "#f5b34a", total) + "</div>") if avisos else ""
+        + prog_barras(avisos, "var(--accent-amber)", total) + "</div>") if avisos else ""
 
     tipos = plano["DESCRICAO"].value_counts().head(4).items()
     composicao = ('<div class="pnl-bloco"><div class="pnl-cab">Composição</div>'
-                  + prog_barras([(t, int(n)) for t, n in tipos], "#60a5fa", total) + "</div>")
+                  + prog_barras([(t, int(n)) for t, n in tipos], "var(--accent-blue)",
+                                total) + "</div>")
 
     return (f'<div class="pnl-caixa"><div class="pnl-tiles">{cabeca}</div>'
             + avanco + situacao + impedimentos + pendencias + composicao
@@ -16131,10 +16152,10 @@ PROG_CSS = """<style>
 .prog-card b { display:block; font-size:26px; line-height:1.2; margin-top:2px;
   font-variant-numeric:tabular-nums; color:var(--text-1); }
 .prog-card i { font-style:normal; font-size:11.5px; color:var(--text-2); }
-.prog-card--ok { --tom:#2dd4bf; }
-.prog-card--info { --tom:#60a5fa; }
-.prog-card--atencao { --tom:#f5b34a; }
-.prog-card--risco { --tom:#f87171; }
+.prog-card--ok { --tom:var(--accent-teal); }
+.prog-card--info { --tom:var(--accent-blue); }
+.prog-card--atencao { --tom:var(--accent-amber); }
+.prog-card--risco { --tom:var(--accent-red); }
 
 .prog-trilha { display:flex; align-items:center; flex-wrap:wrap; gap:4px 14px;
   font-size:12px; color:var(--text-2); margin:0 0 16px;
@@ -16149,11 +16170,11 @@ PROG_CSS = """<style>
 
 /* ---- alerta ------------------------------------------------------ */
 .prog-alerta { display:flex; align-items:flex-start; gap:12px;
-  border:1px solid rgba(245,179,74,.35); border-left:3px solid #f5b34a;
-  border-radius:10px; padding:12px 16px; background:rgba(245,179,74,.08); }
+  border:1px solid rgba(var(--rgb-ambar),.35); border-left:3px solid var(--accent-amber);
+  border-radius:10px; padding:12px 16px; background:rgba(var(--rgb-ambar),.09); }
 .prog-alerta-ico { flex:0 0 20px; width:20px; height:20px; border-radius:50%;
-  background:#f5b34a; color:#1a1200; font-weight:800; font-size:13px;
-  line-height:20px; text-align:center; margin-top:1px; }
+  background:var(--accent-amber); color:var(--sobre-cor); font-weight:800;
+  font-size:13px; line-height:20px; text-align:center; margin-top:1px; }
 .prog-alerta-txt { min-width:0; }
 .prog-alerta-txt b { display:block; font-size:14px; color:var(--text-1);
   line-height:1.35; }
@@ -16204,12 +16225,12 @@ PROG_CSS = """<style>
   color:var(--text-1); }
 .pnl-grande span { font-size:12.5px; color:var(--text-2); }
 .pnl-trilho { position:relative; display:block; height:8px; border-radius:99px;
-  background:rgba(148,163,184,.18); overflow:hidden; min-width:0; }
+  background:rgba(var(--rgb-tinta),.14); overflow:hidden; min-width:0; }
 .pnl-trilho.pnl-alto { height:12px; }
 .pnl-trilho i { display:block; height:100%; border-radius:99px; }
 .pnl-trilho i.pnl-sobre { position:absolute; left:0; top:0; }
 .pnl-pilha { display:flex; gap:2px; height:14px; border-radius:99px; overflow:hidden;
-  background:rgba(148,163,184,.18); }
+  background:rgba(var(--rgb-tinta),.14); }
 .pnl-pilha i { display:block; height:100%; }
 .pnl-legenda { display:flex; flex-wrap:wrap; gap:6px 14px; margin-top:9px;
   font-size:12.5px; color:var(--text-1); }
@@ -16222,6 +16243,8 @@ PROG_CSS = """<style>
   align-items:center; gap:10px; font-size:12.5px; margin-bottom:7px; }
 .pnl-rot { color:var(--text-1); overflow:hidden; text-overflow:ellipsis;
   white-space:nowrap; min-width:0; }
+.pnl-rot small { color:var(--text-2); font-size:11px;
+  font-variant-numeric:tabular-nums; }
 .pnl-linha b { text-align:right; font-variant-numeric:tabular-nums; font-size:12.5px;
   color:var(--text-1); white-space:nowrap; }
 .pnl-vazio { color:var(--text-2); font-size:13px; line-height:1.5; }
@@ -16232,17 +16255,20 @@ def prog_historico(linhas: list) -> str:
     """Programado x montado nas últimas semanas -- calibra a meta."""
     if not linhas:
         return ""
-    maior = max(l["programadas"] for l in linhas) or 1
     barras = []
     for l in linhas:
         pct = l["montadas"] / l["programadas"] * 100 if l["programadas"] else 0
+        # 100% enche a barra. O volume da semana fica no rótulo, ao lado da
+        # sigla, e o detalhe completo no title.
+        cor = "var(--accent-teal)" if pct >= 99.5 else "var(--accent-blue)"
         barras.append(
-            '<div class="pnl-linha">'
-            f'<span class="pnl-rot">{esc(l["semana"].replace("Semana ", "S"))}</span>'
+            '<div class="pnl-linha" title="'
+            f'{br_num(l["montadas"])} montadas de {br_num(l["programadas"])} '
+            f'programadas na {esc(l["semana"])}">'
+            f'<span class="pnl-rot">{esc(l["semana"].replace("Semana ", "S"))}'
+            f'<small> {br_num(l["programadas"])}</small></span>'
             f'<span class="pnl-trilho">'
-            f'<i style="width:{l["programadas"] / maior * 100:.1f}%;background:#334867"></i>'
-            f'<i class="pnl-sobre" style="width:{l["montadas"] / maior * 100:.1f}%;'
-            'background:#2dd4bf"></i></span>'
+            f'<i style="width:{max(pct, 1.5):.1f}%;background:{cor}"></i></span>'
             f'<b>{pct:.0f}%</b></div>')
     return ('<div class="pnl-bloco pnl-fim"><div class="pnl-cab">Histórico · '
             'montado / programado</div>' + "".join(barras) + "</div>")
@@ -16319,7 +16345,7 @@ def render_programacao(cache_key: str = ""):
                 st.rerun()
 
     # --- o que urge: teste de malha em cima e ainda sem semana
-    urgentes = programacao.teste_urgente(aval, cfg_semana - 1)
+    urgentes = programacao.teste_urgente(aval, cfg_semana)
     fora_da_cesta = urgentes[~urgentes["TAG"].isin(cesta)]
     if len(fora_da_cesta):
         with st.container(key="prog_alerta"):
@@ -16483,10 +16509,15 @@ def render_programacao(cache_key: str = ""):
 
 
 def _prog_semana_atual(tags: pd.DataFrame, cache_key: str) -> int:
-    """A semana de hoje, pelo mesmo calendário do Rundown."""
+    """A semana de hoje, pelo mesmo calendário do Rundown.
+
+    Sem somar nada: 14/09/2026 é a Semana 64, de 14 a 20/09, e é isso que a
+    aba tem de chamar de atual. O +1 que existia aqui mostrava "Semana 65 ·
+    atual" na segunda-feira da 64.
+    """
     try:
         fases = rundown_dados(tags, cache_key)
-        return int(fases["geral"]["semana_atual"]) + 1
+        return int(fases["geral"]["semana_atual"])
     except Exception:
         return 1
 
