@@ -2608,8 +2608,11 @@ def inject_css():
            mas a animacao de entrada (que mexe em transform) vai no FILHO
            dele, um nivel abaixo, que a lib de posicionamento nao toca. */
         div[data-testid="stPopoverBody"] {
-          min-width:230px; padding:6px !important;
+          min-width:330px; max-width:380px; padding:10px 12px 12px !important;
           background:var(--dark-card) !important;
+          border:1px solid var(--border-color) !important;
+          border-radius:14px !important;
+          box-shadow:0 18px 44px var(--sombra) !important;
           backdrop-filter:blur(14px) saturate(1.4); -webkit-backdrop-filter:blur(14px) saturate(1.4); }
         div[data-testid="stPopoverBody"] > div {
           animation:expmenu-entra 220ms cubic-bezier(.16,1,.3,1) both; }
@@ -2624,17 +2627,71 @@ def inject_css():
           div[data-testid="stPopoverBody"] > div,
           div[data-testid="stPopoverBody"] > div > * { animation:none !important; }
         }
-        div[data-testid="stPopoverBody"] .stDownloadButton button {
+        /* TODA ação do menu é a mesma linha: botão de baixar, botão comum,
+           qualquer um. Antes só o download era vestido, e o resto ficava com
+           o tamanho cru do Streamlit -- por isso o menu parecia remendado. */
+        div[data-testid="stPopoverBody"] .stDownloadButton button,
+        div[data-testid="stPopoverBody"] .stButton button {
           width:100% !important; justify-content:flex-start !important;
-          gap:10px !important; padding:8px 10px !important; border-radius:8px !important;
+          gap:10px !important; padding:0 10px !important; height:38px !important;
+          min-height:38px !important; border-radius:9px !important;
+          border:1px solid transparent !important; background:transparent !important;
           font-size:13px !important; font-weight:500 !important;
-          color:var(--text-1) !important; transition:background 100ms; }
-        div[data-testid="stPopoverBody"] .stDownloadButton button:hover {
-          background:rgba(var(--rgb-azul),0.14) !important; }
-        div[data-testid="stPopoverBody"] .stDownloadButton button [data-testid="stIconMaterial"] {
-          font-size:17px !important; color:var(--text-3) !important; }
-        div[data-testid="stPopoverBody"] .stDownloadButton button:hover [data-testid="stIconMaterial"] {
+          color:var(--text-1) !important;
+          transition:background 110ms, border-color 110ms; }
+        div[data-testid="stPopoverBody"] .stDownloadButton button:hover,
+        div[data-testid="stPopoverBody"] .stButton button:hover {
+          background:rgba(var(--rgb-azul),0.12) !important;
+          border-color:rgba(var(--rgb-azul),.35) !important; }
+        div[data-testid="stPopoverBody"] .stDownloadButton button p,
+        div[data-testid="stPopoverBody"] .stButton button p {
+          font-size:13px !important; font-weight:500 !important; }
+        div[data-testid="stPopoverBody"] .stDownloadButton button [data-testid="stIconMaterial"],
+        div[data-testid="stPopoverBody"] .stButton button [data-testid="stIconMaterial"] {
+          font-size:18px !important; color:var(--text-3) !important; }
+        div[data-testid="stPopoverBody"] .stDownloadButton button:hover [data-testid="stIconMaterial"],
+        div[data-testid="stPopoverBody"] .stButton button:hover [data-testid="stIconMaterial"] {
           color:var(--accent-blue) !important; }
+        div[data-testid="stPopoverBody"] [data-testid="stElementContainer"] {
+          margin-bottom:2px; }
+        /* o Streamlit põe um div de largura total dentro do botão, e é ele
+           que centraliza o texto -- o justify-content do botão não alcança */
+        div[data-testid="stPopoverBody"] .stDownloadButton button > div,
+        div[data-testid="stPopoverBody"] .stButton button > div {
+          flex:0 0 auto !important; width:auto !important;
+          justify-content:flex-start !important; text-align:left !important; }
+
+        /* O upload nasce como uma área de arrastar de ~100px, com texto de
+           limite de tamanho -- do lado de linhas de 38px vira um bloco
+           estranho. Aqui ele é uma linha como as outras. */
+        div[data-testid="stPopoverBody"] [data-testid="stFileUploaderDropzone"] {
+          min-height:38px !important; height:38px !important; padding:0 10px !important;
+          border:1px dashed var(--border-strong) !important; border-radius:9px !important;
+          background:transparent !important; display:flex !important;
+          align-items:center !important; gap:10px !important;
+          transition:background 110ms, border-color 110ms; }
+        div[data-testid="stPopoverBody"] [data-testid="stFileUploaderDropzone"]:hover {
+          background:rgba(var(--rgb-azul),0.10) !important;
+          border-color:rgba(var(--rgb-azul),.45) !important; }
+        div[data-testid="stPopoverBody"] [data-testid="stFileUploaderDropzoneInstructions"] span,
+        div[data-testid="stPopoverBody"] [data-testid="stFileUploaderDropzoneInstructions"] small {
+          display:none !important; }
+        div[data-testid="stPopoverBody"] [data-testid="stFileUploaderDropzoneInstructions"] {
+          padding:0 !important; margin:0 !important; }
+        div[data-testid="stPopoverBody"] [data-testid="stFileUploaderDropzone"] button {
+          height:26px !important; min-height:26px !important; padding:0 10px !important;
+          font-size:12px !important; border-radius:7px !important;
+          border:1px solid var(--border-color) !important; }
+        div[data-testid="stPopoverBody"] [data-testid="stFileUploaderFile"] {
+          padding:4px 6px !important; }
+        div[data-testid="stPopoverBody"] [data-testid="stFileUploaderFileName"] {
+          font-size:12px !important; }
+
+        /* campo de texto do mesmo tamanho das linhas */
+        div[data-testid="stPopoverBody"] [data-testid="stTextInput"] input {
+          height:34px !important; font-size:12.5px !important; border-radius:8px !important; }
+        div[data-testid="stPopoverBody"] [data-testid="stWidgetLabel"] p {
+          font-size:11.5px !important; color:var(--text-2) !important; }
         /* Divisor de secao dentro do menu (ex.: "Pendencias" separando do
            "Exportar tudo" acima) -- rotulo pequeno com um traço em cima,
            igual um cabecalho de grupo de menu nativo. */
@@ -2642,12 +2699,12 @@ def inject_css():
            cor a esquerda do titulo e respiro em volta. Sem isso os tres
            grupos (filtrar / geral / pendente) corriam juntos. */
         div[data-testid="stPopoverBody"] .expmenu-divisor {
-          position:relative; font-size:10px; font-weight:700; letter-spacing:.09em;
+          position:relative; font-size:10px; font-weight:700; letter-spacing:.1em;
           text-transform:uppercase; color:var(--text-2);
           border-top:1px solid var(--border-color);
-          margin:14px 2px 8px; padding:12px 0 0 10px; }
+          margin:12px 0 6px; padding:11px 0 0 11px; }
         div[data-testid="stPopoverBody"] .expmenu-divisor::before {
-          content:""; position:absolute; left:0; top:12px; width:3px; height:12px;
+          content:""; position:absolute; left:0; top:11px; width:3px; height:11px;
           border-radius:2px; background:var(--accent-blue); }
         /* o primeiro nao precisa de linha em cima */
         div[data-testid="stPopoverBody"] [data-testid="stVerticalBlock"]
@@ -2656,10 +2713,34 @@ def inject_css():
         div[data-testid="stPopoverBody"] [data-testid="stVerticalBlock"]
           > [data-testid="stElementContainer"]:first-child .expmenu-divisor::before {
           top:1px; }
+        /* a legenda explica a linha de cima: encosta nela, recuada */
         div[data-testid="stPopoverBody"] [data-testid="stCaptionContainer"] {
-          padding:2px 10px 6px; }
+          padding:0 10px 6px 20px; margin-top:-2px; }
         div[data-testid="stPopoverBody"] [data-testid="stCaptionContainer"] p {
-          font-size:11.5px !important; color:var(--text-3) !important; }
+          font-size:11.5px !important; line-height:1.45 !important;
+          color:var(--text-3) !important; }
+        div[data-testid="stPopoverBody"] [data-testid="stAlert"] {
+          padding:8px 10px !important; border-radius:9px !important; margin:2px 0 6px; }
+
+        /* ---- histórico de revisão, na ficha da TAG ---- */
+        .fx-hist-l { display:grid; grid-template-columns:64px 1fr; gap:2px 10px;
+          padding:7px 0; border-bottom:1px solid rgba(var(--rgb-tinta),0.06); }
+        .fx-hist-l:last-child { border-bottom:0; }
+        .fx-hist-d { grid-row:span 2; font-size:11px; color:var(--text-3);
+          font-family:ui-monospace,Consolas,monospace; padding-top:2px; }
+        .fx-hist-c { font-size:10.5px; letter-spacing:.07em; text-transform:uppercase;
+          color:var(--text-2); font-family:ui-monospace,Consolas,monospace; }
+        .fx-hist-v { display:flex; align-items:center; gap:8px; font-size:12.5px;
+          flex-wrap:wrap; }
+        .fx-hist-v i { font-style:normal; color:var(--text-3); }
+        .fx-hist-v i::after { content:"→"; margin-left:8px;
+          color:var(--text-3); display:inline-block; }
+        .fx-hist-v b { color:var(--text-1); font-weight:600; }
+        .fx-hist-aviso { font-size:12px; line-height:1.45; color:var(--txt-ambar);
+          background:rgba(var(--rgb-ambar),.12);
+          border:1px solid rgba(var(--rgb-ambar),.35);
+          border-left:3px solid var(--accent-amber);
+          border-radius:8px; padding:8px 10px; margin-bottom:8px; }
 
         /* ---- a janela "Montar exportação" ---- */
         .exp-resumo { display:flex; gap:10px; flex-wrap:wrap; margin:2px 0 14px; }
@@ -6753,6 +6834,80 @@ def fichas_relatorios_html(docs, esperados: pd.DataFrame, historico: dict) -> st
     )
 
 
+# So o que ele pediu rastrear: a vida FISICA do instrumento. Prioridade,
+# descricao, SOP e afins mudam por acerto de cadastro e so fariam barulho na
+# ficha ("apenas aquelas que sao de extrema importancia", 14/09/2026).
+HIST_CAMPOS = ("Calibração", "Localização", "Situação final", "Montagem")
+
+# Voltar atras e depois avancar de novo no mesmo campo: o instrumento pode
+# nao ser o mesmo -- e a pergunta dele, "ja se foram 2 unidades do mesmo tag".
+HIST_VAIVEM = {
+    "Calibração": ("REPROVADO", "APROVADO"),
+    "Localização": ("NÃO LOCALIZADO", "LOCALIZADO"),
+}
+
+
+@st.cache_data(show_spinner=False, max_entries=4)
+def historico_por_tag(cache_key: str) -> dict:
+    """As movimentações da 14_MOVIMENTACOES agrupadas por TAG."""
+    mov = load_data(cache_key)[11]
+    if mov.empty or "OBJETO" not in mov.columns:
+        return {}
+    quer = mov[mov["CAMPO"].astype(str).str.strip().isin(HIST_CAMPOS)]
+    fora: dict[str, list] = {}
+    for r in quer.to_dict("records"):
+        alvo = str(r.get("OBJETO", "")).strip()
+        if not alvo:
+            continue
+        fora.setdefault(alvo, []).append({
+            "data": str(r.get("DATA", "")).strip(),
+            "campo": str(r.get("CAMPO", "")).strip(),
+            "de": str(r.get("DE", "")).strip(),
+            "para": str(r.get("PARA", "")).strip(),
+        })
+    for lista in fora.values():
+        lista.sort(key=lambda x: _hist_quando(x["data"]))
+    return fora
+
+
+def _hist_quando(texto: str):
+    """A data da movimentação, para ordenar. Sem data, vai para o fim."""
+    d = pd.to_datetime(texto, dayfirst=True, errors="coerce")
+    return d if pd.notna(d) else pd.Timestamp.max
+
+
+def hist_vaivem(linhas: list) -> list:
+    """Campos em que a TAG voltou atrás e depois avançou de novo."""
+    achados = []
+    for campo, (volta, ida) in HIST_VAIVEM.items():
+        passos = [l for l in linhas if l["campo"] == campo]
+        vistos = [str(l["para"]).strip().upper() for l in passos]
+        if volta in vistos and ida in vistos[vistos.index(volta) + 1:]:
+            achados.append(campo)
+    return achados
+
+
+def fx_historico(tag_id: str) -> str:
+    """O bloco da ficha: de onde mudou, para onde e quando."""
+    linhas = (st.session_state.get("hist_tag") or {}).get(str(tag_id).strip(), [])
+    if not linhas:
+        return ""
+    aviso = "".join(
+        f'<div class="fx-hist-aviso">{esc(campo)} voltou atrás e avançou de '
+        "novo — pode ser outra unidade do mesmo TAG.</div>"
+        for campo in hist_vaivem(linhas))
+    passos = "".join(
+        '<div class="fx-hist-l">'
+        f'<span class="fx-hist-d">{esc(l["data"][:10])}</span>'
+        f'<span class="fx-hist-c">{esc(l["campo"])}</span>'
+        f'<span class="fx-hist-v"><i>{esc(l["de"] or "—")}</i>'
+        f'<b>{esc(l["para"] or "—")}</b></span></div>'
+        for l in reversed(linhas))
+    return fx_painel("Histórico de revisão", "relogio", aviso + passos,
+                     conta=f"{br_num(len(linhas))} mudança"
+                           f"{'s' if len(linhas) != 1 else ''}")
+
+
 def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
                    tags: pd.DataFrame, com_cabecalho: bool = True,
                    espera_por_doc: dict | None = None,
@@ -6961,7 +7116,8 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
                     f'<div class="fx-kpis">{kpis}</div><div class="fx-dados">{dados}</div>')
         + fx_painel("Relatórios da tag", "folha", tabela,
                     conta=f"{br_num(esp)} previstos", classe_corpo="zero")
-        + f'</div><div class="fx-col">{avanco}{bloco_campo}{bloco_prioridade}{bloco_fornecimento}{mov}{acoes}</div></div></div>'
+        + f'</div><div class="fx-col">{avanco}{bloco_campo}{bloco_prioridade}'
+        f'{bloco_fornecimento}{fx_historico(tag_id)}{mov}{acoes}</div></div></div>'
     )
 
 
@@ -10873,7 +11029,6 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                 file_name=f"pendencias_cabo_{'_'.join(prefixos)}.csv",
                 mime="text/csv", key="cert_export_download",
                 icon=":material/cable:", type="tertiary", use_container_width=True)
-            st.dataframe(df_export, hide_index=True, width="stretch")
 
     escolhido = {c: st.session_state.get(f"cert_f_{c}", "Todos") for c, _ in campos}
 
@@ -17120,6 +17275,9 @@ def main():
         st.stop()
 
     st.session_state["gplan_atualizado_em"] = data_atualizacao(fonte)
+    # o indice do historico fica pronto aqui: a ficha da TAG e montada em
+    # varios lugares e nenhum deles recebe o cache_key
+    st.session_state["hist_tag"] = historico_por_tag(cache_key)
     st.session_state["gplan_fonte"] = fonte_dados(fonte)
     (tags, cabos, tubing, sigem, resumo, esperados,
      gitec, locacao, aux_areas, lancamento, depara, movimentacoes) = load_data(cache_key)
