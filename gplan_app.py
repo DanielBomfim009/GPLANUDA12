@@ -16088,7 +16088,7 @@ def render_programacao(cache_key: str = ""):
     ROTULOS = {programacao.BLOQUEIA: "Bloqueia", programacao.AVISA: "Só avisa",
                programacao.IGNORA: "Ignora"}
     guardados = st.session_state.get("prog_modos") or dict(programacao.MODOS_PADRAO)
-    with st.expander("O que conta como \"pode montar\"", expanded=False):
+    with st.expander("Critérios", expanded=False):
         st.caption("**Bloqueia**: remove da lista · **Só avisa**: mantém, em âmbar · "
                    "**Ignora**: oculta. Padrão medido nas 719 já montadas — calibração, "
                    "almoxarifado, suprimentos e localização erram 0-2%; bandeja 19%, "
@@ -16168,10 +16168,9 @@ def render_programacao(cache_key: str = ""):
         if ja_na_base:
             r = programacao.resumo(conferencia)
             risco = conferencia[conferencia["SITUACAO"] == "travada"]
-            titulo = (f"O que já está programado para a {rotulo_semana} · "
+            titulo = (f"Já programado · {rotulo_semana} · "
                       f"{br_num(ja_na_base)} TAGs"
-                      + (f" · {br_num(len(risco))} em risco" if len(risco)
-                         else " · todas em ordem"))
+                      + (f" · {br_num(len(risco))} em risco" if len(risco) else " · ok"))
             with st.expander(titulo, expanded=False):
                 st.caption("Régua aplicada ao já programado.")
                 render_html(
@@ -16184,9 +16183,9 @@ def render_programacao(cache_key: str = ""):
 
         render_html(
             '<div class="prog-faixa">'
-            + prog_chip("ok", f'{br_num(conta["livre"])} livres')
-            + prog_chip("ressalva", f'{br_num(conta["ressalva"])} com ressalva')
-            + prog_chip("trava", f'{br_num(conta["travada"])} travadas')
+            + prog_chip("ok", f'{br_num(conta["livre"])} prontas')
+            + prog_chip("ressalva", f'{br_num(conta["ressalva"])} com aviso')
+            + prog_chip("trava", f'{br_num(conta["travada"])} impedidas')
             + f'<small>de {br_num(conta["total"])} sem semana</small></div>')
         f1, f2, f3, f4 = st.columns([1.3, 1.3, 1.3, 1])
         familias = sorted(aval["FAMILIA"].unique()) if not aval.empty else []
