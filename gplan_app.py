@@ -4539,6 +4539,28 @@ def render_header(title: str, extra_pill: str | None = None):
     )
 
 
+def ler_lista_tags(arquivo) -> set | None:
+    """As TAGs de uma planilha que a pessoa subiu.
+
+    Aceita a coluna "TAG" ou, na falta dela, a primeira. Devolve None quando
+    não dá para ler -- quem chama avisa na tela.
+    """
+    if arquivo is None:
+        return None
+    try:
+        if arquivo.name.lower().endswith(".csv"):
+            df = pd.read_csv(arquivo, dtype=str, sep=None, engine="python")
+        else:
+            df = pd.read_excel(arquivo, dtype=str)
+    except Exception:
+        return None
+    col = next((c for c in df.columns if str(c).strip().upper() == "TAG"),
+               df.columns[0] if len(df.columns) else None)
+    if col is None:
+        return set()
+    return {str(v).strip().upper() for v in df[col].dropna() if str(v).strip()}
+
+
 def menu_exportar(key: str):
     """Botão "⋮" no topo da página, que abre um menu com as opções de
     exportar -- pedido do usuário pra reunir tudo num lugar só, perto do
@@ -10482,7 +10504,58 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
     # controle proprio (prefixo de TAG) e uma previa em tabela, entao o
     # popover fica maior que os outros, mas o gatilho e a posicao (topo,
     # perto do titulo) sao os mesmos.
+    cert_tags_up = None
     with menu_exportar("expmenu_cert"):
+        # --- filtro por planilha (mesma ideia da aba Avanço)
+        render_html('<div class="expmenu-divisor">Filtrar por planilha</div>')
+        arq_cert = st.file_uploader(
+            "Lista de TAGs", type=["xlsx", "xls", "csv"], key="cert_upload",
+            label_visibility="collapsed",
+            help='Uma coluna "TAG" (ou a primeira coluna). A aba passa a '
+                 "mostrar só essas TAGs.")
+        if arq_cert is not None:
+            cert_tags_up = ler_lista_tags(arq_cert)
+            if cert_tags_up is None:
+                st.warning("Não consegui ler essa planilha.")
+
+        # --- exportação geral: TODO circuito, não só o que está pendente
+        render_html('<div class="expmenu-divisor">Geral · uma linha por '
+                    'circuito</div>')
+        geral_export: dict[str, dict] = {}
+        for tag in universo:
+            for c in (por_tag[tag].get("cadeia_uniao")
+                      or por_tag[tag].get("cadeia", [])):
+                cid = str(c["CIRCUITO"]).strip()
+                linha = geral_export.setdefault(cid, {
+                    "CIRCUITO": cid, "ORIGEM": str(c["ORIGEM"]).strip(),
+                    "DESTINO": str(c["DESTINO"]).strip(),
+                    "DISCIPLINA": str(c["DISCIPLINA"]).strip(),
+                    "STATUS": str(c["STATUS"]).strip(),
+                    "PCT_AVANCO_REAL": round(cert_num(c["PCT"]), 1),
+                    "PCT_LANCAMENTO": round(cert_num(c["PCT_LANC"] if "PCT_LANC" in c
+                                                     else c["PCT"]), 1),
+                    "METROS": cert_num(c["METROS"]),
+                    "METROS_LANCADOS": cert_metro_medido(c),
+                    "TAGS": set(),
+                })
+                linha["TAGS"].add(tag)
+        linhas_geral = sorted(
+            ({**v, "TAGS": ", ".join(sorted(v["TAGS"]))} for v in geral_export.values()),
+            key=lambda v: v["CIRCUITO"])
+        if linhas_geral:
+            st.download_button(
+                "Exportar tudo (CSV)",
+                pd.DataFrame(linhas_geral).to_csv(index=False, sep=";", decimal=",")
+                .encode("utf-8-sig"),
+                file_name="certificacao_circuitos.csv", mime="text/csv",
+                key="cert_csv_geral", icon=":material/download:",
+                type="tertiary", use_container_width=True)
+            st.caption(f"{br_num(len(linhas_geral))} circuitos · "
+                       f"{br_num(len(universo))} TAGs")
+        else:
+            st.caption("Nenhum circuito neste recorte.")
+
+        render_html('<div class="expmenu-divisor">Só o que está pendente</div>')
         st.caption("Exportar pendências de cabo")
         prefixos_txt = st.text_input(
             "Prefixos de TAG, separados por vírgula", value="AST,OST",
@@ -10576,6 +10649,9 @@ def render_certificacao(tags: pd.DataFrame, lanc: pd.DataFrame, depara: pd.DataF
                            "para Todos")
 
     universo_f = [t for t in universo if combina(t)]
+    # a lista que ele subiu no menu recorta a aba inteira
+    if cert_tags_up:
+        universo_f = [t for t in universo_f if t.upper() in cert_tags_up]
     ativos = [f"{rot.lower()} {escolhido[c]}" for c, rot in campos
               if escolhido[c] != "Todos"]
 
@@ -13781,27 +13857,22 @@ def render_avanco_fisico(tags: pd.DataFrame, resumo: pd.DataFrame,
     # filtros da lateral (pedido do usuario, 2026-09-03).
     grupo = linhas
 
+    # O upload mora DENTRO do menu "⋮", e não num cartão no meio da tela:
+    # ocupava a largura toda para uma coisa que ele usa de vez em quando, e
+    # empurrava a tabela para baixo (pedido dele, 14/09/2026).
     tags_upload = None
-    arquivo = st.file_uploader(
-        "Filtrar por lista de TAGs (upload)", type=["xlsx", "xls", "csv"],
-        key="af_upload",
-        help='Sobe uma planilha com uma coluna "TAG" (ou usa a primeira '
-             "coluna) e a tela passa a mostrar só essas TAGs -- pra "
-             "conferir um lote específico sem digitar uma por uma.")
+    with menu_af:
+        render_html('<div class="expmenu-divisor">Filtrar por planilha</div>')
+        arquivo = st.file_uploader(
+            "Lista de TAGs", type=["xlsx", "xls", "csv"],
+            key="af_upload", label_visibility="collapsed",
+            help='Uma coluna "TAG" (ou a primeira coluna). A tela passa a '
+                 "mostrar só essas TAGs.")
     if arquivo is not None:
-        try:
-            if arquivo.name.lower().endswith(".csv"):
-                df_up = pd.read_csv(arquivo, dtype=str, sep=None, engine="python")
-            else:
-                df_up = pd.read_excel(arquivo, dtype=str)
-            col = next((c for c in df_up.columns
-                       if str(c).strip().upper() == "TAG"),
-                      df_up.columns[0] if len(df_up.columns) else None)
-            tags_upload = ({str(v).strip().upper() for v in df_up[col].dropna()
-                            if str(v).strip()} if col is not None else set())
-        except Exception:
+        tags_upload = ler_lista_tags(arquivo)
+        if tags_upload is None:
             st.warning("Não consegui ler essa planilha -- confira o arquivo "
-                      "e tente de novo.")
+                       "e tente de novo.")
         if tags_upload is not None:
             achadas = sum(1 for l in grupo if l["tag"].upper() in tags_upload)
             st.caption(f"{achadas} de {len(tags_upload)} TAGs da planilha "
