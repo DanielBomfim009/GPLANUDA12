@@ -1062,6 +1062,10 @@ TEMAS = {
         # claro sobre o escuro e a prancha para de ser um retângulo branco
         "planta_filtro": "invert(1) brightness(.86) contrast(1.22)",
         "planta_opacidade": ".52",
+        # a planilha do Streamlit e desenhada num canvas e pinta com as cores
+        # fixas do config.toml -- a MESMA nos dois temas. No escuro ela ja
+        # nasce certa, entao aqui nao ha o que fazer.
+        "grade_filtro": "none",
         "esquema": "dark",
     },
     "claro": {
@@ -1085,6 +1089,11 @@ TEMAS = {
         # prancha preta no meio de uma tela clara
         "planta_filtro": "grayscale(1) contrast(1.35) brightness(.82)",
         "planta_opacidade": ".55",
+        # no claro a planilha chega escura e nao ha CSS que alcance o canvas:
+        # inverter e girar o matiz devolve fundo claro com texto escuro,
+        # mantendo as cores reconheciveis -- e o mesmo recurso do desenho da
+        # Planta, que ja nasceu preto no branco e e invertido no escuro.
+        "grade_filtro": "invert(1) hue-rotate(180deg)",
         "esquema": "light",
     },
 }
@@ -1177,6 +1186,7 @@ def tokens_css(tema: str) -> str:
           --teal-2: {t['teal2']};
           --rgb-chapa: {t['rgb_chapa']};
           --planta-filtro: {t['planta_filtro']};
+          --grade-filtro: {t['grade_filtro']};
           --planta-opacidade: {t['planta_opacidade']};"""
 
 
@@ -1552,6 +1562,9 @@ def inject_css():
            na 8501 um usuario mudaria a tela de todos. Entao os componentes
            nativos que pintam com as cores do config precisam sair pelos
            nossos tokens, ou viram mancha escura na tela clara. */
+        /* a planilha (canvas) nao acompanha o tema: no claro ela vem escura.
+           O filtro e por tema -- "none" no escuro, invertido no claro. */
+        [data-testid="stDataFrame"] { filter: var(--grade-filtro, none); }
         /* trilho da barra de progresso: vinha #12172a, uma barra preta */
         [data-testid="stProgressBarTrack"] {
           background: rgba(var(--rgb-tinta), 0.14) !important; }
