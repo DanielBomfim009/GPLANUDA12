@@ -15867,6 +15867,56 @@ def prog_chip(situacao: str, texto: str) -> str:
             f'color:{cor[2]}">{esc(texto)}</span>')
 
 
+def prog_cards(estado: dict) -> str:
+    """Os quatro números que abrem a aba, como um grupo só."""
+    itens = (("Montadas", estado["montadas"], "ok", "concluídas"),
+             ("Em programação", estado["em_programacao"], "info", "status da base"),
+             ("Com semana", estado["programadas"], "info", "marcadas"),
+             ("Sem semana", estado["disponiveis"], "atencao", "a programar"))
+    return ('<div class="prog-cards">' + "".join(
+        f'<div class="prog-card prog-card--{tom}"><small>{esc(rot)}</small>'
+        f'<b>{br_num(n)}</b><i>{esc(det)}</i></div>'
+        for rot, n, tom, det in itens) + "</div>")
+
+
+def prog_trilha(por_semana: dict, quantas: int = 6) -> str:
+    """As últimas semanas marcadas, em uma linha."""
+    ultimas = list(por_semana.items())[-quantas:]
+    if not ultimas:
+        return ""
+    return ('<div class="prog-trilha"><small>Últimas semanas</small>'
+            + "".join(f'<span>{esc(s.replace("Semana ", "S"))} <b>{br_num(n)}</b></span>'
+                      for s, n in ultimas) + "</div>")
+
+
+def prog_semanas(por_semana: dict, atual: int) -> list:
+    """As semanas que dá para abrir: as que já têm TAG marcada -- inclusive
+    as passadas -- mais a janela à frente."""
+    marcadas = {programacao.semana_numero(s) for s in por_semana}
+    marcadas.discard(0)
+    return sorted(marcadas | set(range(atual, atual + PROG_SEMANAS)))
+
+
+def prog_rotulo(s: int, atual: int, por_semana: dict) -> str:
+    marcas = []
+    if s == atual:
+        marcas.append("atual")
+    elif s < atual:
+        marcas.append("passada")
+    n = por_semana.get(f"Semana {s}", 0)
+    if n:
+        marcas.append(f"{br_num(n)} TAGs")
+    return f"Semana {s}" + (" · " + " · ".join(marcas) if marcas else "")
+
+
+def prog_alerta(n: int, janela: int) -> str:
+    return ('<div class="prog-alerta"><span class="prog-alerta-ico">!</span>'
+            '<div class="prog-alerta-txt">'
+            f'<b>{br_num(n)} aptas · teste de malha em até {janela} semanas · '
+            'sem programação</b>'
+            '<span>Montagem antecede o teste.</span></div></div>')
+
+
 def prog_tabela(aval: pd.DataFrame, chave: str) -> list:
     """A tabela com seleção de linhas -- devolve as TAGs marcadas.
 
@@ -15881,7 +15931,7 @@ def prog_tabela(aval: pd.DataFrame, chave: str) -> list:
         "Tipo": aval["DESCRICAO"],
         "Prio": aval["PRIORITARIA"].map({True: "★", False: ""}),
         "Nível": aval["NIVEL"],
-        "Teste malha": aval["TESTE_MALHA"],
+        "Teste": aval["TESTE_MALHA"],
         "Área": aval["AREA"],
         "Planta": aval["PLANTA"],
         "Sistema": aval["SUBSISTEMA"],
@@ -15896,12 +15946,15 @@ def prog_tabela(aval: pd.DataFrame, chave: str) -> list:
         column_config={
             "TAG": st.column_config.TextColumn(width="medium"),
             "Tipo": st.column_config.TextColumn(
-                width="large", help="Descrição da base 01 -- é ela que diz o tipo"),
+                width="medium", help="Descrição da base 01 -- é ela que diz o tipo"),
+            "Área": st.column_config.TextColumn(width="small"),
+            "Planta": st.column_config.TextColumn(width="small"),
+            "Fase": st.column_config.TextColumn(width="small"),
             "Prio": st.column_config.TextColumn("Prio", width="small",
                                                 help="SSOP Prioritário = SIM"),
             "Nível": st.column_config.TextColumn(width="small",
                                                  help="Subgrupo de prioridade da base"),
-            "Teste malha": st.column_config.TextColumn(
+            "Teste": st.column_config.TextColumn(
                 width="small", help="Semana prevista do teste de malha -- a montagem "
                                     "precisa acontecer antes dela"),
             "Sistema": st.column_config.TextColumn(width="medium", help="SSOP"),
@@ -15946,13 +15999,18 @@ def prog_barras(itens, cor="#2dd4bf", total=None) -> str:
     return "".join(linhas)
 
 
-def prog_painel(plano, meta, semana: int, escolhidas: int) -> str:
+def prog_painel(plano, meta, semana: int, escolhidas: int, extra: str = "") -> str:
     """O retrato da semana: quanto já foi montado, como está a situação de
-    cada TAG e o que está travando."""
+    cada TAG e o que está travando.
+
+    `extra` entra DENTRO do cartão -- o histórico nasceu fora dele e ficava
+    solto no meio da coluna, sem borda nem fundo.
+    """
     total = len(plano)
     if not total:
         return ('<div class="pnl-caixa"><div class="pnl-vazio">Semana '
-                f'{semana}: nada programado. Escolha à esquerda.</div></div>')
+                f'{semana}: nada programado. Escolha à esquerda.</div>'
+                + extra + '</div>')
     montadas = int((plano["MONTAGEM"] == "Montado").sum())
     contagem = plano["SITUACAO"].value_counts()
     risco = int(contagem.get("travada", 0))
@@ -16017,43 +16075,156 @@ def prog_painel(plano, meta, semana: int, escolhidas: int) -> str:
                   + prog_barras([(t, int(n)) for t, n in tipos], "#60a5fa", total) + "</div>")
 
     return (f'<div class="pnl-caixa"><div class="pnl-tiles">{cabeca}</div>'
-            + avanco + situacao + impedimentos + pendencias + composicao + "</div>")
+            + avanco + situacao + impedimentos + pendencias + composicao
+            + extra + "</div>")
 
 
 PROG_CSS = """<style>
-.prog-chip{display:inline-block;font-size:12px;padding:3px 9px;border-radius:7px;
-  border:1px solid transparent;font-family:ui-monospace,Consolas,monospace;margin-right:6px}
-.prog-faixa{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:10px 0 16px}
-.prog-faixa small{color:#93a2b8;margin-left:6px}
-.pnl-caixa{border:1px solid rgba(148,163,184,.22);border-radius:14px;padding:16px;
-  background:rgba(148,163,184,.05)}
-.pnl-tiles{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:rgba(148,163,184,.22);
-  border:1px solid rgba(148,163,184,.22);border-radius:10px;overflow:hidden;margin-bottom:16px}
-.pnl-tile{background:var(--dark-card,#111a2b);padding:10px 12px}
-.pnl-tile small{display:block;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
-  color:#93a2b8;font-family:ui-monospace,Consolas,monospace}
-.pnl-tile b{display:block;font-size:26px;line-height:1.15;font-variant-numeric:tabular-nums}
-.pnl-tile i{font-style:normal;font-size:11.5px;color:#93a2b8}
-.pnl-bloco{margin-bottom:16px}
-.pnl-cab{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:#93a2b8;
-  font-family:ui-monospace,Consolas,monospace;margin-bottom:8px}
-.pnl-grande{font-size:22px;font-variant-numeric:tabular-nums;margin-bottom:8px}
-.pnl-grande span{font-size:13px;color:#93a2b8}
-.pnl-trilho{display:block;height:8px;border-radius:99px;background:rgba(148,163,184,.18);
-  overflow:hidden;flex:1}
-.pnl-trilho.pnl-alto{height:12px}
-.pnl-trilho{position:relative}.pnl-trilho i{display:block;height:100%;border-radius:99px}.pnl-trilho i.pnl-sobre{position:absolute;left:0;top:0}
-.pnl-pilha{display:flex;gap:2px;height:14px;border-radius:99px;overflow:hidden;
-  background:rgba(148,163,184,.18)}
-.pnl-pilha i{display:block;height:100%}
-.pnl-legenda{display:flex;flex-wrap:wrap;gap:12px;margin-top:9px;font-size:12.5px;color:#cbd6e6}
-.pnl-legenda span{display:inline-flex;align-items:center;gap:6px}
-.pnl-legenda i{width:9px;height:9px;border-radius:3px;display:inline-block}
-.pnl-linha{display:grid;grid-template-columns:142px 1fr 30px;align-items:center;gap:8px;
-  font-size:12.5px;margin-bottom:7px}
-.pnl-rot{color:#cbd6e6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pnl-linha b{text-align:right;font-variant-numeric:tabular-nums;font-size:12.5px}
-.pnl-vazio{color:#93a2b8;font-size:13px;line-height:1.5}
+/* ===================================================================
+   Programação -- enquadramento
+   A regra que resolve o corte: coluna de Streamlit nasce sem min-width,
+   então um filho largo (a tabela) empurra a linha inteira e a página
+   ganha scroll horizontal. min-width:0 deixa a coluna encolher, e o que
+   é largo rola dentro do próprio componente.
+   =================================================================== */
+[class*="st-key-prog_"] [data-testid="stColumn"],
+[class*="st-key-prog_"] [data-testid="stColumn"] > div { min-width: 0; }
+[class*="st-key-prog_"] [data-testid="stDataFrame"] { max-width: 100%; }
+[class*="st-key-prog_"] * { box-sizing: border-box; }
+
+/* Empilhar de verdade. O Streamlit 1.60 põe um stLayoutWrapper entre o
+   container e a linha de colunas, e não quebra sozinho em tela estreita --
+   sem estas regras o painel chegava a 66px no celular. */
+@media (max-width: 1150px) {
+  .st-key-prog_corpo > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+  .st-key-prog_corpo > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+    flex: 1 1 100% !important; width: 100% !important;
+  }
+}
+/* tablet: os filtros passam a duas colunas */
+@media (max-width: 1000px) {
+  .st-key-prog_filtros [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+    flex: 1 1 calc(50% - 8px) !important; width: auto !important;
+  }
+}
+/* celular: tudo em uma coluna */
+@media (max-width: 760px) {
+  [class*="st-key-prog_"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+    flex: 1 1 100% !important; width: 100% !important;
+  }
+  .st-key-prog_faixa { padding: 12px; }
+  .prog-alerta { padding: 12px; }
+}
+
+/* ---- cartões de resumo ------------------------------------------ */
+.prog-cards { display:grid; grid-template-columns:repeat(4, minmax(0,1fr));
+  gap:12px; margin:4px 0 12px; }
+@media (max-width:1150px){ .prog-cards{ grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:620px){ .prog-cards{ grid-template-columns:1fr; } }
+.prog-card { border:1px solid var(--border-color); border-left:3px solid var(--tom,#60a5fa);
+  border-radius:10px; padding:10px 14px; background:var(--dark-card); min-width:0; }
+.prog-card small { display:block; font-size:10.5px; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--text-2);
+  font-family:ui-monospace,Consolas,monospace; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; }
+.prog-card b { display:block; font-size:26px; line-height:1.2; margin-top:2px;
+  font-variant-numeric:tabular-nums; color:var(--text-1); }
+.prog-card i { font-style:normal; font-size:11.5px; color:var(--text-2); }
+.prog-card--ok { --tom:#2dd4bf; }
+.prog-card--info { --tom:#60a5fa; }
+.prog-card--atencao { --tom:#f5b34a; }
+.prog-card--risco { --tom:#f87171; }
+
+.prog-trilha { display:flex; align-items:center; flex-wrap:wrap; gap:4px 14px;
+  font-size:12px; color:var(--text-2); margin:0 0 16px;
+  font-family:ui-monospace,Consolas,monospace; }
+.prog-trilha small { font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; }
+.prog-trilha b { color:var(--text-1); font-weight:600; }
+
+/* ---- faixa da semana -------------------------------------------- */
+.st-key-prog_faixa { border:1px solid var(--border-color); border-radius:12px;
+  padding:12px 16px 14px; background:var(--dark-card); margin-bottom:16px; }
+.st-key-prog_faixa [data-testid="stProgress"] { margin-bottom:2px; }
+
+/* ---- alerta ------------------------------------------------------ */
+.prog-alerta { display:flex; align-items:flex-start; gap:12px;
+  border:1px solid rgba(245,179,74,.35); border-left:3px solid #f5b34a;
+  border-radius:10px; padding:12px 16px; background:rgba(245,179,74,.08); }
+.prog-alerta-ico { flex:0 0 20px; width:20px; height:20px; border-radius:50%;
+  background:#f5b34a; color:#1a1200; font-weight:800; font-size:13px;
+  line-height:20px; text-align:center; margin-top:1px; }
+.prog-alerta-txt { min-width:0; }
+.prog-alerta-txt b { display:block; font-size:14px; color:var(--text-1);
+  line-height:1.35; }
+.prog-alerta-txt span { font-size:12.5px; color:var(--text-2); }
+
+/* ---- chips ------------------------------------------------------- */
+.prog-chip { display:inline-block; font-size:12px; padding:3px 9px; border-radius:7px;
+  border:1px solid transparent; font-family:ui-monospace,Consolas,monospace; }
+.prog-faixa { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin:0 0 12px; }
+.prog-faixa small { color:var(--text-2); margin-left:2px; }
+
+/* O ícone de ajuda nasce em um div com justify-content:flex-end e flex:1,
+   então ia parar na outra ponta do campo -- parecia um segundo controle
+   solto ao lado do rótulo. Aqui ele encosta no texto que explica. */
+[class*="st-key-prog_"] [data-testid="stWidgetLabel"] { gap:6px; align-items:center; }
+[class*="st-key-prog_"] [data-testid="stWidgetLabel"] > div:has([data-testid="stTooltipIcon"]) {
+  justify-content:flex-start !important; flex:0 0 auto !important; }
+
+/* ritmo entre as seções */
+.st-key-prog_alerta { margin-bottom:16px; }
+.st-key-prog_base { margin-bottom:8px; }
+.st-key-prog_filtros { margin-bottom:4px; }
+
+/* ---- rótulo de bloco --------------------------------------------- */
+.prog-secao { font-size:10.5px; letter-spacing:.09em; text-transform:uppercase;
+  color:var(--text-2); font-family:ui-monospace,Consolas,monospace;
+  margin:4px 0 8px; }
+
+/* ---- painel da semana -------------------------------------------- */
+.pnl-caixa { border:1px solid var(--border-color); border-radius:12px; padding:16px;
+  background:var(--dark-card); }
+.pnl-tiles { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:1px;
+  background:var(--border-color); border:1px solid var(--border-color);
+  border-radius:10px; overflow:hidden; margin-bottom:16px; }
+.pnl-tile { background:var(--dark-card-2); padding:10px 12px; min-width:0; }
+.pnl-tile small { display:block; font-size:10.5px; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--text-2);
+  font-family:ui-monospace,Consolas,monospace; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; }
+.pnl-tile b { display:block; font-size:24px; line-height:1.2;
+  font-variant-numeric:tabular-nums; color:var(--text-1); }
+.pnl-tile i { font-style:normal; font-size:11.5px; color:var(--text-2); }
+.pnl-bloco { margin-bottom:16px; }
+.pnl-bloco.pnl-fim { margin-bottom:0; }
+.pnl-cab { font-size:10.5px; letter-spacing:.09em; text-transform:uppercase;
+  color:var(--text-2); font-family:ui-monospace,Consolas,monospace; margin-bottom:8px; }
+.pnl-grande { font-size:20px; font-variant-numeric:tabular-nums; margin-bottom:8px;
+  color:var(--text-1); }
+.pnl-grande span { font-size:12.5px; color:var(--text-2); }
+.pnl-trilho { position:relative; display:block; height:8px; border-radius:99px;
+  background:rgba(148,163,184,.18); overflow:hidden; min-width:0; }
+.pnl-trilho.pnl-alto { height:12px; }
+.pnl-trilho i { display:block; height:100%; border-radius:99px; }
+.pnl-trilho i.pnl-sobre { position:absolute; left:0; top:0; }
+.pnl-pilha { display:flex; gap:2px; height:14px; border-radius:99px; overflow:hidden;
+  background:rgba(148,163,184,.18); }
+.pnl-pilha i { display:block; height:100%; }
+.pnl-legenda { display:flex; flex-wrap:wrap; gap:6px 14px; margin-top:9px;
+  font-size:12.5px; color:var(--text-1); }
+.pnl-legenda span { display:inline-flex; align-items:center; gap:6px; }
+.pnl-legenda i { width:9px; height:9px; border-radius:3px; display:inline-block; }
+/* rótulo | barra | número: a barra é a única coluna elástica, e o rótulo
+   tem largura mínima zero para poder cortar com reticências em vez de
+   empurrar a linha */
+.pnl-linha { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(0,2fr) auto;
+  align-items:center; gap:10px; font-size:12.5px; margin-bottom:7px; }
+.pnl-rot { color:var(--text-1); overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; min-width:0; }
+.pnl-linha b { text-align:right; font-variant-numeric:tabular-nums; font-size:12.5px;
+  color:var(--text-1); white-space:nowrap; }
+.pnl-vazio { color:var(--text-2); font-size:13px; line-height:1.5; }
 </style>"""
 
 
@@ -16073,8 +16244,8 @@ def prog_historico(linhas: list) -> str:
             f'<i class="pnl-sobre" style="width:{l["montadas"] / maior * 100:.1f}%;'
             'background:#2dd4bf"></i></span>'
             f'<b>{pct:.0f}%</b></div>')
-    return ('<div class="pnl-bloco"><div class="pnl-cab">Histórico · montado / programado</div>'
-            + "".join(barras) + "</div>")
+    return ('<div class="pnl-bloco pnl-fim"><div class="pnl-cab">Histórico · '
+            'montado / programado</div>' + "".join(barras) + "</div>")
 
 
 def render_programacao(cache_key: str = ""):
@@ -16109,70 +16280,67 @@ def render_programacao(cache_key: str = ""):
     aval = prog_avaliacao(cache_key, modos)
     conta = programacao.resumo(aval)
     estado = programacao.estado(tags)
-    ultimas = list(estado["por_semana"].items())[-5:]
-    render_html(
-        '<div class="prog-faixa">'
-        + prog_chip("ok", f'{br_num(estado["montadas"])} montadas')
-        + prog_chip("sem_dado", f'{br_num(estado["em_programacao"])} em programação')
-        + prog_chip("sem_dado", f'{br_num(estado["programadas"])} com semana marcada')
-        + prog_chip("ressalva", f'{br_num(estado["disponiveis"])} ainda sem semana')
-        + '<small>semanas: '
-        + " · ".join(f"{esc(s.replace('Semana ', 'S'))} {br_num(n)}" for s, n in ultimas)
-        + "</small></div>")
-
-    # ------------------------------------------------------- semana e meta
-    cfg_semana = _prog_semana_atual(tags, cache_key)
-    c_sem, c_meta, c_lim = st.columns([1.2, 2.4, 1.4], vertical_alignment="center")
-    with c_sem:
-        semana = st.selectbox(
-            "Semana", list(range(cfg_semana, cfg_semana + PROG_SEMANAS)),
-            format_func=lambda s: f"Semana {s}", key="prog_semana")
-    meta = prog_meta(tags, cache_key, semana)
     cesta = prog_cesta()
-    rotulo_semana = f"Semana {semana}"
-    conferencia = prog_conferencia(cache_key, rotulo_semana, modos)
-    ja_na_base = len(conferencia)
-    total_semana = ja_na_base + len(cesta)
-    with c_meta:
-        detalhe = (f"{br_num(ja_na_base)} base + {br_num(len(cesta))} agora"
-                   if ja_na_base else f"{br_num(len(cesta))} escolhidas")
-        if meta:
-            falta = max(int(meta) - total_semana, 0)
-            st.progress(min(total_semana / meta, 1.0),
-                        text=f"{br_num(total_semana)} / {br_num(int(meta))} da curva · "
-                             + detalhe
-                             + (f" · faltam {br_num(falta)}" if falta else " · meta ok"))
-        else:
-            st.progress(0.0, text=detalhe + " · curva sem previsto")
-    with c_lim:
-        if st.button("Limpar programação", use_container_width=True, key="prog_limpar"):
-            st.session_state["prog_cesta"] = []
-            st.rerun()
+
+    # ------------------------------------------------------- cards de resumo
+    render_html(prog_cards(estado) + prog_trilha(estado["por_semana"]))
+
+    # ------------------------------------------------ semana, meta e ações
+    cfg_semana = _prog_semana_atual(tags, cache_key)
+    opcoes = prog_semanas(estado["por_semana"], cfg_semana)
+    with st.container(key="prog_faixa"):
+        c_sem, c_meta, c_lim = st.columns([1.3, 2.5, 1.2], vertical_alignment="bottom")
+        with c_sem:
+            semana = st.selectbox(
+                "Semana", opcoes, index=opcoes.index(cfg_semana),
+                format_func=lambda x: prog_rotulo(x, cfg_semana, estado["por_semana"]),
+                key="prog_semana",
+                help="As semanas passadas com TAG marcada também entram na lista.")
+        meta = prog_meta(tags, cache_key, semana)
+        rotulo_semana = f"Semana {semana}"
+        passada = semana < cfg_semana
+        conferencia = prog_conferencia(cache_key, rotulo_semana, modos)
+        ja_na_base = len(conferencia)
+        total_semana = ja_na_base + len(cesta)
+        with c_meta:
+            detalhe = (f"{br_num(ja_na_base)} base + {br_num(len(cesta))} agora"
+                       if ja_na_base else f"{br_num(len(cesta))} escolhidas")
+            if meta:
+                falta = max(int(meta) - total_semana, 0)
+                st.progress(min(total_semana / meta, 1.0),
+                            text=f"{br_num(total_semana)} / {br_num(int(meta))} da curva · "
+                                 + detalhe
+                                 + (f" · faltam {br_num(falta)}" if falta else " · meta ok"))
+            else:
+                st.progress(0.0, text=detalhe + " · curva sem previsto")
+        with c_lim:
+            if st.button("Limpar programação", use_container_width=True, key="prog_limpar"):
+                st.session_state["prog_cesta"] = []
+                st.rerun()
+
     # --- o que urge: teste de malha em cima e ainda sem semana
     urgentes = programacao.teste_urgente(aval, cfg_semana - 1)
     fora_da_cesta = urgentes[~urgentes["TAG"].isin(cesta)]
     if len(fora_da_cesta):
-        a1, a2 = st.columns([4, 1], vertical_alignment="center")
-        with a1:
-            st.warning(f"**{br_num(len(fora_da_cesta))} aptas com teste de malha em até "
-                       f"{programacao.JANELA_TESTE} semanas e sem programação** — "
-                       "montagem tem de anteceder o teste.")
-        with a2:
-            if st.button("Programar essas", key="prog_urg", use_container_width=True):
-                prog_juntar(fora_da_cesta["TAG"].tolist())
-                st.rerun()
+        with st.container(key="prog_alerta"):
+            a1, a2 = st.columns([3.6, 1], vertical_alignment="center")
+            with a1:
+                render_html(prog_alerta(len(fora_da_cesta), programacao.JANELA_TESTE))
+            with a2:
+                if st.button("Programar essas", key="prog_urg", use_container_width=True):
+                    prog_juntar(fora_da_cesta["TAG"].tolist())
+                    st.rerun()
 
-    # ----------------------------------------------------------- as colunas
-    esq, dir_ = st.columns([2.6, 1.5], gap="large")
-    with esq:
-        if ja_na_base:
-            r = programacao.resumo(conferencia)
-            risco = conferencia[conferencia["SITUACAO"] == "travada"]
-            titulo = (f"Já programado · {rotulo_semana} · "
-                      f"{br_num(ja_na_base)} TAGs"
-                      + (f" · {br_num(len(risco))} em risco" if len(risco) else " · ok"))
-            with st.expander(titulo, expanded=False):
-                st.caption("Régua aplicada ao já programado.")
+    # --- o que já está marcado na base para a semana escolhida
+    if ja_na_base:
+        r = programacao.resumo(conferencia)
+        risco = conferencia[conferencia["SITUACAO"] == "travada"]
+        titulo = (f"Já programado · {rotulo_semana} · {br_num(ja_na_base)} TAGs"
+                  + (f" · {br_num(len(risco))} em risco" if len(risco) else " · ok"))
+        with st.container(key="prog_base"):
+            with st.expander(titulo, expanded=passada):
+                st.caption("Régua aplicada ao já programado."
+                           if not passada else "Semana passada: consulta.")
                 render_html(
                     '<div class="prog-faixa">'
                     + prog_chip("ok", f'{br_num(r["livre"])} em ordem')
@@ -16181,122 +16349,137 @@ def render_programacao(cache_key: str = ""):
                     + "</div>")
                 prog_tabela(conferencia.sort_values("SITUACAO", ascending=False), "conferencia")
 
-        render_html(
-            '<div class="prog-faixa">'
-            + prog_chip("ok", f'{br_num(conta["livre"])} prontas')
-            + prog_chip("ressalva", f'{br_num(conta["ressalva"])} com aviso')
-            + prog_chip("trava", f'{br_num(conta["travada"])} impedidas')
-            + f'<small>de {br_num(conta["total"])} sem semana</small></div>')
-        f1, f2, f3, f4 = st.columns([1.3, 1.3, 1.3, 1])
-        familias = sorted(aval["DESCRICAO"].unique()) if not aval.empty else []
-        plantas = sorted(aval["PLANTA"].unique()) if not aval.empty else []
-        niveis = sorted(n for n in aval["NIVEL"].unique() if n) if not aval.empty else []
-        fases = sorted(f for f in aval["FASE"].unique() if f) if not aval.empty else []
-        with f1:
-            sel_fam = st.multiselect("Tipo", familias, key="prog_fam",
-                                     placeholder="Todos",
-                                     help="Descrição da base 01. Digite para achar.")
-        with f2:
-            sel_nivel = st.multiselect("Nível de prioridade", niveis, key="prog_nivel",
-                                       placeholder="Todos")
-        with f3:
-            sel_planta = st.multiselect("Planta", plantas, key="prog_planta",
-                                        placeholder="Todas")
-        with f4:
-            so_prio = st.toggle("Só prioritárias", key="prog_prio")
-        sel_fase = st.multiselect("Fase", fases, key="prog_fase", placeholder="Todas")
-        vista = aval
-        if sel_fam:
-            vista = vista[vista["DESCRICAO"].isin(sel_fam)]
-        if sel_nivel:
-            vista = vista[vista["NIVEL"].isin(sel_nivel)]
-        if sel_planta:
-            vista = vista[vista["PLANTA"].isin(sel_planta)]
-        if sel_fase:
-            vista = vista[vista["FASE"].isin(sel_fase)]
-        if so_prio:
-            vista = vista[vista["PRIORITARIA"]]
-        vista = vista[~vista["TAG"].isin(cesta)]
+    # ----------------------------------------------------------- as colunas
+    with st.container(key="prog_corpo"):
+        esq, dir_ = st.columns([2.7, 1.3], gap="large")
+        with esq:
+            render_html(
+                '<div class="prog-faixa">'
+                + prog_chip("ok", f'{br_num(conta["livre"])} prontas')
+                + prog_chip("ressalva", f'{br_num(conta["ressalva"])} com aviso')
+                + prog_chip("trava", f'{br_num(conta["travada"])} impedidas')
+                + f'<small>de {br_num(conta["total"])} sem semana</small></div>')
 
-        por = st.radio("Agrupar os atalhos por", ("Planta", "Subsistema"), horizontal=True,
-                       key="prog_agrupar", label_visibility="collapsed")
-        coluna_grupo = "PLANTA" if por == "Planta" else "SUBSISTEMA"
-        vazio = "sem planta" if por == "Planta" else ""
-        agrupaveis = vista[(vista["SITUACAO"] != "travada") & (vista[coluna_grupo] != vazio)]
-        atalhos = programacao.por_grupo(agrupaveis, coluna_grupo)[:6]
-        if atalhos:
-            st.caption(f"Atalhos por {por.lower()}:")
-            for grupo, coluna in zip(atalhos, st.columns(min(len(atalhos), 3))):
-                with coluna:
-                    if st.button(f"+ {grupo['nome']} · {br_num(grupo['livres'])}",
-                                 key=f"prog_g_{coluna_grupo}_{grupo['nome']}",
-                                 use_container_width=True,
-                                 help=f"{grupo['prioritarias']} prioritárias · "
-                                      f"áreas {', '.join(grupo['areas'][:3])}"):
-                        prog_juntar(grupo["tags"]["TAG"].tolist())
+            familias = sorted(aval["DESCRICAO"].unique()) if not aval.empty else []
+            plantas = sorted(aval["PLANTA"].unique()) if not aval.empty else []
+            niveis = sorted(n for n in aval["NIVEL"].unique() if n) if not aval.empty else []
+            fases = sorted(f for f in aval["FASE"].unique() if f) if not aval.empty else []
+            render_html('<div class="prog-secao">Filtros</div>')
+            with st.container(key="prog_filtros"):
+                f1, f2, f3, f4 = st.columns(4)
+                with f1:
+                    sel_fam = st.multiselect("Tipo", familias, key="prog_fam",
+                                             placeholder="Todos",
+                                             help="Descrição da base 01. Digite para achar.")
+                with f2:
+                    sel_nivel = st.multiselect("Nível", niveis, key="prog_nivel",
+                                               placeholder="Todos",
+                                               help="Subgrupo de prioridade da base 01.")
+                with f3:
+                    sel_planta = st.multiselect("Planta", plantas, key="prog_planta",
+                                                placeholder="Todas")
+                with f4:
+                    sel_fase = st.multiselect("Fase", fases, key="prog_fase",
+                                              placeholder="Todas")
+                g1, g2 = st.columns([1, 2.2], vertical_alignment="center")
+                with g1:
+                    so_prio = st.toggle("Só prioritárias · SSOP", key="prog_prio")
+                with g2:
+                    por = st.radio("Agrupar atalhos", ("Planta", "Subsistema"),
+                                   horizontal=True, key="prog_agrupar",
+                                   label_visibility="collapsed")
+            vista = aval
+            if sel_fam:
+                vista = vista[vista["DESCRICAO"].isin(sel_fam)]
+            if sel_nivel:
+                vista = vista[vista["NIVEL"].isin(sel_nivel)]
+            if sel_planta:
+                vista = vista[vista["PLANTA"].isin(sel_planta)]
+            if sel_fase:
+                vista = vista[vista["FASE"].isin(sel_fase)]
+            if so_prio:
+                vista = vista[vista["PRIORITARIA"]]
+            vista = vista[~vista["TAG"].isin(cesta)]
+
+            coluna_grupo = "PLANTA" if por == "Planta" else "SUBSISTEMA"
+            vazio = "sem planta" if por == "Planta" else ""
+            agrupaveis = vista[(vista["SITUACAO"] != "travada")
+                               & (vista[coluna_grupo] != vazio)]
+            atalhos = programacao.por_grupo(agrupaveis, coluna_grupo)[:6]
+            if atalhos:
+                render_html(f'<div class="prog-secao">Atalhos por {esc(por.lower())}</div>')
+                with st.container(key="prog_atalhos"):
+                    for grupo, coluna in zip(atalhos, st.columns(min(len(atalhos), 3))):
+                        with coluna:
+                            if st.button(f"+ {grupo['nome']} · {br_num(grupo['livres'])}",
+                                         key=f"prog_g_{coluna_grupo}_{grupo['nome']}",
+                                         use_container_width=True,
+                                         help=f"{grupo['prioritarias']} prioritárias · "
+                                              f"áreas {', '.join(grupo['areas'][:3])}"):
+                                prog_juntar(grupo["tags"]["TAG"].tolist())
+                                st.rerun()
+
+            livres = vista[vista["SITUACAO"] == "livre"]
+            ressalva = vista[vista["SITUACAO"] == "ressalva"]
+            travadas = vista[vista["SITUACAO"] == "travada"]
+            # só o que está apto: é daqui que ele parte. As travadas continuam a
+            # um clique, embaixo, para quando ele quiser saber o que falta nelas.
+            aba1, aba2 = st.tabs([f"Prontas · {br_num(len(livres))}",
+                                  f"Com aviso · {br_num(len(ressalva))}"])
+            for aba, bloco, chave, ajuda in (
+                    (aba1, livres, "livres", "Aptas. Ordem: teste de malha, prioridade, nível."),
+                    (aba2, ressalva, "ressalva", "Aptas com aviso não impeditivo.")):
+                with aba:
+                    st.caption(ajuda)
+                    marcadas = prog_tabela(bloco, chave)
+                    if marcadas and st.button(
+                            f"Adicionar {br_num(len(marcadas))} à programação",
+                            key=f"prog_add_{chave}", type="primary"):
+                        prog_juntar(marcadas)
                         st.rerun()
+            if len(travadas):
+                with st.expander(f"Impedidas · {br_num(len(travadas))}"):
+                    st.caption("Fora da escolha. Motivo na coluna Pendências.")
+                    prog_tabela(travadas, "travadas")
 
-        livres = vista[vista["SITUACAO"] == "livre"]
-        ressalva = vista[vista["SITUACAO"] == "ressalva"]
-        travadas = vista[vista["SITUACAO"] == "travada"]
-        # só o que está apto: é daqui que ele parte. As travadas continuam a
-        # um clique, embaixo, para quando ele quiser saber o que falta nelas.
-        aba1, aba2 = st.tabs([f"Prontas · {br_num(len(livres))}",
-                              f"Com aviso · {br_num(len(ressalva))}"])
-        for aba, bloco, chave, ajuda in (
-                (aba1, livres, "livres", "Aptas. Ordem: teste de malha, prioridade, nível."),
-                (aba2, ressalva, "ressalva", "Aptas com aviso não impeditivo.")):
-            with aba:
-                st.caption(ajuda)
-                marcadas = prog_tabela(bloco, chave)
-                if marcadas and st.button(
-                        f"Adicionar {br_num(len(marcadas))} à programação",
-                        key=f"prog_add_{chave}", type="primary"):
-                    prog_juntar(marcadas)
+        # -------------------------------------------------------- a cesta
+        with dir_:
+            aviso = st.session_state.pop("prog_aviso", "")
+            if aviso:
+                st.success(aviso)
+            # o plano da semana é o que já está na base MAIS o que ele acabou de
+            # escolher: é esse conjunto que o painel retrata
+            escolhidas = aval[aval["TAG"].isin(cesta)]
+            plano = (pd.concat([conferencia, escolhidas], ignore_index=True)
+                     if ja_na_base else escolhidas)
+            render_html(prog_painel(plano, meta, semana, len(cesta),
+                                    extra=prog_historico(programacao.historico(tags))))
+            falta_meta = int(meta) - len(plano) if meta else 0
+            if falta_meta > 0:
+                if st.button(f"Completar meta · +{br_num(falta_meta)} mais urgentes",
+                             key="prog_completar", use_container_width=True):
+                    prog_juntar(programacao.sugerir(aval, falta_meta, cesta))
                     st.rerun()
-        if len(travadas):
-            with st.expander(f"Impedidas · {br_num(len(travadas))}"):
-                st.caption("Fora da escolha. Motivo na coluna Pendências.")
-                prog_tabela(travadas, "travadas")
-
-    # ------------------------------------------------------------ a cesta
-    with dir_:
-        aviso = st.session_state.pop("prog_aviso", "")
-        if aviso:
-            st.success(aviso)
-        # o plano da semana é o que já está na base MAIS o que ele acabou de
-        # escolher: é esse conjunto que o painel retrata
-        escolhidas = aval[aval["TAG"].isin(cesta)]
-        plano = (pd.concat([conferencia, escolhidas], ignore_index=True)
-                 if ja_na_base else escolhidas)
-        render_html(prog_painel(plano, meta, semana, len(cesta))
-                    + prog_historico(programacao.historico(tags)))
-        falta_meta = int(meta) - len(plano) if meta else 0
-        if falta_meta > 0:
-            if st.button(f"Completar meta · +{br_num(falta_meta)} mais urgentes",
-                         key="prog_completar", use_container_width=True):
-                prog_juntar(programacao.sugerir(aval, falta_meta, cesta))
-                st.rerun()
-        pulados = programacao.niveis_pulados(aval, list(plano["TAG"]))
-        if pulados:
-            st.warning("Fora de ordem: nível "
-                       + ", ".join(f"{n} ({br_num(q)} aptas)" for n, q in pulados)
-                       + " pendente.")
-        if cesta:
-            with st.expander(f"Escolhidas agora · {br_num(len(cesta))}"):
-                for tag in cesta[:200]:
-                    linha = st.columns([3, 1])
-                    linha[0].markdown(f"`{tag}`")
-                    if linha[1].button("✕", key=f"prog_rm_{tag}"):
-                        st.session_state["prog_cesta"] = [t for t in cesta if t != tag]
-                        st.rerun()
-            st.download_button(
-                "Exportar Excel", programacao.para_excel(aval, cesta, f"Semana {semana}"),
-                file_name=f"programacao_semana_{semana}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="prog_xlsx", type="primary", use_container_width=True)
-            if st.button("Salvar no Gplan", key="prog_salvar", use_container_width=True):
-                _prog_salvar(f"Semana {semana}", cesta, aval, meta)
+            pulados = programacao.niveis_pulados(aval, list(plano["TAG"]))
+            if pulados:
+                st.warning("Fora de ordem: nível "
+                           + ", ".join(f"{n} ({br_num(q)} aptas)" for n, q in pulados)
+                           + " pendente.")
+            if cesta:
+                with st.expander(f"Escolhidas agora · {br_num(len(cesta))}"):
+                    for tag in cesta[:200]:
+                        linha = st.columns([3, 1])
+                        linha[0].markdown(f"`{tag}`")
+                        if linha[1].button("✕", key=f"prog_rm_{tag}"):
+                            st.session_state["prog_cesta"] = [t for t in cesta if t != tag]
+                            st.rerun()
+                st.download_button(
+                    "Exportar Excel", programacao.para_excel(aval, cesta, f"Semana {semana}"),
+                    file_name=f"programacao_semana_{semana}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="prog_xlsx", type="primary", use_container_width=True)
+                if st.button("Salvar no Gplan", key="prog_salvar", use_container_width=True):
+                    _prog_salvar(f"Semana {semana}", cesta, aval, meta)
 
 
 def _prog_semana_atual(tags: pd.DataFrame, cache_key: str) -> int:
