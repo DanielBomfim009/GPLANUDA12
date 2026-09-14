@@ -1331,9 +1331,16 @@ svg.lg-mark { width:44px; height:44px; flex:none;
    nasce do tamanho do texto, e width:100% dentro dele media esses 63 px */
 [data-testid="stForm"] [data-testid="stElementContainer"] { width:100% !important; }
 [data-testid="stFormSubmitButton"] { width:100%; margin-top:4px; }
+/* O azul vinha do primaryColor do config.toml, que é fixo, e o texto vinha
+   branco nos dois temas: 2,98:1 no escuro -- abaixo do mínimo de leitura. O
+   fundo passa a ser o token (clareia no escuro, escurece no claro) e o texto,
+   a cor de ficar SOBRE cor: escura no tema escuro, branca no claro. */
 [data-testid="stFormSubmitButton"] button { width:100%; border-radius:10px !important;
   font-weight:700 !important; letter-spacing:.2px; transition:transform .12s ease,
-  box-shadow .12s ease; }
+  box-shadow .12s ease;
+  background:var(--accent-blue) !important; border-color:var(--accent-blue) !important;
+  color:var(--sobre-cor) !important; }
+[data-testid="stFormSubmitButton"] button p { color:var(--sobre-cor) !important; }
 [data-testid="stFormSubmitButton"] button:hover { transform:translateY(-1px);
   box-shadow:0 8px 22px rgba(var(--rgb-azul),.32); }
 [data-testid="stFormSubmitButton"] button:active { transform:translateY(0); }
@@ -1520,6 +1527,26 @@ def inject_css():
         }
         [data-testid="stHeader"] { background: transparent !important;
           height: 44px !important; min-height: 44px !important; }
+        /* Os icones do Streamlit nascem com a cor de texto do tema fixo do
+           config.toml (#f4f6fb). No tema claro viram branco sobre branco:
+           medidos em 1,05:1 (a seta de recolher a lateral) e 1,08:1 (as
+           setas do "Meu perfil"). Passam a sair do token. */
+        [data-testid="stSidebarCollapseButton"] [data-testid="stIconMaterial"],
+        [data-testid="stSidebarCollapsedControl"] [data-testid="stIconMaterial"],
+        [data-testid="stExpander"] summary [data-testid="stIconMaterial"],
+        [data-testid="stExpander"] summary svg {
+          color: var(--text-2) !important; fill: var(--text-2) !important; }
+        [data-testid="stExpander"] summary:hover [data-testid="stIconMaterial"] {
+          color: var(--text-1) !important; }
+        /* O olho de mostrar a senha nasce com a cor de texto do tema fixo do
+           Streamlit (#f4f6fb): no tema claro e um icone branco sobre campo
+           branco -- invisivel, contraste 1,01:1. */
+        [data-testid="stTextInput"] button,
+        [data-testid="stTextInput"] button [data-testid="stIconMaterial"] {
+          color: var(--text-2) !important; }
+        [data-testid="stTextInput"] button:hover,
+        [data-testid="stTextInput"] button:hover [data-testid="stIconMaterial"] {
+          color: var(--text-1) !important; }
         /* O tema do Streamlit vem fixo em "dark" do config.toml e nao da
            para troca-lo por sessao -- o set_option e global do processo, e
            na 8501 um usuario mudaria a tela de todos. Entao os componentes
