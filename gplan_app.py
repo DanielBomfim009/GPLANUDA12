@@ -2722,16 +2722,66 @@ def inject_css():
         div[data-testid="stPopoverBody"] [data-testid="stAlert"] {
           padding:8px 10px !important; border-radius:9px !important; margin:2px 0 6px; }
 
+        /* ---- aviso de mudancas importantes ----
+           Anatomia da referencia que ele mandou (shadcn AlertDialog): icone
+           em circulo no topo, titulo centrado, selo da versao, e o corpo num
+           fundo levemente rebaixado com os dois botoes. */
+        .avs-topo { display:flex; flex-direction:column; align-items:center;
+          gap:10px; padding:8px 8px 18px; text-align:center; }
+        .avs-selo-ic { width:48px; height:48px; border-radius:50%;
+          display:flex; align-items:center; justify-content:center;
+          background:rgba(var(--rgb-azul),.14); color:var(--accent-blue); }
+        .avs-selo-ic .fxi { font-size:24px; }
+        .avs-topo h3 { margin:0; font-size:17px; font-weight:700;
+          color:var(--text-1); letter-spacing:-.2px; }
+        .avs-selo { font-size:11px; font-weight:600; padding:3px 10px;
+          border-radius:99px; background:rgba(var(--rgb-teal),.14);
+          color:var(--txt-teal); border:1px solid rgba(var(--rgb-teal),.35);
+          font-family:ui-monospace,Consolas,monospace; }
+        .avs-corpo { background:rgba(var(--rgb-tinta),.04);
+          border-top:1px solid var(--border-color);
+          border-radius:12px; padding:16px 16px 6px; margin:0 -4px 4px; }
+        .avs-corpo p { margin:0 0 12px; font-size:13px; line-height:1.5;
+          color:var(--text-2); text-align:center; }
+        .avs-l { display:grid; grid-template-columns:26px 1fr auto;
+          align-items:center; gap:2px 10px; padding:9px 0;
+          border-bottom:1px solid rgba(var(--rgb-tinta),.06); }
+        .avs-l:last-child { border-bottom:0; }
+        .avs-ic { grid-row:span 2; width:26px; height:26px; border-radius:8px;
+          display:flex; align-items:center; justify-content:center;
+          background:rgba(var(--rgb-tinta),.06); color:var(--text-2); }
+        .avs-ic .fxi { font-size:15px; }
+        .avs-c { font-size:13px; font-weight:600; color:var(--text-1); }
+        .avs-n { font-size:15px; font-weight:700; color:var(--text-1);
+          font-variant-numeric:tabular-nums; }
+        .avs-d { grid-column:2 / span 2; font-size:11.5px; color:var(--text-3); }
+        /* os dois botões do aviso: o de confirmar é o que tem peso */
+        .st-key-avs_depois button, .st-key-avs_ok button {
+          height:42px !important; border-radius:10px !important;
+          font-weight:600 !important; }
+        .st-key-avs_ok button {
+          background:var(--accent-blue) !important;
+          border-color:var(--accent-blue) !important;
+          color:var(--sobre-cor) !important; }
+        .st-key-avs_ok button p { color:var(--sobre-cor) !important; }
+        .st-key-avs_ok button:hover {
+          filter:brightness(1.06); }
+
         /* ---- histórico de revisão, na ficha da TAG ---- */
-        .fx-hist-l { display:grid; grid-template-columns:64px 1fr; gap:2px 10px;
-          padding:7px 0; border-bottom:1px solid rgba(var(--rgb-tinta),0.06); }
+        .fx-hist-l { display:grid; grid-template-columns:92px 128px 1fr;
+          align-items:center; gap:12px; padding:8px 2px;
+          border-bottom:1px solid rgba(var(--rgb-tinta),0.06); }
+        @media (max-width:820px) {
+          .fx-hist-l { grid-template-columns:82px 1fr; gap:2px 10px; }
+          .fx-hist-d { grid-row:span 2; }
+        }
         .fx-hist-l:last-child { border-bottom:0; }
-        .fx-hist-d { grid-row:span 2; font-size:11px; color:var(--text-3);
-          font-family:ui-monospace,Consolas,monospace; padding-top:2px; }
+        .fx-hist-d { font-size:11.5px; color:var(--text-3);
+          font-family:ui-monospace,Consolas,monospace; }
         .fx-hist-c { font-size:10.5px; letter-spacing:.07em; text-transform:uppercase;
           color:var(--text-2); font-family:ui-monospace,Consolas,monospace; }
         .fx-hist-v { display:flex; align-items:center; gap:8px; font-size:12.5px;
-          flex-wrap:wrap; }
+          flex-wrap:wrap; min-width:0; }
         .fx-hist-v i { font-style:normal; color:var(--text-3); }
         .fx-hist-v i::after { content:"→"; margin-left:8px;
           color:var(--text-3); display:inline-block; }
@@ -6908,6 +6958,127 @@ def fx_historico(tag_id: str) -> str:
                            f"{'s' if len(linhas) != 1 else ''}")
 
 
+# Os tres assuntos que ele quer ser avisado (14/09/2026). Nao e a mesma
+# lista do historico da ficha: "Situacao final" muda junto com a calibracao e
+# duplicaria o aviso.
+AVISO_CAMPOS = ("Localização", "Calibração", "Montagem")
+AVISO_ICONE = {"Localização": "caixa", "Calibração": "ok", "Montagem": "tag"}
+
+
+@st.cache_data(show_spinner=False, max_entries=4)
+def mudancas_importantes(cache_key: str) -> dict:
+    """As mudancas de localizacao, calibracao e montagem da ultima carga.
+
+    A base nao guarda "desde quando": o que existe e a data de cada
+    movimentacao. O recorte e o DIA mais recente que tem movimentacao de um
+    desses tres campos -- é o que a atualizacao mais nova trouxe.
+    """
+    mov = load_data(cache_key)[11]
+    if mov.empty or "CAMPO" not in mov.columns:
+        return {}
+    quer = mov[mov["CAMPO"].astype(str).str.strip().isin(AVISO_CAMPOS)].copy()
+    if quer.empty:
+        return {}
+    quer["_dt"] = pd.to_datetime(quer["DATA"], dayfirst=True, errors="coerce")
+    quer = quer.dropna(subset=["_dt"])
+    if quer.empty:
+        return {}
+    ultimo_dia = quer["_dt"].dt.normalize().max()
+    doa = quer[quer["_dt"].dt.normalize() == ultimo_dia]
+    por_campo = {}
+    for campo in AVISO_CAMPOS:
+        bloco = doa[doa["CAMPO"].astype(str).str.strip() == campo]
+        if bloco.empty:
+            continue
+        destinos = (bloco["PARA"].astype(str).str.strip()
+                    .value_counts().head(3).items())
+        por_campo[campo] = {
+            "total": int(len(bloco)),
+            "tags": sorted({str(t).strip() for t in bloco["OBJETO"]})[:200],
+            "destinos": [(d, int(n)) for d, n in destinos],
+        }
+    if not por_campo:
+        return {}
+    total = sum(v["total"] for v in por_campo.values())
+    return {
+        "dia": ultimo_dia.strftime("%d/%m/%Y"),
+        "total": total,
+        "por_campo": por_campo,
+        # o que identifica ESTA leva de mudancas, para nao avisar duas vezes
+        "marca": f"{ultimo_dia.date()}|{total}",
+    }
+
+
+def aviso_ja_visto(marca: str) -> bool:
+    """Se esta leva de mudanças já foi confirmada neste navegador."""
+    if st.session_state.get("aviso_confirmado") == marca:
+        return True
+    try:
+        return st.context.cookies.get("gplan_aviso") == marca
+    except Exception:
+        return False
+
+
+def aviso_confirmar(marca: str) -> None:
+    """Agenda a marca desta leva.
+
+    O cookie NÃO pode ser escrito aqui: o st.rerun() logo depois derruba o
+    componente antes de ele montar, e a marca se perdia -- medido, o cookie
+    nunca chegava. Sai na execução seguinte, com a página já desenhada.
+    """
+    st.session_state["aviso_confirmado"] = marca
+    st.session_state["aviso_gravar"] = marca
+
+
+def aviso_gravar_pendente() -> None:
+    """Escreve o cookie agendado, uma vez, numa execução normal."""
+    marca = st.session_state.pop("aviso_gravar", "")
+    if not marca:
+        return
+    st.components.v1.html(
+        "<script>try{parent.document.cookie="
+        f"'gplan_aviso={marca};path=/;max-age=31536000;samesite=lax'}}catch(e){{}}</script>",
+        height=0)
+
+
+@st.dialog("Mudanças importantes na base", width="small")
+def dialogo_mudancas(dados: dict):
+    """O aviso. Mesma anatomia da referência que ele mandou: ícone em
+    círculo, título, selo, descrição e dois botões lado a lado."""
+    linhas = ""
+    for campo, v in dados["por_campo"].items():
+        destinos = " · ".join(f"{br_num(n)} {esc(d.lower())}"
+                              for d, n in v["destinos"] if d and d.lower() != "nan")
+        linhas += (
+            '<div class="avs-l"><span class="avs-ic">'
+            f'{fx_svg(AVISO_ICONE.get(campo, "relogio"))}</span>'
+            f'<span class="avs-c">{esc(campo)}</span>'
+            f'<span class="avs-n">{br_num(v["total"])}</span>'
+            + (f'<span class="avs-d">{destinos}</span>' if destinos else "")
+            + "</div>")
+    render_html(
+        '<div class="avs">'
+        '<div class="avs-topo">'
+        f'<div class="avs-selo-ic">{fx_svg("alerta")}</div>'
+        f'<span class="avs-selo">Atualização de {esc(dados["dia"])}</span>'
+        "</div>"
+        '<div class="avs-corpo">'
+        f'<p>{br_num(dados["total"])} TAGs mudaram de estado nos assuntos que '
+        "decidem o trabalho. Veja de onde foi para onde na ficha de cada uma.</p>"
+        f'<div class="avs-lista">{linhas}</div></div></div>')
+    e, d = st.columns(2)
+    with e:
+        if st.button("Perguntar depois", use_container_width=True,
+                     key="avs_depois"):
+            st.session_state["aviso_adiado"] = True
+            st.rerun()
+    with d:
+        if st.button("Confirmado", type="primary", use_container_width=True,
+                     key="avs_ok"):
+            aviso_confirmar(dados["marca"])
+            st.rerun()
+
+
 def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
                    tags: pd.DataFrame, com_cabecalho: bool = True,
                    espera_por_doc: dict | None = None,
@@ -7116,8 +7287,11 @@ def tag_ficha_html(tag_id: str, resumo: pd.DataFrame, esperados: pd.DataFrame,
                     f'<div class="fx-kpis">{kpis}</div><div class="fx-dados">{dados}</div>')
         + fx_painel("Relatórios da tag", "folha", tabela,
                     conta=f"{br_num(esp)} previstos", classe_corpo="zero")
+        # o histórico mora embaixo dos relatórios, na mesma largura: na
+        # coluna estreita cada mudança quebrava em duas linhas
+        + fx_historico(tag_id)
         + f'</div><div class="fx-col">{avanco}{bloco_campo}{bloco_prioridade}'
-        f'{bloco_fornecimento}{fx_historico(tag_id)}{mov}{acoes}</div></div></div>'
+        f'{bloco_fornecimento}{mov}{acoes}</div></div></div>'
     )
 
 
@@ -17420,6 +17594,14 @@ def main():
         st.error("Este login não tem nenhuma aba liberada. Fale com um "
                  "administrador em Acessos.")
         st.stop()
+
+    # O aviso das mudancas importantes abre uma vez por leva: "Confirmado"
+    # guarda no navegador, "Perguntar depois" so adia ate a proxima visita.
+    aviso_gravar_pendente()
+    if not st.session_state.get("aviso_adiado"):
+        _mud = mudancas_importantes(cache_key)
+        if _mud and not aviso_ja_visto(_mud["marca"]):
+            dialogo_mudancas(_mud)
 
     nav = st.navigation(secoes, position="sidebar")
     expandir_menu_lateral()
