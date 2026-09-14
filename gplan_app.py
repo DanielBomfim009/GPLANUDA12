@@ -15878,8 +15878,7 @@ def prog_tabela(aval: pd.DataFrame, chave: str) -> list:
         return []
     vista = pd.DataFrame({
         "TAG": aval["TAG"],
-        "Descrição": aval["DESCRICAO"],
-        "Tipo": aval["FAMILIA"],
+        "Tipo": aval["DESCRICAO"],
         "Prio": aval["PRIORITARIA"].map({True: "★", False: ""}),
         "Nível": aval["NIVEL"],
         "Teste malha": aval["TESTE_MALHA"],
@@ -15896,7 +15895,8 @@ def prog_tabela(aval: pd.DataFrame, chave: str) -> list:
         on_select="rerun", selection_mode="multi-row", key=f"prog_tab_{chave}",
         column_config={
             "TAG": st.column_config.TextColumn(width="medium"),
-            "Descrição": st.column_config.TextColumn(width="medium"),
+            "Tipo": st.column_config.TextColumn(
+                width="large", help="Descrição da base 01 -- é ela que diz o tipo"),
             "Prio": st.column_config.TextColumn("Prio", width="small",
                                                 help="SSOP Prioritário = SIM"),
             "Nível": st.column_config.TextColumn(width="small",
@@ -16012,7 +16012,7 @@ def prog_painel(plano, meta, semana: int, escolhidas: int) -> str:
         '<div class="pnl-bloco"><div class="pnl-cab">Avisos</div>'
         + prog_barras(avisos, "#f5b34a", total) + "</div>") if avisos else ""
 
-    tipos = plano["FAMILIA"].value_counts().head(4).items()
+    tipos = plano["DESCRICAO"].value_counts().head(4).items()
     composicao = ('<div class="pnl-bloco"><div class="pnl-cab">Composição</div>'
                   + prog_barras([(t, int(n)) for t, n in tipos], "#60a5fa", total) + "</div>")
 
@@ -16188,13 +16188,14 @@ def render_programacao(cache_key: str = ""):
             + prog_chip("trava", f'{br_num(conta["travada"])} impedidas')
             + f'<small>de {br_num(conta["total"])} sem semana</small></div>')
         f1, f2, f3, f4 = st.columns([1.3, 1.3, 1.3, 1])
-        familias = sorted(aval["FAMILIA"].unique()) if not aval.empty else []
+        familias = sorted(aval["DESCRICAO"].unique()) if not aval.empty else []
         plantas = sorted(aval["PLANTA"].unique()) if not aval.empty else []
         niveis = sorted(n for n in aval["NIVEL"].unique() if n) if not aval.empty else []
         fases = sorted(f for f in aval["FASE"].unique() if f) if not aval.empty else []
         with f1:
             sel_fam = st.multiselect("Tipo", familias, key="prog_fam",
-                                     placeholder="Todos")
+                                     placeholder="Todos",
+                                     help="Descrição da base 01. Digite para achar.")
         with f2:
             sel_nivel = st.multiselect("Nível de prioridade", niveis, key="prog_nivel",
                                        placeholder="Todos")
@@ -16206,7 +16207,7 @@ def render_programacao(cache_key: str = ""):
         sel_fase = st.multiselect("Fase", fases, key="prog_fase", placeholder="Todas")
         vista = aval
         if sel_fam:
-            vista = vista[vista["FAMILIA"].isin(sel_fam)]
+            vista = vista[vista["DESCRICAO"].isin(sel_fam)]
         if sel_nivel:
             vista = vista[vista["NIVEL"].isin(sel_nivel)]
         if sel_planta:

@@ -60,51 +60,6 @@ INFRA_RESSALVA = 0.80
 # ---------------------------------------------------------------- veredito
 OK, RESSALVA, TRAVA, SEM_DADO = "ok", "ressalva", "trava", "sem_dado"
 
-# Pela letra do instrumento (convenção ISA). Serve só para agrupar a tela:
-# o que não estiver aqui aparece como "Outros", sem prejuízo nenhum.
-FAMILIAS = {
-    "CJ": "Caixa de junção", "CJA": "Caixa de junção", "CJD": "Caixa de junção",
-    "CJP": "Caixa de junção", "CJS": "Caixa de junção", "CFF": "Caixa de junção",
-    "PIT": "Transmissor", "FIT": "Transmissor", "TIT": "Transmissor",
-    "LIT": "Transmissor", "PDIT": "Transmissor", "AT": "Transmissor",
-    "VT": "Transmissor de vibração", "AIT": "Analisador",
-    "AST": "Chave", "LSH": "Chave", "LSL": "Chave", "PSH": "Chave",
-    "PSL": "Chave", "XSH": "Chave", "TSH": "Chave", "FSL": "Chave",
-    "HS": "Chave manual", "ZSH": "Chave de posição", "ZSL": "Chave de posição",
-    "PI": "Indicador", "TI": "Indicador", "LI": "Indicador", "FI": "Indicador",
-    "PDI": "Indicador", "LG": "Visor de nível", "FG": "Visor de fluxo",
-    "TE": "Termoelemento", "FE": "Elemento de vazão", "TW": "Poço termométrico",
-    "VE": "Sensor de vibração", "XV": "Válvula on-off", "FV": "Válvula de controle",
-    "PV": "Válvula de controle", "TV": "Válvula de controle", "LV": "Válvula de controle",
-    "PSV": "Válvula de segurança", "XY": "Solenoide", "PY": "Conversor",
-    "FY": "Conversor", "TY": "Conversor", "LY": "Conversor",
-    # Os 55 prefixos que caíam em "Outros" (856 TAGs). O nome saiu da própria
-    # descrição da base 01, encurtado -- agrupar por família só serve à tela.
-    "CJV": "Caixa de junção", "CBF": "Caixa de junção", "CJT": "Caixa de junção",
-    "CBZ": "Caixa de junção", "CBT": "Caixa de junção",
-    "YST": "Detector", "BSL": "Detector", "OST": "Detector",
-    "HV": "Válvula de controle", "PCV": "Válvula de controle",
-    "FCV": "Válvula de controle", "PDV": "Válvula de controle",
-    "VM": "Válvula on-off", "PAV": "Válvula de segurança", "PRV": "Válvula de segurança",
-    "TJT": "Transmissor", "PT": "Transmissor", "TT": "Transmissor",
-    "PDT": "Transmissor", "LT": "Transmissor", "FT": "Transmissor",
-    "IIT": "Transmissor", "EIT": "Transmissor", "ST": "Transmissor",
-    "ZIT": "Transmissor de posição", "ZT": "Transmissor de posição",
-    "FO": "Orifício de restrição",
-    "FZ": "Posicionador", "HZ": "Posicionador", "PZ": "Posicionador",
-    "ZV": "Posicionador", "LZ": "Posicionador", "TZ": "Posicionador",
-    "PDZ": "Posicionador",
-    "HSS": "Botoeira", "ESD": "Botoeira", "YS": "Botoeira",
-    "PN": "Painel", "PNI": "Painel",
-    "XSHL": "Solenoide", "HY": "Solenoide",
-    "YAYL": "Alarme", "PDA": "Pote de ar",
-    "VSH": "Chave", "LSLL": "Chave",
-    "SE": "Sensor", "ZE": "Sensor",
-    "AP": "Analisador", "AR": "Analisador", "AE": "Analisador",
-    "SIC": "Controlador", "ZC": "Controlador", "SY": "Controlador",
-    "ZI": "Indicador", "SI": "Indicador",
-}
-
 
 @dataclass
 class Fonte:
@@ -119,9 +74,15 @@ class Fonte:
     infra: dict = field(default_factory=dict)        # sigla da planta -> 0..1
 
 
-def familia(tag: str) -> str:
-    prefixo = "".join(c for c in str(tag).split("-")[0] if c.isalpha()).upper()
-    return FAMILIAS.get(prefixo, "Outros")
+def tipo(descricao: object) -> str:
+    """O tipo do instrumento é a DESCRICAO da base 01, e nada mais.
+
+    São 112 textos fechados para as 5.098 TAGs -- a própria obra já
+    classificou. Só normaliza o espaço em branco, porque algumas descrições
+    vêm da planilha com quebra de linha no meio.
+    """
+    texto = " ".join(_texto(descricao).split())
+    return texto or "sem descrição"
 
 
 def planta_do_desenho(desenho: object) -> str:
@@ -377,7 +338,7 @@ def _modos(escolha) -> dict:
 def avaliar(f: Fonte, ligados: list[str] | None = None) -> pd.DataFrame:
     """Uma linha por TAG candidata, com o veredito e o porquê.
 
-    Colunas: TAG, DESCRICAO, FAMILIA, AREA, PLANTA, PRIORITARIA, SITUACAO
+    Colunas: TAG, DESCRICAO, AREA, PLANTA, PRIORITARIA, SITUACAO
     ("livre", "ressalva" ou "travada"), MOTIVOS (lista de (chave, situação,
     texto)) e BLOQUEIOS (só o que pesou).
     """
@@ -417,8 +378,7 @@ def _avaliar(f: Fonte, base: pd.DataFrame, modos) -> pd.DataFrame:
         loc = f._locacao_por_tag.get(tag) or {}
         linhas.append({
             "TAG": tag,
-            "DESCRICAO": _texto(linha.get("DESCRICAO")),
-            "FAMILIA": familia(tag),
+            "DESCRICAO": tipo(linha.get("DESCRICAO")),
             "AREA": _texto(loc.get("AREA")) or "sem área",
             "PLANTA": planta_do_desenho(loc.get("LOCACAO")) or "sem planta",
             "MALHA": _texto(linha.get("MALHA")),
@@ -436,7 +396,7 @@ def _avaliar(f: Fonte, base: pd.DataFrame, modos) -> pd.DataFrame:
             "RESSALVAS": ressalvas,
         })
     if not linhas:
-        return pd.DataFrame(columns=["TAG", "DESCRICAO", "FAMILIA", "AREA", "PLANTA",
+        return pd.DataFrame(columns=["TAG", "DESCRICAO", "AREA", "PLANTA",
                                      "MALHA", "PRIORITARIA", "NIVEL", "FASE", "SISTEMA",
                                      "SUBSISTEMA", "TESTE_MALHA", "SEMANA", "MONTAGEM",
                                      "SITUACAO", "MOTIVOS", "BLOQUEIOS", "RESSALVAS"])
@@ -556,7 +516,7 @@ def para_excel(aval: pd.DataFrame, escolhidas: list[str], semana: str) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = semana.replace(" ", "_")[:28] or "Programacao"
-    cabecalho = ["TAG", "DESCRIÇÃO", "TIPO", "ÁREA", "PLANTA", "MALHA",
+    cabecalho = ["TAG", "TIPO", "ÁREA", "PLANTA", "MALHA",
                  "PRIORITÁRIA", "SEMANA", "SITUAÇÃO", "OBSERVAÇÃO"]
     ws.append(cabecalho)
     for celula in ws[1]:
@@ -564,10 +524,10 @@ def para_excel(aval: pd.DataFrame, escolhidas: list[str], semana: str) -> bytes:
         celula.fill = PatternFill("solid", fgColor="0F766E")
         celula.alignment = Alignment(vertical="center")
     for r in escolha.to_dict("records"):
-        ws.append([r["TAG"], r["DESCRICAO"], r["FAMILIA"], r["AREA"], r["PLANTA"],
+        ws.append([r["TAG"], r["DESCRICAO"], r["AREA"], r["PLANTA"],
                    r["MALHA"], "SIM" if r["PRIORITARIA"] else "NÃO", semana,
                    r["SITUACAO"], "; ".join(r["RESSALVAS"] + r["BLOQUEIOS"])])
-    larguras = (16, 44, 18, 10, 12, 14, 12, 12, 12, 46)
+    larguras = (16, 44, 10, 12, 14, 12, 12, 12, 46)
     for i, largura in enumerate(larguras, start=1):
         ws.column_dimensions[ws.cell(1, i).column_letter].width = largura
     ws.freeze_panes = "A2"
@@ -587,7 +547,7 @@ def para_guardar(semana: str, escolhidas: list[str], aval: pd.DataFrame,
         "meta": meta,
         "quantidade": len(escolhidas),
         "tags": [
-            {"tag": r["TAG"], "tipo": r["FAMILIA"], "area": r["AREA"],
+            {"tag": r["TAG"], "tipo": r["DESCRICAO"], "area": r["AREA"],
              "planta": r["PLANTA"], "prioritaria": bool(r["PRIORITARIA"]),
              "situacao": r["SITUACAO"],
              "ressalvas": r["RESSALVAS"], "bloqueios": r["BLOQUEIOS"]}
