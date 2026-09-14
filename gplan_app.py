@@ -7713,6 +7713,12 @@ def cert_num(valor) -> float:
     return 0.0 if v != v else v
 
 
+def _texto_etapa(v) -> str:
+    """O status de uma etapa do cabo, limpo. Vazio quando a base não diz."""
+    t = str(v).strip()
+    return "" if t.lower() in ("nan", "none", "-", "0") else t
+
+
 def _cert_circuito(linha, mont: dict) -> dict:
     ponta = str(linha["ORIGEM"]).strip()
     m = mont.get(ponta, {})
@@ -7726,6 +7732,13 @@ def _cert_circuito(linha, mont: dict) -> dict:
             "pct_lanc": round(cert_num(linha["PCT_LANC"] if "PCT_LANC" in linha
                                        else linha["PCT"]), 1),
             "m_lanc": cert_metro_medido(linha),
+            # as etapas que compoem o avanco real (a planilha pesa 75/10/10/5).
+            # Sem elas, "Em Andamento 75%" nao dizia se o que falta e o
+            # lancamento ou a conexao/teste (usuario, 14/09/2026).
+            "p_conex": round(cert_num(linha.get("PCT_CONEXAO")), 1),
+            "ponta1": _texto_etapa(linha.get("PONTA1")),
+            "ponta2": _texto_etapa(linha.get("PONTA2")),
+            "teste": _texto_etapa(linha.get("TESTE")),
             # o circuito de potência traz -P no fim do código; a coluna TIPO não
             # separa os dois -- ela diz o sistema, não a função do cabo
             "pot": bool(re.search(r"-P\d*$", str(linha["CIRCUITO"]).strip(), re.I)),
@@ -8775,10 +8788,27 @@ const nivel = v => /^(PN|PL|PCC)/.test(v) ? 2 : /^(CJ|CFF)/.test(v) ? 1 : 0;
 const percurso = c => c.de && c.para ? [c.de, c.para]
   : nivel(c.org) < nivel(c.dst) ? [c.dst, c.org] : [c.org, c.dst];
 
+// O avanco real soma lancamento (75), conexao das duas pontas (10 + 10) e
+// teste (5). "Em Andamento 75%" pode ser cabo lancado sem conexao OU cabo
+// pela metade -- a linha de etapas separa os dois casos.
+function etapas(c) {
+  if (c.pct >= 99.5) return '';
+  const feito = v => v && /conclu|ok|sim|feit|realiz/i.test(v);
+  const partes = [];
+  partes.push('lançamento ' + (c.pct_lanc >= 99.5 ? '✓' : br(c.pct_lanc || 0, 0) + '%'));
+  const pontas = [c.ponta1, c.ponta2].filter(Boolean);
+  if (c.p_conex >= 99.5) partes.push('conexão ✓');
+  else if (pontas.length) partes.push('conexão ' + pontas.filter(feito).length + '/2');
+  else partes.push('conexão —');
+  partes.push('teste ' + (feito(c.teste) ? '✓' : '—'));
+  return dl('etapas', partes.join(' · '));
+}
+
 function dicaCabo(c, papel) {
   const t = cls(c.status), [a, b] = percurso(c);
   return cab(papel || 'cabo', c.id) + dl('situação', c.status, t) +
     (c.pct > 0 && c.pct < 100 ? dl('avanço', br(c.pct, 1) + '%', t) : '') +
+    etapas(c) +
     dl('lançado', br(c.m_lanc !== undefined ? c.m_lanc
                      : c.m_real === undefined ? c.m * c.pct / 100 : c.m_real) +
        ' de ' + br(c.m) + ' m') + dl('disciplina', c.disc) +
@@ -16057,6 +16087,47 @@ PROG_TONS = {
 }
 
 
+PROG_COLUNAS = (("TAG", "TAG"), ("DESCRICAO", "Tipo"), ("_SIT", "Situação"),
+                ("PRIORITARIA", "Prio"), ("NIVEL", "Nível"), ("TESTE_MALHA", "Teste"),
+                ("AREA", "Área"), ("PLANTA", "Planta"), ("SUBSISTEMA", "Sistema"),
+                ("FASE", "Fase"), ("_PEND", "Pendências"))
+
+
+def prog_tabela_html(aval: pd.DataFrame, limite: int = 400) -> str:
+    """A tabela de consulta, em HTML -- é a única que segue o tema.
+
+    O st.dataframe desenha num canvas com as cores fixas do config.toml: a
+    mesma tela escura no tema claro, e não há CSS que alcance. Aqui só serve
+    para VER; onde ele escolhe TAG na caixinha, o st.dataframe continua.
+    """
+    if aval.empty:
+        return '<div class="gtbl-empty">Nada com estes filtros.</div>'
+    corte = aval.head(limite)
+    linhas = []
+    for _i, r in corte.iterrows():
+        cor, rotulo = PROG_TONS[r["SITUACAO"]]
+        celulas = []
+        for chave, _cab in PROG_COLUNAS:
+            if chave == "_SIT":
+                v = (f'<span class="prog-ponto" style="background:{cor}"></span>'
+                     f'{esc(rotulo)}')
+            elif chave == "_PEND":
+                v = esc(" · ".join(list(r["BLOQUEIOS"]) + list(r["RESSALVAS"])))
+            elif chave == "PRIORITARIA":
+                v = "★" if r["PRIORITARIA"] else ""
+            else:
+                v = esc(str(r[chave]))
+            celulas.append(f"<td>{v}</td>")
+        linhas.append("<tr>" + "".join(celulas) + "</tr>")
+    sobra = ("" if len(aval) <= limite else
+             f'<div class="gtbl-muted" style="padding:10px 14px;font-size:12px">'
+             f'mostrando {br_num(limite)} de {br_num(len(aval))} — use os filtros'
+             f'</div>')
+    cab = "".join(f"<th>{esc(c)}</th>" for _k, c in PROG_COLUNAS)
+    return (f'<div class="ct-rolo"><table class="gtbl"><thead><tr>{cab}</tr></thead>'
+            f'<tbody>{"".join(linhas)}</tbody></table>{sobra}</div>')
+
+
 def prog_barras(itens, cor="var(--accent-teal)", total=None) -> str:
     """Barras horizontais para poucas categorias: rótulo, barra e número."""
     if not itens:
@@ -16233,6 +16304,12 @@ PROG_CSS = """<style>
 .prog-alerta-txt b { display:block; font-size:14px; color:var(--text-1);
   line-height:1.35; }
 .prog-alerta-txt span { font-size:12.5px; color:var(--text-2); }
+
+/* o ponto de situação na tabela de consulta */
+.prog-ponto { display:inline-block; width:8px; height:8px; border-radius:50%;
+  margin-right:7px; vertical-align:baseline; }
+/* a tabela de consulta rola na horizontal DENTRO dela, nunca na página */
+.st-key-prog_base .ct-rolo, .st-key-prog_corpo .ct-rolo { overflow:auto; max-width:100%; }
 
 /* ---- chips ------------------------------------------------------- */
 .prog-chip { display:inline-block; font-size:12px; padding:3px 9px; border-radius:7px;
@@ -16419,15 +16496,23 @@ def render_programacao(cache_key: str = ""):
                   + (f" · {br_num(len(risco))} em risco" if len(risco) else " · ok"))
         with st.container(key="prog_base"):
             with st.expander(titulo, expanded=passada):
-                st.caption("Régua aplicada ao já programado."
-                           if not passada else "Semana passada: consulta.")
-                render_html(
-                    '<div class="prog-faixa">'
-                    + prog_chip("ok", f'{br_num(r["livre"])} em ordem')
-                    + prog_chip("ressalva", f'{br_num(r["ressalva"])} com aviso')
-                    + prog_chip("trava", f'{br_num(r["travada"])} em risco')
-                    + "</div>")
-                prog_tabela(conferencia.sort_values("SITUACAO", ascending=False), "conferencia")
+                st.caption(("Régua aplicada ao já programado."
+                            if not passada else "Semana passada: consulta.")
+                           + " Clique numa condição para ver só ela; sem marcar, "
+                             "a tabela mostra todas.")
+                # as condições viram filtro: é o recorte que ele pediu, e sem
+                # nada marcado a tabela segue mostrando a semana inteira
+                rotulos = {f'Em ordem · {br_num(r["livre"])}': "livre",
+                           f'Com aviso · {br_num(r["ressalva"])}': "ressalva",
+                           f'Em risco · {br_num(r["travada"])}': "travada"}
+                marcadas = st.pills(
+                    "Condição", list(rotulos), selection_mode="multi",
+                    key="prog_sit", label_visibility="collapsed")
+                querem = {rotulos[m] for m in (marcadas or [])}
+                vista_base = (conferencia[conferencia["SITUACAO"].isin(querem)]
+                              if querem else conferencia)
+                render_html(prog_tabela_html(
+                    vista_base.sort_values("SITUACAO", ascending=False)))
 
     # ----------------------------------------------------------- as colunas
     with st.container(key="prog_corpo"):
@@ -16520,7 +16605,7 @@ def render_programacao(cache_key: str = ""):
             if len(travadas):
                 with st.expander(f"Impedidas · {br_num(len(travadas))}"):
                     st.caption("Fora da escolha. Motivo na coluna Pendências.")
-                    prog_tabela(travadas, "travadas")
+                    render_html(prog_tabela_html(travadas))
 
         # -------------------------------------------------------- a cesta
         with dir_:
