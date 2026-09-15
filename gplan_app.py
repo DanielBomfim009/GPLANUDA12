@@ -2,6 +2,7 @@ import base64
 import collections
 import hashlib
 import io
+import itertools
 import json
 import math
 import os
@@ -79,6 +80,9 @@ def render_html(html: str):
 # A marca segue o tema pelas variaveis: o anel de fundo e o ponteiro sao os
 # que sumiriam -- anel escuro sobre fundo claro, ponteiro claro sobre card
 # branco. O arco e o miolo ficam nas cores da marca nos dois temas.
+_LOGO_N = itertools.count()
+
+
 def _logo_svg(sufixo: str = "", px: int = 48) -> str:
     """A marca.
 
@@ -88,7 +92,9 @@ def _logo_svg(sufixo: str = "", px: int = 48) -> str:
     onde há regra; isto é só o tamanho de partida, para não haver instante
     nenhum sem tamanho.
     """
-    grad = f"gpArc{sufixo}"
+    # id unico por desenho: com dois logos na mesma pagina o segundo
+    # passava a usar o gradiente definido pelo primeiro
+    grad = f"gpArc{sufixo}{next(_LOGO_N)}"
     return (
         f'<svg width="{px}" height="{px}" viewBox="0 0 48 48" fill="none">'
         '<circle cx="24" cy="24" r="19" stroke="var(--text-3)" stroke-width="5"/>'
@@ -3326,7 +3332,9 @@ def inject_css():
         .sup-lateral { background:var(--dark-card-2); border:1px solid var(--border-color);
           border-radius:13px; padding:14px 15px; display:flex; flex-direction:column;
           gap:10px; position:sticky; top:14px; }
-        .sup-lateral h4 { font-size:10px; text-transform:uppercase; letter-spacing:.5px;
+        /* <div>, nao <h4>: titulo vira ancora automatica no Streamlit,
+           e com um cartao por TAG a pagina ficava com 100 ids iguais */
+        .sup-lateral .sup-lateral-t { font-size:10px; text-transform:uppercase; letter-spacing:.5px;
           color:var(--text-3); font-weight:700; margin:0; }
         .sup-lat-stat { display:flex; justify-content:space-between; align-items:baseline;
           gap:8px; font-size:12px; color:var(--text-2); padding:6px 0;
@@ -5760,7 +5768,7 @@ def sup_lateral_html(resumo_tag: dict, n_relacionados: int,
             f'<b style="color:{cor_forn}">{esc(rotulo_forn)}</b></div>'
             f'<div class="sup-lat-stat"><span>Previsão de fornecimento</span><b>{data_txt}</b></div>')
 
-    return f'<div class="sup-lateral"><h4>Resumo da TAG</h4>{stats}</div>'
+    return f'<div class="sup-lateral"><div class="sup-lateral-t">Resumo da TAG</div>{stats}</div>'
 
 
 def sup_ficha_tag_html(tag: str, itens_tag: pd.DataFrame, resumo_tag: dict,
@@ -17530,7 +17538,12 @@ def main():
     with st.sidebar:
         render_perfil_lateral()
 
-    dashboard_page = st.Page(lambda: _sob_carga("Carregando o painel", lambda: render_dashboard(resumo, esperados, tags, sigem, cache_key)), title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
+    dashboard_page = st.Page(lambda: _sob_carga("Carregando o painel", lambda: render_dashboard(resumo, esperados, tags, sigem, cache_key)), title="Dashboard", icon=":material/dashboard:", url_path="dashboard",
+                            # o Streamlit serve a pagina inicial em "/" e nao
+                            # registra o url_path dela: /dashboard responde 404
+                            # e cai aqui. Conferido que nenhum link do app
+                            # aponta para la -- e comportamento do framework.
+                            default=True)
     suprimentos_page = st.Page(lambda: _sob_carga("Carregando suprimentos", lambda: render_suprimentos(*suprimentos_dados(cache_key), tags, movimentacoes, cache_key)), title="Suprimentos", icon=":material/local_shipping:", url_path="suprimentos")
     relatorios_page = st.Page(lambda: _sob_carga("Carregando os relatórios", lambda: render_relatorios(esperados, resumo, tags, sigem, cache_key)), title="Relatórios", icon=":material/description:", url_path="relatorios")
     progresso_page = st.Page(lambda: _sob_carga("Abrindo o Progresso", lambda: render_progresso(resumo, esperados, tags, sigem, cache_key)), title="Progresso", icon=":material/insights:", url_path="progresso")
