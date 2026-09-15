@@ -107,7 +107,10 @@ def _logo_svg(sufixo: str = "", px: int = 48) -> str:
     )
 
 
-LOGO_SVG = _logo_svg(px=58)
+# Sem constante: o id do gradiente precisa ser novo a cada desenho, e uma
+# constante calculada no import repete o mesmo id onde quer que apareca.
+def logo_svg_carga() -> str:
+    return _logo_svg(px=58)
 
 
 # A transicao inteira leva isso, mesmo quando o trabalho acaba antes. Sem o
@@ -141,7 +144,7 @@ def tela_carregando(texto: str, pct: int | None = None, coberta: bool = True,
     return (
         f'<div class="{classes}">'
         '<div class="gpl-corpo">'
-        f'<div class="gpl-mark">{LOGO_SVG}</div>'
+        f'<div class="gpl-mark">{logo_svg_carga()}</div>'
         '<div class="gpl-nome">Gplan</div>'
         f'<div class="gpl-txt">{esc(texto)}</div>'
         f'<div class="gpl-track">{barra}</div></div></div>'
